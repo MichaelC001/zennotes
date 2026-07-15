@@ -898,7 +898,7 @@ export function notePathWithinFolder(
 ): string {
   if (folder === 'inbox' && isPrimaryNotesAtRoot(settings)) return path
   const prefix = `${resolveFolderPath(folder, settings?.systemFolderPaths)}/`
-  return path.toLowerCase().startsWith(prefix) ? path.slice(prefix.length) : path
+  return path.toLowerCase().startsWith(prefix.toLowerCase()) ? path.slice(prefix.length) : path
 }
 
 export function noteFolderSubpath(
@@ -1476,7 +1476,7 @@ export function assetPathWithinFolder(
   const normalized = assetPath.replace(/\\/g, '/').replace(/^\/+/, '')
   if (folder === 'inbox' && isPrimaryNotesAtRoot(settings)) return normalized
   const prefix = `${resolveFolderPath(folder, settings?.systemFolderPaths)}/`
-  return normalized.toLowerCase().startsWith(prefix)
+  return normalized.toLowerCase().startsWith(prefix.toLowerCase())
     ? normalized.slice(prefix.length)
     : normalized
 }

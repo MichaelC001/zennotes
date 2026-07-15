@@ -30,8 +30,8 @@ describe('normalizeSystemFolderPaths', () => {
     })
   })
 
-  it('normalizes backslashes to forward slashes', () => {
-    expect(normalizeSystemFolderPaths({ inbox: 'Notes\\Inbox' })).toEqual({ inbox: 'Notes/Inbox' })
+  it('rejects backslashes in paths', () => {
+    expect(normalizeSystemFolderPaths({ inbox: 'Notes\\Inbox' })).toEqual({})
   })
 
   it('rejects paths with .. segments', () => {
@@ -46,9 +46,8 @@ describe('normalizeSystemFolderPaths', () => {
     expect(normalizeSystemFolderPaths({ inbox: 'inbox//sub' })).toEqual({})
   })
 
-  it('rejects paths starting with dot in top segment', () => {
+  it('rejects paths starting with dot', () => {
     expect(normalizeSystemFolderPaths({ trash: '.trash' })).toEqual({})
-    expect(normalizeSystemFolderPaths({ inbox: '.hidden/inbox' })).toEqual({})
   })
 
   it('rejects paths with invalid characters', () => {
@@ -77,24 +76,37 @@ describe('normalizeSystemFolderPaths', () => {
     expect(normalizeSystemFolderPaths({ trash: 'comments' })).toEqual({})
   })
 
-  it('rejects duplicate custom paths', () => {
-    expect(normalizeSystemFolderPaths({ inbox: 'Notes', archive: 'Notes' })).toEqual({})
+  it('keeps one of duplicate custom paths, drops the other', () => {
+    const result = normalizeSystemFolderPaths({ inbox: 'Notes', archive: 'Notes' })
+    // One will be kept, the other dropped due to collision
+    expect(result).toEqual({ archive: 'Notes' })
   })
 
-  it('rejects nested paths that are prefix of another', () => {
-    expect(normalizeSystemFolderPaths({ inbox: 'Archive', archive: 'Archive/Old' })).toEqual({})
-    expect(normalizeSystemFolderPaths({ archive: 'Archive', inbox: 'Archive/Inbox' })).toEqual({})
+  it('rejects custom path colliding with another folder default', () => {
+    expect(normalizeSystemFolderPaths({ inbox: 'archive' })).toEqual({})
+    expect(normalizeSystemFolderPaths({ trash: 'inbox' })).toEqual({})
+  })
+
+  it('keeps valid overrides when some are conflicting with each other', () => {
+    const result = normalizeSystemFolderPaths({ inbox: 'my-inbox', trash: 'dup', archive: 'dup' })
+    // 'dup' collides between trash and archive; one is removed, the other kept
+    expect(result).toEqual({ inbox: 'my-inbox', trash: 'dup' })
+  })
+
+  it('removes override that collides with a default', () => {
+    expect(normalizeSystemFolderPaths({ inbox: 'my-inbox', trash: 'archive' })).toEqual({
+      inbox: 'my-inbox'
+    })
+  })
+
+  it('rejects multi-segment paths', () => {
+    expect(normalizeSystemFolderPaths({ trash: 'sys/trash' })).toEqual({})
+    expect(normalizeSystemFolderPaths({ inbox: 'Notes/Inbox' })).toEqual({})
   })
 
   it('ignores unknown keys', () => {
     expect(normalizeSystemFolderPaths({ inbox: '01 - Entry', other: 'value' })).toEqual({
       inbox: '01 - Entry'
-    })
-  })
-
-  it('allows nested paths', () => {
-    expect(normalizeSystemFolderPaths({ inbox: 'Notes/Inbox' })).toEqual({
-      inbox: 'Notes/Inbox'
     })
   })
 
@@ -141,17 +153,11 @@ describe('buildReverseFolderMap', () => {
     expect(buildReverseFolderMap({})).toEqual(new Map())
   })
 
-  it('maps custom top segments to folder IDs', () => {
+  it('maps custom single-segment paths to folder IDs', () => {
     const map = buildReverseFolderMap({ inbox: '01 - Entry', trash: 'deleted' })
     expect(map.get('01 - entry')).toBe('inbox')
     expect(map.get('deleted')).toBe('trash')
     expect(map.size).toBe(2)
-  })
-
-  it('maps nested paths by top segment', () => {
-    const map = buildReverseFolderMap({ inbox: 'Notes/Inbox' })
-    expect(map.get('notes')).toBe('inbox')
-    expect(map.size).toBe(1)
   })
 })
 

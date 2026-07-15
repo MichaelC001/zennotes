@@ -66,6 +66,7 @@ import {
   importFiles,
   importPastedImage,
   invalidateNoteMetaCache,
+  invalidateVaultSettingsCache,
   invalidateVaultTextSearchCache,
   listAssets,
   listFolders,
@@ -231,6 +232,7 @@ const windowVaults = new WindowVaultRegistry({
   invalidateVault: (root, ev) => {
     invalidateNoteMetaCache(root, ev.scope === 'vault-settings' ? undefined : ev.path)
     invalidateVaultTextSearchCache(root)
+    invalidateVaultSettingsCache(root)
   },
   sendVaultChange: (windowId, ev) => {
     const win = BrowserWindow.fromId(windowId)

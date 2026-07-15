@@ -259,6 +259,7 @@ const noteMetaCache = new Map<
 >()
 const loadedPersistedNoteMetaCacheRoots = new Set<string>()
 const noteMetaCachePersistTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const vaultSettingsCache = new Map<string, { settings: VaultSettings; mtimeMs: number }>()
 
 export interface PersistedWindowState {
   x: number
@@ -1256,13 +1257,32 @@ async function vaultLooksEmpty(root: string): Promise<boolean> {
 }
 
 export async function getVaultSettings(root: string): Promise<VaultSettings> {
+  const settingsFile = vaultSettingsPath(root)
+  let stat
+  try {
+    stat = await fs.stat(settingsFile)
+  } catch {
+    const cached = vaultSettingsCache.get(root)
+    if (cached) {
+      vaultSettingsCache.delete(root)
+    }
+    const fallbackPrimary = await inferPrimaryNotesLocation(root)
+    return normalizeVaultSettings(null, fallbackPrimary)
+  }
+  const cached = vaultSettingsCache.get(root)
+  if (cached && sameMtimeMs(cached.mtimeMs, stat.mtimeMs)) {
+    return cached.settings
+  }
   let fallbackPrimary = DEFAULT_VAULT_SETTINGS.primaryNotesLocation
   try {
     fallbackPrimary = await inferPrimaryNotesLocation(root)
-    const raw = await fs.readFile(vaultSettingsPath(root), 'utf8')
-    return normalizeVaultSettings(JSON.parse(raw), fallbackPrimary)
+    const raw = await fs.readFile(settingsFile, 'utf8')
+    const settings = normalizeVaultSettings(JSON.parse(raw), fallbackPrimary)
+    vaultSettingsCache.set(root, { settings, mtimeMs: stat.mtimeMs })
+    return settings
   } catch {
-    return normalizeVaultSettings(null, fallbackPrimary)
+    const fallback = normalizeVaultSettings(null, fallbackPrimary)
+    return fallback
   }
 }
 
@@ -1274,10 +1294,16 @@ export async function setVaultSettings(
   const normalized = normalizeVaultSettings(next, fallbackPrimary)
   await fs.mkdir(path.dirname(vaultSettingsPath(root)), { recursive: true })
   await fs.writeFile(vaultSettingsPath(root), JSON.stringify(normalized, null, 2), 'utf8')
+  const writeStat = await fs.stat(vaultSettingsPath(root))
+  vaultSettingsCache.set(root, { settings: normalized, mtimeMs: writeStat.mtimeMs })
   if (normalized.primaryNotesLocation === 'inbox') {
     await fs.mkdir(path.join(root, 'inbox'), { recursive: true })
   }
   return cloneVaultSettings(normalized)
+}
+
+export function invalidateVaultSettingsCache(root: string): void {
+  vaultSettingsCache.delete(root)
 }
 
 async function primaryNotesRoot(root: string): Promise<string> {
@@ -1294,10 +1320,7 @@ function customHiddenPrimaryRootNames(settings: VaultSettings): Set<string> {
   if (!settings.systemFolderPaths) return names
   for (const f of ['quick', 'archive', 'trash'] as NoteFolder[]) {
     const custom = settings.systemFolderPaths[f]
-    if (custom) {
-      const top = custom.split('/')[0]
-      if (top !== f) names.add(top)
-    }
+    if (custom && custom !== f) names.add(custom)
   }
   return names
 }

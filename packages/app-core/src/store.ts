@@ -6836,7 +6836,7 @@ export const useStore = create<Store>((set, get) => {
         : p
 
     const notes = get().notes.map((n) =>
-      n.path.startsWith(oldPrefix) ? { ...n, path: rewritePath(n.path) } : n
+      n.path.toLowerCase().startsWith(oldPrefix.toLowerCase()) ? { ...n, path: rewritePath(n.path) } : n
     )
     const folders = get().folders.map((f) => {
       if (f.folder !== folder) return f

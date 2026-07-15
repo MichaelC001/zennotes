@@ -26,12 +26,12 @@ const INVALID_CHARS_RE = /[\\:*?"<>|#^\[\]<>]/
 
 function normalizeSystemFolderPath(value: unknown): string | null {
   if (typeof value !== 'string') return null
-  const trimmed = value.trim().replace(/\\/g, '/')
+  const trimmed = value.trim()
   if (!trimmed) return null
   if (trimmed.length > MAX_PATH_LENGTH) return null
+  if (trimmed.includes('/') || trimmed.includes('\\')) return null
   if (trimmed.startsWith('/')) return null
-  const parts = trimmed.split('/')
-  if (parts.some((p) => !p || p === '.' || p === '..' || p.startsWith('.'))) return null
+  if (trimmed === '.' || trimmed === '..' || trimmed.startsWith('.')) return null
   if (INVALID_CHARS_RE.test(trimmed)) return null
   return trimmed
 }
@@ -48,24 +48,30 @@ export function normalizeSystemFolderPaths(
       next[key] = p
     }
   }
-  if (!hasValidPaths(next)) return {}
-  return next
-}
-
-function hasValidPaths(paths: SystemFolderPaths): boolean {
-  const values = Object.values(paths)
-  if (new Set(values).size !== values.length) return false
-  for (const p of values) {
-    const top = p.split('/')[0]
-    if (RESERVED_ROOT_NAMES.has(top)) return false
-    for (const other of values) {
-      if (other === p) continue
-      if (other === top || other.startsWith(top + '/')) return false
-      const otherTop = other.split('/')[0]
-      if (p === otherTop || p.startsWith(otherTop + '/')) return false
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const key of FOLDER_IDS) {
+      if (!next[key]) continue
+      const resolved = resolveFolderPath(key, next)
+      const lower = resolved.toLowerCase()
+      if (RESERVED_ROOT_NAMES.has(lower)) {
+        delete next[key]
+        changed = true
+        continue
+      }
+      for (const other of FOLDER_IDS) {
+        if (other === key) continue
+        const otherResolved = resolveFolderPath(other, next).toLowerCase()
+        if (lower === otherResolved) {
+          delete next[key]
+          changed = true
+          break
+        }
+      }
     }
   }
-  return true
+  return next
 }
 
 export function resolveFolderPath(
@@ -81,9 +87,8 @@ export function buildReverseFolderMap(
   const map = new Map<string, NoteFolder>()
   for (const folder of FOLDER_IDS) {
     const p = resolveFolderPath(folder, overrides)
-    const top = p.split('/')[0]
-    if (top !== DEFAULT_FOLDER_PATHS[folder]) {
-      map.set(top.toLowerCase(), folder)
+    if (p !== DEFAULT_FOLDER_PATHS[folder]) {
+      map.set(p.toLowerCase(), folder)
     }
   }
   return map
