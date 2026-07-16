@@ -86,6 +86,10 @@ import type {
   McpInstructionsPayload,
   McpServerRuntime
 } from '@shared/mcp-clients'
+import type {
+  CustomCodeLanguageInstallInput,
+  CustomCodeLanguageUpdateInput
+} from '@shared/custom-code-languages'
 
 const WEB_CAPABILITIES: ZenCapabilities = {
   supportsUpdater: false,
@@ -94,7 +98,8 @@ const WEB_CAPABILITIES: ZenCapabilities = {
   supportsLocalFilesystemPickers: false,
   supportsRemoteWorkspace: false,
   supportsCliInstall: false,
-  supportsCustomTemplates: false
+  supportsCustomTemplates: false,
+  supportsCustomCodeLanguages: false
 }
 
 const WEB_APP_INFO: ZenAppInfo = {
@@ -1590,6 +1595,16 @@ export const httpBridge: ZenBridge = {
   deleteCustomTheme: async () => {},
   createCustomTheme: async () => null,
   onCustomThemesChange: () => () => {},
+  listCustomCodeLanguages: async () => [],
+  installCustomCodeLanguage: async (_input: CustomCodeLanguageInstallInput) => {
+    throw new Error('Custom code languages are available in the desktop app.')
+  },
+  updateCustomCodeLanguage: async (_input: CustomCodeLanguageUpdateInput) => {
+    throw new Error('Custom code languages are available in the desktop app.')
+  },
+  revealCustomCodeLanguagesDir: async () => {},
+  deleteCustomCodeLanguage: async () => {},
+  onCustomCodeLanguagesChange: () => () => {},
   listOverrides: async () => [],
   revealOverridesDir: async () => {},
   deleteOverride: async () => {},

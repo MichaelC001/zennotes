@@ -390,6 +390,7 @@ export const Preview = memo(function Preview({
     [folders, vaultSettings],
   );
   const assetFiles = useStore((s) => s.assetFiles);
+  const customCodeLanguagesRevision = useStore((s) => s.customCodeLanguagesRevision);
   const refreshAssets = useStore((s) => s.refreshAssets);
   const deleteAssetAction = useStore((s) => s.deleteAsset);
   const effectiveMode = usePreviewDiagramThemeMode();
@@ -506,7 +507,7 @@ export const Preview = memo(function Preview({
 
   const html = useMemo(
     () => renderMarkdown(expandedForCurrent ?? markdown),
-    [expandedForCurrent, markdown],
+    [expandedForCurrent, markdown, customCodeLanguagesRevision],
   );
   const assetFilesKey = useMemo(
     () => assetFiles.map((asset) => asset.path).join("\n"),

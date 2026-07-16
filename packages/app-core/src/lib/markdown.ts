@@ -18,6 +18,10 @@ import { recordRendererPerf } from './perf'
 import { classifyLocalAssetHref } from './local-assets'
 import { parseEmbedSizeHint } from './excalidraw-preview'
 import { parseColWidthsComment } from './markdown-table'
+import {
+  customCodeLanguageRegistry,
+  PREVIEW_TOKEN_CLASS
+} from './custom-code-languages'
 
 /**
  * Remark plugin: `[[target]]` and `[[target|label]]` → link nodes
@@ -436,6 +440,46 @@ function rehypeMathDiagrams() {
   }
 }
 
+/** Highlight unknown fenced tags through the user-installed TextMate registry. */
+function rehypeCustomCodeLanguages() {
+  return (tree: HastRoot): void => {
+    visit(tree, 'element', (node) => {
+      if (node.tagName !== 'code') return
+      const classNames = (node.properties?.className as string[] | undefined) ?? []
+      const languageClass = classNames.find((name) => name.startsWith('language-'))
+      if (!languageClass) return
+      const tag = languageClass.slice('language-'.length)
+      if (!customCodeLanguageRegistry.resolve(tag)) return
+      const textContent = (child: HastElement['children'][number]): string => {
+        if (child.type === 'text') return child.value
+        if (child.type === 'element') return child.children.map(textContent).join('')
+        return ''
+      }
+      const source = node.children.map(textContent).join('')
+      const tokens = customCodeLanguageRegistry.tokenize(tag, source)
+      if (tokens.length === 0) return
+      const children: HastElement['children'] = []
+      let offset = 0
+      for (const token of tokens) {
+        if (token.from > offset) children.push({ type: 'text', value: source.slice(offset, token.from) })
+        children.push({
+          type: 'element',
+          tagName: 'span',
+          properties: { className: PREVIEW_TOKEN_CLASS[token.kind].split(' ') },
+          children: [{ type: 'text', value: source.slice(token.from, token.to) }]
+        })
+        offset = token.to
+      }
+      if (offset < source.length) children.push({ type: 'text', value: source.slice(offset) })
+      node.children = children
+      node.properties = {
+        ...node.properties,
+        className: Array.from(new Set([...classNames, 'hljs']))
+      }
+    })
+  }
+}
+
 /**
  * Honor a `<!-- zen:cols=120,auto,90 -->` width hint that follows a table (#294):
  * turn it into a <colgroup> so the preview and PDF export render the columns at
@@ -547,6 +591,7 @@ const processor = unified()
   .use(rehypeMermaid)
   .use(rehypeMathDiagrams)
   .use(rehypeHighlight, { detect: true, ignoreMissing: true })
+  .use(rehypeCustomCodeLanguages)
   .use(rehypeKatex)
   .use(rehypeStringify)
 
@@ -712,7 +757,8 @@ function normalizeBlockMathFences(src: string): string {
 }
 
 export function renderMarkdown(src: string): string {
-  const cached = getCachedMarkdown(src)
+  const cacheKey = `${customCodeLanguageRegistry.revision}\0${src}`
+  const cached = getCachedMarkdown(cacheKey)
   if (cached != null) {
     recordRendererPerf('markdown.render.cache-hit', 0, { chars: src.length })
     return cached
@@ -723,7 +769,7 @@ export function renderMarkdown(src: string): string {
     const html = sanitizeRenderedHtml(
       String(processor.processSync(escapeTableMathPipes(normalizeBlockMathFences(src))))
     )
-    cacheRenderedMarkdown(src, html)
+    cacheRenderedMarkdown(cacheKey, html)
     recordRendererPerf('markdown.render', performance.now() - startedAt, {
       chars: src.length
     })
