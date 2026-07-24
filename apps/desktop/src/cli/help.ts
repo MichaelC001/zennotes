@@ -154,7 +154,7 @@ const SECTIONS: Array<{ heading: string; rows: CommandRow[] }> = [
   {
     heading: 'OPEN',
     rows: [
-      { name: 'open <file.md>', description: 'Open markdown files in the ZenNotes app, in a vault or not' }
+      { name: 'open <path>', description: 'Open markdown files, or a folder / vault (a focused session), in the app' }
     ]
   },
   {
@@ -186,7 +186,8 @@ const EXAMPLES: string[] = [
   'zn list --tag idea --limit 5',
   'zn list --vault work --limit 5',
   'zn task list --unchecked --tag work',
-  'zn open ~/Downloads/notes.md'
+  'zn open ~/Downloads/notes.md',
+  'zn open ~/code/project/docs   # focus a folder as a session'
 ]
 
 function header(width: number): string[] {
