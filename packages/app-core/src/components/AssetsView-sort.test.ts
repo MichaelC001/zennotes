@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from 'vitest'
 import type { AssetMeta } from '@shared/ipc'
-import { sortAssets, type AssetSort } from './AssetsView'
+import {
+  assetSortOrderOf,
+  parseAssetSortOrder,
+  sortAssets,
+  type AssetSort
+} from './AssetsView'
 
 // #460: the Assets list can be sorted by any column.
 function asset(over: Partial<AssetMeta>): AssetMeta {
@@ -74,5 +79,30 @@ describe('#460 — sortAssets', () => {
     const input = [C, A, B]
     sortAssets(input, usage, { key: 'name', dir: 'asc' })
     expect(input).toEqual([C, A, B])
+  })
+})
+
+// #473: the chosen column is stored as one `<column>-<dir>` preference, so it
+// survives leaving the view (and restarting the app).
+describe('#473: asset sort order round-trip', () => {
+  const ALL: AssetSort[] = (['name', 'used', 'type', 'size', 'modified'] as const).flatMap((key) =>
+    (['asc', 'desc'] as const).map((dir) => ({ key, dir }))
+  )
+
+  it('round-trips every column and direction', () => {
+    for (const sort of ALL) {
+      expect(parseAssetSortOrder(assetSortOrderOf(sort))).toEqual(sort)
+    }
+  })
+
+  it('formats to the values the store accepts', () => {
+    expect(assetSortOrderOf({ key: 'modified', dir: 'desc' })).toBe('modified-desc')
+    expect(assetSortOrderOf({ key: 'name', dir: 'asc' })).toBe('name-asc')
+  })
+
+  it('sorts the same whether given the parsed pref or a literal', () => {
+    expect(names(sortAssets(LIST, usage, parseAssetSortOrder('size-desc')))).toEqual(
+      names(sortAssets(LIST, usage, { key: 'size', dir: 'desc' }))
+    )
   })
 })

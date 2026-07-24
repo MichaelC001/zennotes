@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { AssetMeta } from '@shared/ipc'
-import { useStore } from '../store'
+import { useStore, type AssetSortColumn, type AssetSortOrder } from '../store'
 import { assetTabPath } from '../lib/asset-tabs'
 import { confirmMoveToTrash } from '../lib/confirm-trash'
 import { promptApp } from '../lib/prompt-requests'
@@ -37,10 +37,26 @@ const ASSET_ROW_GRID =
   'grid grid-cols-[minmax(0,1fr)_6rem_4rem_5rem_5rem_1.75rem] items-center gap-4'
 
 // Which column the Assets list is sorted by. (#460)
-export type AssetSortKey = 'name' | 'used' | 'type' | 'size' | 'modified'
+export type AssetSortKey = AssetSortColumn
 export interface AssetSort {
   key: AssetSortKey
   dir: 'asc' | 'desc'
+}
+
+/** Split the stored `<column>-<dir>` preference into the shape `sortAssets`
+ *  takes. The value is validated in the store, so a bad split can't reach
+ *  here; fall back to the default anyway rather than sorting by `undefined`. (#473) */
+export function parseAssetSortOrder(order: AssetSortOrder): AssetSort {
+  const at = order.lastIndexOf('-')
+  const key = order.slice(0, at) as AssetSortKey
+  const dir = order.slice(at + 1) as AssetSort['dir']
+  if (!key || (dir !== 'asc' && dir !== 'desc')) return { key: 'name', dir: 'asc' }
+  return { key, dir }
+}
+
+/** Inverse of `parseAssetSortOrder`, for writing the preference back. (#473) */
+export function assetSortOrderOf(sort: AssetSort): AssetSortOrder {
+  return `${sort.key}-${sort.dir}` as AssetSortOrder
 }
 
 /** Display label for a note path in the "used by" menu — its filename. */
@@ -103,10 +119,11 @@ export function AssetsView(): JSX.Element {
   const [filter, setFilter] = useState('')
   const [menu, setMenu] = useState<{ x: number; y: number; asset: AssetMeta } | null>(null)
   const [usageMenu, setUsageMenu] = useState<{ x: number; y: number; notes: string[] } | null>(null)
-  const [sort, setSort] = useState<{ key: AssetSortKey; dir: 'asc' | 'desc' }>({
-    key: 'name',
-    dir: 'asc'
-  })
+  // Sort lives in the store (and config.toml), not local state, so leaving the
+  // view and coming back keeps the column you picked. (#473)
+  const assetSortOrder = useStore((s) => s.assetSortOrder)
+  const setAssetSortOrder = useStore((s) => s.setAssetSortOrder)
+  const sort = useMemo(() => parseAssetSortOrder(assetSortOrder), [assetSortOrder])
 
   // assetPath → note paths that embed it (resolved via relative-path + the
   // unique-basename fallback, matching how embeds render). (#185)
@@ -138,11 +155,11 @@ export function AssetsView(): JSX.Element {
   // Click a header: sort by it, or flip direction if it's already active. Text
   // columns start ascending; count/size/date start descending (biggest first).
   const toggleSort = (key: AssetSortKey): void => {
-    setSort((prev) =>
-      prev.key === key
-        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+    const next: AssetSort =
+      sort.key === key
+        ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
         : { key, dir: key === 'name' || key === 'type' ? 'asc' : 'desc' }
-    )
+    setAssetSortOrder(assetSortOrderOf(next))
   }
 
   const copyEmbed = (asset: AssetMeta): void => {

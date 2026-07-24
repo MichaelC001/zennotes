@@ -373,6 +373,7 @@ export interface MonthlyNotesSettings {
  */
 export interface VaultViewSettings {
   noteSortOrder?: string
+  assetSortOrder?: string
   groupByKind?: boolean
   tasksViewMode?: string
   kanbanGroupBy?: string
