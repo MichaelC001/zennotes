@@ -10,6 +10,7 @@ import {
 } from '@codemirror/view'
 import { useStore } from '../store'
 import {
+  buildAttachmentChip,
   classifyLocalAssetHref,
   hrefFragment,
   resolveAssetVaultRelativePath,
@@ -17,6 +18,7 @@ import {
 } from './local-assets'
 import { setImageBlockDragPayload } from './image-block-dnd'
 import { assetTabPath } from './asset-tabs'
+import { openExternalFileLink } from './external-file-link'
 import {
   getExcalidrawPreview,
   parseEmbedSizeHint,
@@ -231,6 +233,45 @@ function parseStandaloneLocalPdf(lineText: string): ParsedPdf | null {
     href,
     resolvedUrl
   }
+}
+
+type ParsedAttachment = {
+  href: string
+  resolvedUrl: string
+  name: string
+}
+
+// A standalone non-previewable attachment embed. Two forms:
+//  - Markdown `![](file.tldraw)` — any non-image, non-excalidraw file (PDFs in
+//    this form have no dedicated widget, so they chip too).
+//  - Obsidian `![[file.tldraw]]` — generic files only; PDF/audio/video keep
+//    their rich widgets/embeds.
+// Images and excalidraw drawings have their own widgets and are excluded. (#463)
+function parseStandaloneLocalAttachment(lineText: string): ParsedAttachment | null {
+  const md = lineText.match(STANDALONE_IMAGE_RE)
+  const embed = md ? null : lineText.match(STANDALONE_OBSIDIAN_EMBED_RE)
+  let href: string
+  let alt: string
+  if (md) {
+    href = (md[2] ?? md[3] ?? '').trim()
+    alt = (md[1] ?? '').trim()
+  } else if (embed) {
+    href = (embed[1] ?? '').trim()
+    alt = (embed[2] ?? '').trim()
+  } else {
+    return null
+  }
+  const kind = classifyLocalAssetHref(href)
+  if (md) {
+    if (!kind || kind === 'image' || kind === 'excalidraw') return null
+  } else if (kind !== 'file') {
+    return null
+  }
+  const state = useStore.getState()
+  const resolvedUrl = resolveLocalAssetUrl(state.vault?.root, state.activeNote?.path, href)
+  if (!resolvedUrl) return null
+  const name = alt || decodeURIComponentSafe(href.split('/').filter(Boolean).pop()) || 'Attachment'
+  return { href, resolvedUrl, name }
 }
 
 class LocalImageWidget extends WidgetType {
@@ -666,6 +707,46 @@ class LocalExcalidrawWidget extends WidgetType {
   }
 }
 
+/** Renders a non-previewable attachment (`![](file.tldraw)`) as an attachment
+ *  chip — matching the reading preview — instead of leaving the line blank.
+ *  Clicking opens the file the same way the image/PDF widgets do. (#463) */
+class AttachmentChipWidget extends WidgetType {
+  constructor(
+    private readonly href: string,
+    private readonly resolvedUrl: string,
+    private readonly name: string
+  ) {
+    super()
+  }
+
+  eq(other: AttachmentChipWidget): boolean {
+    return (
+      other.href === this.href &&
+      other.resolvedUrl === this.resolvedUrl &&
+      other.name === this.name
+    )
+  }
+
+  toDOM(): HTMLElement {
+    return buildAttachmentChip(this.resolvedUrl, this.href, this.name, () => {
+      const state = useStore.getState()
+      const root = state.vault?.root
+      const notePath = state.activeNote?.path
+      const assetPath =
+        root && notePath ? resolveAssetVaultRelativePath(root, notePath, this.href) : null
+      // Open in the OS default app — an in-app asset tab can't render a
+      // non-previewable file. (#463)
+      if (root && assetPath) {
+        void openExternalFileLink(`${root.replace(/\/+$/, '')}/${assetPath}`)
+      }
+    })
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+}
+
 /** Renders a GFM task-list marker (`[ ]` / `[x]` / `[X]`) as a clickable
  *  checkbox. The widget rewrites the underlying markdown when toggled — the
  *  same single-character mutation the Preview pane uses, so the on-disk
@@ -925,6 +1006,33 @@ function computeDecorations(view: EditorView): DecorationSet {
           from: line.from,
           to: line.to,
           deco: imageSourceHide
+        })
+      }
+      const parsedAttachment = parseStandaloneLocalAttachment(line.text)
+      if (parsedAttachment && !replacedLines.has(lineNo)) {
+        replacedLines.add(lineNo)
+        pending.push({
+          from: line.to,
+          to: line.to,
+          deco: Decoration.widget({
+            side: 1,
+            widget: new AttachmentChipWidget(
+              parsedAttachment.href,
+              parsedAttachment.resolvedUrl,
+              parsedAttachment.name
+            )
+          })
+        })
+        pending.push({
+          from: line.from,
+          to: line.to,
+          deco: imageSourceHide
+        })
+        // Collapse the now text-less line's strut, like the image embed does.
+        pending.push({
+          from: line.from,
+          to: line.from,
+          deco: imageEmbedLine
         })
       }
     }
