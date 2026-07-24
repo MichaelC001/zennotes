@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { isImeComposing } from '../lib/ime'
+import { isPaletteNextKey, isPalettePreviousKey } from '../lib/palette-nav'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 
@@ -18,8 +19,23 @@ export interface PromptOptions {
   allowEmptySubmit?: boolean
   suggestions?: PromptSuggestion[]
   suggestionsHint?: string
+  /**
+   * Preselect the first matching suggestion as the user types, so Enter picks it
+   * without first reaching for an arrow key. Used by the folder pickers (#467).
+   * The typed value stays reachable with ArrowUp / Ctrl+K (for a new path).
+   */
+  autoHighlightFirst?: boolean
   /** Return an error string to block submission, or null/undefined to allow. */
   validate?: (value: string) => string | null | undefined
+}
+
+/**
+ * The suggestion index to activate after the user edits the query. `-1` keeps
+ * the typed value selected (Enter submits it). Folder pickers preselect the
+ * first match (`0`) once a non-empty query is typed so Enter picks it. (#467)
+ */
+export function activeSuggestionAfterInput(query: string, autoHighlightFirst: boolean): number {
+  return autoHighlightFirst && query.trim().length > 0 ? 0 : -1
 }
 
 /**
@@ -148,7 +164,9 @@ export function PromptModal({
           onChange={(e) => {
             setValue(e.target.value)
             setError(null)
-            setActiveSuggestion(-1)
+            setActiveSuggestion(
+              activeSuggestionAfterInput(e.target.value, options.autoHighlightFirst ?? false)
+            )
             setDismissed(false)
           }}
           onKeyDown={(e) => {
@@ -158,10 +176,12 @@ export function PromptModal({
             if (e.key === 'Tab' && filteredSuggestions.length > 0) {
               e.preventDefault()
               moveSuggestion(e.shiftKey ? -1 : 1)
-            } else if (e.key === 'ArrowDown' && filteredSuggestions.length > 0) {
+            } else if (isPaletteNextKey(e) && filteredSuggestions.length > 0) {
+              // ArrowDown / Ctrl+J (vim) / Ctrl+N (emacs) — same as the palettes. (#467)
               e.preventDefault()
               moveSuggestion(1)
-            } else if (e.key === 'ArrowUp' && filteredSuggestions.length > 0) {
+            } else if (isPalettePreviousKey(e) && filteredSuggestions.length > 0) {
+              // ArrowUp / Ctrl+K / Ctrl+P.
               e.preventDefault()
               moveSuggestion(-1)
             } else if (e.key === 'Enter') {
