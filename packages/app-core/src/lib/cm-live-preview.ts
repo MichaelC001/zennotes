@@ -138,6 +138,37 @@ function enclosingLinkRange(ref: SyntaxNodeRefLike): { from: number; to: number 
   return null
 }
 
+/**
+ * True when a `Link`/`Image` node that ends at `linkTo` is immediately
+ * followed by a `(` whose matching `)` hasn't been typed yet, i.e. the
+ * link target is still being written. (#471)
+ *
+ * The parser ends the `Link` node at the `]` in that state (`[Example](`
+ * gives `Link[0,9]`), so its brackets would otherwise be hidden and the
+ * label would render as `Example(` mid-edit. Parens nest, matching
+ * CommonMark's balanced-paren destinations, so a URL like
+ * `https://en.wikipedia.org/wiki/Foo_(bar` still counts as unterminated.
+ */
+function hasUnterminatedLinkTarget(state: EditorView['state'], linkTo: number): boolean {
+  if (state.doc.sliceString(linkTo, linkTo + 1) !== '(') return false
+  const line = state.doc.lineAt(linkTo)
+  const rest = state.doc.sliceString(linkTo, line.to)
+  let depth = 0
+  for (let i = 0; i < rest.length; i++) {
+    const ch = rest[i]
+    if (ch === '\\') {
+      i += 1
+      continue
+    }
+    if (ch === '(') depth += 1
+    else if (ch === ')') {
+      depth -= 1
+      if (depth === 0) return false
+    }
+  }
+  return true
+}
+
 function createImageDragPreview(title: string): HTMLDivElement {
   const chip = document.createElement('div')
   chip.style.position = 'fixed'
@@ -1126,6 +1157,13 @@ function computeDecorations(view: EditorView): DecorationSet {
         if (isUrl) {
           const prevChar = state.doc.sliceString(node.from - 1, node.from)
           if (prevChar !== '(') return // autolink or label URL → keep visible
+          // A URL that follows `(` but hangs off the paragraph rather than the
+          // `Link`/`Image` is an autolink, not a destination: either a
+          // half-typed target (`[a](https://…` before the `)`) or a
+          // parenthesised bare URL (`(https://…)`). Hiding it made the pasted
+          // URL vanish while the link was still being written. (#471)
+          const urlParent = node.node.parent?.name
+          if (urlParent !== 'Link' && urlParent !== 'Image') return
         }
 
         if (!isPrefix && !isSimple && !isUrl) return
@@ -1146,6 +1184,10 @@ function computeDecorations(view: EditorView): DecorationSet {
         if (isLinkSyntax) {
           const linkRange = enclosingLinkRange(node)
           if (linkRange && selectionTouchesRange(state, linkRange.from, linkRange.to)) return
+          // `[label](` with no closing `)` yet isn't a link, so keep its
+          // brackets visible: the label reads as source while the target is
+          // typed or pasted, and collapses once the syntax is complete. (#471)
+          if (linkRange && hasUnterminatedLinkTarget(state, linkRange.to)) return
         } else if (activeLines.has(line)) {
           // Reveal every marker on the active line, headings included: the
           // cursor anywhere in a heading shows its `##` prefix, matching the
