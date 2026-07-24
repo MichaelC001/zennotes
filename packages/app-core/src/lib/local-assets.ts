@@ -114,7 +114,8 @@ export function resolveAssetVaultRelativePath(
 
   const noteDir = notePath.includes('/') ? notePath.slice(0, notePath.lastIndexOf('/')) : ''
   const decodedHref = decodeHrefPath(trimmed)
-  let target = decodedHref.startsWith('/')
+  const isAbsolute = decodedHref.startsWith('/')
+  let target = isAbsolute
     ? decodedHref.replace(/^\/+/, '')
     : noteDir
       ? posixJoin(noteDir, decodedHref)
@@ -124,6 +125,27 @@ export function resolveAssetVaultRelativePath(
 
   const assets = useStore.getState().assetFiles
   if (assets.some((asset) => asset.path === target)) return target
+
+  // A wikilink embed (`![[assets/img.png]]`) — and any path written relative
+  // to the vault root — resolves from the root, not the note's folder, which
+  // is what Obsidian does with wikilinks. When the note-relative join above
+  // didn't hit an asset, try the path as vault-root-relative before the fuzzy
+  // basename search below. This is what makes a pasted `![[assets/img.png]]`
+  // render from a note in a subfolder (e.g. a daily note under
+  // `Daily Notes/`), and it's more precise than the basename fallback when
+  // several files share a name. (#459)
+  if (!isAbsolute && noteDir) {
+    const rootTarget = posixNormalize(decodedHref)
+    if (
+      rootTarget &&
+      rootTarget !== target &&
+      !rootTarget.startsWith('../') &&
+      rootTarget !== '..' &&
+      assets.some((asset) => asset.path === rootTarget)
+    ) {
+      return rootTarget
+    }
+  }
 
   const targetBase = target.split('/').filter(Boolean).pop()?.toLowerCase()
   if (!targetBase) return null
