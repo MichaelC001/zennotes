@@ -186,11 +186,13 @@ export function DatabaseView({
                 }
                 size="sm"
                 title="Filter rows"
-                onClick={(e) =>
-                  setFilterAnchor((prev) =>
-                    prev ? null : e.currentTarget.getBoundingClientRect()
-                  )
-                }
+                onClick={(e) => {
+                  // Read the anchor rect during dispatch — React nulls the
+                  // synthetic event's currentTarget once dispatch ends, and
+                  // the updater can run deferred (crashes the root otherwise).
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  setFilterAnchor((prev) => (prev ? null : rect))
+                }}
               >
                 <FilterIcon className="h-3.5 w-3.5" /> Filter
                 {(activeView.filters?.length ?? 0) > 0 ? ` (${activeView.filters.length})` : ''}
