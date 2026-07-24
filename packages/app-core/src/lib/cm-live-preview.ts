@@ -17,6 +17,7 @@ import {
   resolveLocalAssetUrl
 } from './local-assets'
 import { setImageBlockDragPayload } from './image-block-dnd'
+import { imageCacheKey, rememberImageOnLoad, takeCachedImage } from './image-element-cache'
 import { assetTabPath } from './asset-tabs'
 import { openExternalFileLink } from './external-file-link'
 import {
@@ -77,6 +78,8 @@ type ParsedImage = {
   alt: string
   href: string
   resolvedUrl: string
+  /** Asset mtime, part of the image cache key so an edited file reloads. (#472) */
+  version: number
 }
 
 type ParsedPdf = {
@@ -210,6 +213,25 @@ function createImageDragPreview(title: string): HTMLDivElement {
   return chip
 }
 
+let assetVersionSource: unknown = null
+let assetVersionIndex: Map<string, number> = new Map()
+
+/** Mtime of the vault asset `href` resolves to, or 0 when unknown. (#472) */
+function assetVersionFor(href: string): number {
+  const state = useStore.getState()
+  const root = state.vault?.root
+  const notePath = state.activeNote?.path
+  if (!root || !notePath) return 0
+  const rel = resolveAssetVaultRelativePath(root, notePath, href)
+  if (!rel) return 0
+  const files = state.assetFiles
+  if (files !== assetVersionSource) {
+    assetVersionSource = files
+    assetVersionIndex = new Map(files.map((a) => [a.path, a.updatedAt]))
+  }
+  return assetVersionIndex.get(rel) ?? 0
+}
+
 function parseStandaloneLocalImage(lineText: string): ParsedImage | null {
   const state = useStore.getState()
   const fromMarkdown = lineText.match(STANDALONE_IMAGE_RE)
@@ -221,7 +243,8 @@ function parseStandaloneLocalImage(lineText: string): ParsedImage | null {
     return {
       alt: (fromMarkdown[1] ?? '').trim(),
       href,
-      resolvedUrl
+      resolvedUrl,
+      version: assetVersionFor(href)
     }
   }
 
@@ -234,7 +257,8 @@ function parseStandaloneLocalImage(lineText: string): ParsedImage | null {
   return {
     alt: (fromEmbed[2] ?? '').trim(),
     href,
-    resolvedUrl
+    resolvedUrl,
+    version: assetVersionFor(href)
   }
 }
 
@@ -313,7 +337,8 @@ class LocalImageWidget extends WidgetType {
     private readonly lineText: string,
     private readonly alt: string,
     private readonly href: string,
-    private readonly resolvedUrl: string
+    private readonly resolvedUrl: string,
+    private readonly version: number
   ) {
     super()
   }
@@ -326,7 +351,8 @@ class LocalImageWidget extends WidgetType {
       other.lineText === this.lineText &&
       other.alt === this.alt &&
       other.href === this.href &&
-      other.resolvedUrl === this.resolvedUrl
+      other.resolvedUrl === this.resolvedUrl &&
+      other.version === this.version
     )
   }
 
@@ -362,9 +388,17 @@ class LocalImageWidget extends WidgetType {
     const frame = document.createElement('div')
     frame.className = 'local-image-embed-frame'
 
-    const image = document.createElement('img')
+    // Reuse the decoded element when this image was on screen recently, so
+    // scrolling back paints it immediately instead of refetching and
+    // re-decoding it. (#472)
+    const key = imageCacheKey(this.resolvedUrl, this.version)
+    const cached = takeCachedImage(key)
+    const image = cached ?? document.createElement('img')
     image.className = 'local-image-embed-image'
-    image.src = this.resolvedUrl
+    if (!cached) {
+      image.src = this.resolvedUrl
+      rememberImageOnLoad(key, image)
+    }
     image.alt = this.alt
     image.loading = 'lazy'
     image.draggable = false
@@ -938,7 +972,8 @@ function computeDecorations(view: EditorView): DecorationSet {
               line.text,
               parsedImage.alt,
               parsedImage.href,
-              parsedImage.resolvedUrl
+              parsedImage.resolvedUrl,
+              parsedImage.version
             )
           })
         })

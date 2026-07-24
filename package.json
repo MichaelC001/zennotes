@@ -32,7 +32,8 @@
     "pack": "npm run pack --workspace @zennotes/desktop",
     "dist:mac": "npm run dist:mac --workspace @zennotes/desktop",
     "dist:win": "npm run dist:win --workspace @zennotes/desktop",
-    "dist:linux": "npm run dist:linux --workspace @zennotes/desktop"
+    "dist:linux": "npm run dist:linux --workspace @zennotes/desktop",
+    "perf:editor-scroll": "node tooling/scripts/perf-editor-scroll.mjs"
   },
   "devDependencies": {
     "turbo": "^2.5.8"
