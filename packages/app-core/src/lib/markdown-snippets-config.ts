@@ -1,7 +1,8 @@
 import type { Extension } from '@codemirror/state'
-import type { EditorView } from '@codemirror/view'
+import { EditorView, keymap } from '@codemirror/view'
 import { autoPairExtension, isInMarkdownCode } from './cm-auto-pairs'
 import { markdownSnippetExtension } from './cm-markdown-snippets'
+import { formatMarkerBackspaceTransaction } from './cm-format'
 import { isEditorInsertMode } from './vim-nav'
 import { useStore } from '../store'
 
@@ -31,6 +32,21 @@ export function appMarkdownSnippetExtension(): Extension {
         const s = useStore.getState()
         return s.markdownSnippets && isTyping(view)
       }
-    })
+    }),
+    // Backspace inside a just-inserted empty formatting snippet (`**|**`, `` `|` ``)
+    // deletes the whole pair, not one marker char (#468). Always on while typing —
+    // it's a formatting-shortcut fix, independent of the auto-pairs pref.
+    keymap.of([
+      {
+        key: 'Backspace',
+        run: (view: EditorView): boolean => {
+          if (!isTyping(view)) return false
+          const tr = formatMarkerBackspaceTransaction(view.state)
+          if (!tr) return false
+          view.dispatch(tr)
+          return true
+        }
+      }
+    ])
   ]
 }
