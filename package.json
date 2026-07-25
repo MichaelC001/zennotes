@@ -1,7 +1,7 @@
 {
   "name": "zennotes-monorepo",
   "private": true,
-  "version": "2.16.0",
+  "version": "2.18.0",
   "description": "ZenNotes monorepo for desktop, web, and self-hosted server builds",
   "packageManager": "npm@10.9.2",
   "engines": {
@@ -32,7 +32,8 @@
     "pack": "npm run pack --workspace @zennotes/desktop",
     "dist:mac": "npm run dist:mac --workspace @zennotes/desktop",
     "dist:win": "npm run dist:win --workspace @zennotes/desktop",
-    "dist:linux": "npm run dist:linux --workspace @zennotes/desktop"
+    "dist:linux": "npm run dist:linux --workspace @zennotes/desktop",
+    "perf:editor-scroll": "node tooling/scripts/perf-editor-scroll.mjs"
   },
   "devDependencies": {
     "turbo": "^2.5.8"

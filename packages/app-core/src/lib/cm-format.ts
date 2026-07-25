@@ -4,7 +4,7 @@
  * highlight, `$` math) around the selection, or wrap it as a link. (#201-style
  * quick-format affordance.)
  */
-import { EditorSelection } from '@codemirror/state'
+import { EditorSelection, type EditorState, type TransactionSpec } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 
 function isInsideUnclosedMarker(text: string, marker: string): boolean {
@@ -22,6 +22,36 @@ function isInsideUnclosedMarker(text: string, marker: string): boolean {
     index = found + marker.length
   }
   return count % 2 === 1
+}
+
+// Symmetric inline markers the formatting shortcuts insert empty (`toggleWrap`
+// drops the cursor between them). Ordered longest-first so `**|**` matches `**`
+// (bold) before `*` (italic), and `~~`/`==` before nothing shorter. (#468)
+const WRAP_MARKERS = ['**', '~~', '==', '*', '`', '$'] as const
+
+/**
+ * When the cursor sits between two identical *empty* formatting markers — e.g.
+ * `**|**` just inserted by Ctrl+B, or `` `|` `` — Backspace should remove the
+ * whole snippet in one press, not a single marker character (#468). Returns the
+ * delete transaction, or null when the cursor isn't between an empty pair.
+ */
+export function formatMarkerBackspaceTransaction(state: EditorState): TransactionSpec | null {
+  const sel = state.selection.main
+  if (!sel.empty) return null
+  const head = sel.head
+  for (const m of WRAP_MARKERS) {
+    if (head - m.length < 0 || head + m.length > state.doc.length) continue
+    if (
+      state.sliceDoc(head - m.length, head) === m &&
+      state.sliceDoc(head, head + m.length) === m
+    ) {
+      return {
+        changes: { from: head - m.length, to: head + m.length, insert: '' },
+        selection: EditorSelection.cursor(head - m.length)
+      }
+    }
+  }
+  return null
 }
 
 /**

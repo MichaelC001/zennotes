@@ -10,13 +10,16 @@ import {
 } from '@codemirror/view'
 import { useStore } from '../store'
 import {
+  buildAttachmentChip,
   classifyLocalAssetHref,
   hrefFragment,
   resolveAssetVaultRelativePath,
   resolveLocalAssetUrl
 } from './local-assets'
 import { setImageBlockDragPayload } from './image-block-dnd'
+import { imageCacheKey, rememberImageOnLoad, takeCachedImage } from './image-element-cache'
 import { assetTabPath } from './asset-tabs'
+import { openExternalFileLink } from './external-file-link'
 import {
   getExcalidrawPreview,
   parseEmbedSizeHint,
@@ -75,6 +78,8 @@ type ParsedImage = {
   alt: string
   href: string
   resolvedUrl: string
+  /** Asset mtime, part of the image cache key so an edited file reloads. (#472) */
+  version: number
 }
 
 type ParsedPdf = {
@@ -136,6 +141,37 @@ function enclosingLinkRange(ref: SyntaxNodeRefLike): { from: number; to: number 
   return null
 }
 
+/**
+ * True when a `Link`/`Image` node that ends at `linkTo` is immediately
+ * followed by a `(` whose matching `)` hasn't been typed yet, i.e. the
+ * link target is still being written. (#471)
+ *
+ * The parser ends the `Link` node at the `]` in that state (`[Example](`
+ * gives `Link[0,9]`), so its brackets would otherwise be hidden and the
+ * label would render as `Example(` mid-edit. Parens nest, matching
+ * CommonMark's balanced-paren destinations, so a URL like
+ * `https://en.wikipedia.org/wiki/Foo_(bar` still counts as unterminated.
+ */
+function hasUnterminatedLinkTarget(state: EditorView['state'], linkTo: number): boolean {
+  if (state.doc.sliceString(linkTo, linkTo + 1) !== '(') return false
+  const line = state.doc.lineAt(linkTo)
+  const rest = state.doc.sliceString(linkTo, line.to)
+  let depth = 0
+  for (let i = 0; i < rest.length; i++) {
+    const ch = rest[i]
+    if (ch === '\\') {
+      i += 1
+      continue
+    }
+    if (ch === '(') depth += 1
+    else if (ch === ')') {
+      depth -= 1
+      if (depth === 0) return false
+    }
+  }
+  return true
+}
+
 function createImageDragPreview(title: string): HTMLDivElement {
   const chip = document.createElement('div')
   chip.style.position = 'fixed'
@@ -177,6 +213,25 @@ function createImageDragPreview(title: string): HTMLDivElement {
   return chip
 }
 
+let assetVersionSource: unknown = null
+let assetVersionIndex: Map<string, number> = new Map()
+
+/** Mtime of the vault asset `href` resolves to, or 0 when unknown. (#472) */
+function assetVersionFor(href: string): number {
+  const state = useStore.getState()
+  const root = state.vault?.root
+  const notePath = state.activeNote?.path
+  if (!root || !notePath) return 0
+  const rel = resolveAssetVaultRelativePath(root, notePath, href)
+  if (!rel) return 0
+  const files = state.assetFiles
+  if (files !== assetVersionSource) {
+    assetVersionSource = files
+    assetVersionIndex = new Map(files.map((a) => [a.path, a.updatedAt]))
+  }
+  return assetVersionIndex.get(rel) ?? 0
+}
+
 function parseStandaloneLocalImage(lineText: string): ParsedImage | null {
   const state = useStore.getState()
   const fromMarkdown = lineText.match(STANDALONE_IMAGE_RE)
@@ -188,7 +243,8 @@ function parseStandaloneLocalImage(lineText: string): ParsedImage | null {
     return {
       alt: (fromMarkdown[1] ?? '').trim(),
       href,
-      resolvedUrl
+      resolvedUrl,
+      version: assetVersionFor(href)
     }
   }
 
@@ -201,7 +257,8 @@ function parseStandaloneLocalImage(lineText: string): ParsedImage | null {
   return {
     alt: (fromEmbed[2] ?? '').trim(),
     href,
-    resolvedUrl
+    resolvedUrl,
+    version: assetVersionFor(href)
   }
 }
 
@@ -233,6 +290,45 @@ function parseStandaloneLocalPdf(lineText: string): ParsedPdf | null {
   }
 }
 
+type ParsedAttachment = {
+  href: string
+  resolvedUrl: string
+  name: string
+}
+
+// A standalone non-previewable attachment embed. Two forms:
+//  - Markdown `![](file.tldraw)` — any non-image, non-excalidraw file (PDFs in
+//    this form have no dedicated widget, so they chip too).
+//  - Obsidian `![[file.tldraw]]` — generic files only; PDF/audio/video keep
+//    their rich widgets/embeds.
+// Images and excalidraw drawings have their own widgets and are excluded. (#463)
+function parseStandaloneLocalAttachment(lineText: string): ParsedAttachment | null {
+  const md = lineText.match(STANDALONE_IMAGE_RE)
+  const embed = md ? null : lineText.match(STANDALONE_OBSIDIAN_EMBED_RE)
+  let href: string
+  let alt: string
+  if (md) {
+    href = (md[2] ?? md[3] ?? '').trim()
+    alt = (md[1] ?? '').trim()
+  } else if (embed) {
+    href = (embed[1] ?? '').trim()
+    alt = (embed[2] ?? '').trim()
+  } else {
+    return null
+  }
+  const kind = classifyLocalAssetHref(href)
+  if (md) {
+    if (!kind || kind === 'image' || kind === 'excalidraw') return null
+  } else if (kind !== 'file') {
+    return null
+  }
+  const state = useStore.getState()
+  const resolvedUrl = resolveLocalAssetUrl(state.vault?.root, state.activeNote?.path, href)
+  if (!resolvedUrl) return null
+  const name = alt || decodeURIComponentSafe(href.split('/').filter(Boolean).pop()) || 'Attachment'
+  return { href, resolvedUrl, name }
+}
+
 class LocalImageWidget extends WidgetType {
   constructor(
     private readonly notePath: string,
@@ -241,7 +337,8 @@ class LocalImageWidget extends WidgetType {
     private readonly lineText: string,
     private readonly alt: string,
     private readonly href: string,
-    private readonly resolvedUrl: string
+    private readonly resolvedUrl: string,
+    private readonly version: number
   ) {
     super()
   }
@@ -254,7 +351,8 @@ class LocalImageWidget extends WidgetType {
       other.lineText === this.lineText &&
       other.alt === this.alt &&
       other.href === this.href &&
-      other.resolvedUrl === this.resolvedUrl
+      other.resolvedUrl === this.resolvedUrl &&
+      other.version === this.version
     )
   }
 
@@ -290,9 +388,17 @@ class LocalImageWidget extends WidgetType {
     const frame = document.createElement('div')
     frame.className = 'local-image-embed-frame'
 
-    const image = document.createElement('img')
+    // Reuse the decoded element when this image was on screen recently, so
+    // scrolling back paints it immediately instead of refetching and
+    // re-decoding it. (#472)
+    const key = imageCacheKey(this.resolvedUrl, this.version)
+    const cached = takeCachedImage(key)
+    const image = cached ?? document.createElement('img')
     image.className = 'local-image-embed-image'
-    image.src = this.resolvedUrl
+    if (!cached) {
+      image.src = this.resolvedUrl
+      rememberImageOnLoad(key, image)
+    }
     image.alt = this.alt
     image.loading = 'lazy'
     image.draggable = false
@@ -666,6 +772,46 @@ class LocalExcalidrawWidget extends WidgetType {
   }
 }
 
+/** Renders a non-previewable attachment (`![](file.tldraw)`) as an attachment
+ *  chip — matching the reading preview — instead of leaving the line blank.
+ *  Clicking opens the file the same way the image/PDF widgets do. (#463) */
+class AttachmentChipWidget extends WidgetType {
+  constructor(
+    private readonly href: string,
+    private readonly resolvedUrl: string,
+    private readonly name: string
+  ) {
+    super()
+  }
+
+  eq(other: AttachmentChipWidget): boolean {
+    return (
+      other.href === this.href &&
+      other.resolvedUrl === this.resolvedUrl &&
+      other.name === this.name
+    )
+  }
+
+  toDOM(): HTMLElement {
+    return buildAttachmentChip(this.resolvedUrl, this.href, this.name, () => {
+      const state = useStore.getState()
+      const root = state.vault?.root
+      const notePath = state.activeNote?.path
+      const assetPath =
+        root && notePath ? resolveAssetVaultRelativePath(root, notePath, this.href) : null
+      // Open in the OS default app — an in-app asset tab can't render a
+      // non-previewable file. (#463)
+      if (root && assetPath) {
+        void openExternalFileLink(`${root.replace(/\/+$/, '')}/${assetPath}`)
+      }
+    })
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+}
+
 /** Renders a GFM task-list marker (`[ ]` / `[x]` / `[X]`) as a clickable
  *  checkbox. The widget rewrites the underlying markdown when toggled — the
  *  same single-character mutation the Preview pane uses, so the on-disk
@@ -826,7 +972,8 @@ function computeDecorations(view: EditorView): DecorationSet {
               line.text,
               parsedImage.alt,
               parsedImage.href,
-              parsedImage.resolvedUrl
+              parsedImage.resolvedUrl,
+              parsedImage.version
             )
           })
         })
@@ -927,6 +1074,33 @@ function computeDecorations(view: EditorView): DecorationSet {
           deco: imageSourceHide
         })
       }
+      const parsedAttachment = parseStandaloneLocalAttachment(line.text)
+      if (parsedAttachment && !replacedLines.has(lineNo)) {
+        replacedLines.add(lineNo)
+        pending.push({
+          from: line.to,
+          to: line.to,
+          deco: Decoration.widget({
+            side: 1,
+            widget: new AttachmentChipWidget(
+              parsedAttachment.href,
+              parsedAttachment.resolvedUrl,
+              parsedAttachment.name
+            )
+          })
+        })
+        pending.push({
+          from: line.from,
+          to: line.to,
+          deco: imageSourceHide
+        })
+        // Collapse the now text-less line's strut, like the image embed does.
+        pending.push({
+          from: line.from,
+          to: line.from,
+          deco: imageEmbedLine
+        })
+      }
     }
   }
 
@@ -1018,6 +1192,13 @@ function computeDecorations(view: EditorView): DecorationSet {
         if (isUrl) {
           const prevChar = state.doc.sliceString(node.from - 1, node.from)
           if (prevChar !== '(') return // autolink or label URL → keep visible
+          // A URL that follows `(` but hangs off the paragraph rather than the
+          // `Link`/`Image` is an autolink, not a destination: either a
+          // half-typed target (`[a](https://…` before the `)`) or a
+          // parenthesised bare URL (`(https://…)`). Hiding it made the pasted
+          // URL vanish while the link was still being written. (#471)
+          const urlParent = node.node.parent?.name
+          if (urlParent !== 'Link' && urlParent !== 'Image') return
         }
 
         if (!isPrefix && !isSimple && !isUrl) return
@@ -1038,6 +1219,10 @@ function computeDecorations(view: EditorView): DecorationSet {
         if (isLinkSyntax) {
           const linkRange = enclosingLinkRange(node)
           if (linkRange && selectionTouchesRange(state, linkRange.from, linkRange.to)) return
+          // `[label](` with no closing `)` yet isn't a link, so keep its
+          // brackets visible: the label reads as source while the target is
+          // typed or pasted, and collapses once the syntax is complete. (#471)
+          if (linkRange && hasUnterminatedLinkTarget(state, linkRange.to)) return
         } else if (activeLines.has(line)) {
           // Reveal every marker on the active line, headings included: the
           // cursor anywhere in a heading shows its `##` prefix, matching the

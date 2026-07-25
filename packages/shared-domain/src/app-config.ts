@@ -111,6 +111,7 @@ export const PORTABLE_PREF_KEYS = [
   // view
   'systemFolderLabels',
   'noteSortOrder',
+  'assetSortOrder',
   'groupByKind',
   'nestedTags',
   'autoReveal',
@@ -209,6 +210,7 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   monoFont: null,
   systemFolderLabels: {},
   noteSortOrder: 'none',
+  assetSortOrder: 'name-asc',
   groupByKind: true,
   nestedTags: true,
   autoReveal: false,

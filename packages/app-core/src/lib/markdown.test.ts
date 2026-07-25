@@ -85,6 +85,20 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('<img')
   })
 
+  it('#463: a generic-file Obsidian embed becomes an image node (→ attachment chip)', () => {
+    // `![[file.tldraw]]` flows through the same <img> path as `![](file.tldraw)`
+    // so the asset enhancer denotes it as a chip.
+    const html = renderMarkdown('![[attachments/diagram.tldraw]]')
+    expect(html).toContain('<img')
+    expect(html).toContain('src="attachments/diagram.tldraw"')
+  })
+
+  it('#463: a PDF Obsidian embed stays a link (keeps its rich embed), not an image', () => {
+    const html = renderMarkdown('![[attachments/report.pdf]]')
+    expect(html).not.toContain('<img')
+    expect(html).toContain('attachments/report.pdf')
+  })
+
   it('parses size hints on excalidraw embeds', () => {
     const html = renderMarkdown('![[diagram.excalidraw|600x400]]')
 

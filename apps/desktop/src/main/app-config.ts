@@ -240,6 +240,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     comment: 'code / monospace font; empty = system default'
   },
   // view
+  assetSortOrder: {
+    section: 'view',
+    tomlKey: 'asset_sort_order',
+    comment: 'Assets view sort: name | used | type | size | modified, each -asc or -desc'
+  },
   noteSortOrder: {
     section: 'view',
     tomlKey: 'note_sort_order',

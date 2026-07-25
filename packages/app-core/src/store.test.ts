@@ -934,6 +934,18 @@ describe('viewPrefsFromVault (#292 — per-vault view overlay)', () => {
     expect('tasksViewMode' in patch).toBe(false)
   })
 
+  it('overlays the Assets sort order, and drops an invalid one (#473)', async () => {
+    installZen()
+    const { viewPrefsFromVault } = await loadStore()
+    expect(
+      viewPrefsFromVault({ view: { assetSortOrder: 'modified-desc' } } as unknown as ViewArg)
+        .assetSortOrder
+    ).toBe('modified-desc')
+    expect(
+      'assetSortOrder' in
+        viewPrefsFromVault({ view: { assetSortOrder: 'size-sideways' } } as unknown as ViewArg)
+    ).toBe(false)
+  })
   it('returns an empty patch when there is no view block', async () => {
     installZen()
     const { viewPrefsFromVault } = await loadStore()
@@ -967,6 +979,35 @@ describe('viewPrefsFromVault (#292 — per-vault view overlay)', () => {
       view: { kanbanColumnTitles: { [key]: 'Unassigned', 'field:status:review': 'In review' } }
     } as unknown as ViewArg)
     expect(patch.kanbanColumnTitles).toEqual({ [key]: 'Unassigned', 'field:status:review': 'In review' })
+  })
+})
+
+describe('assetSortOrder (#473: Assets view sort is sticky)', () => {
+  it('defaults to name-asc and survives a store reload', async () => {
+    installZen()
+    const first = await loadStore()
+    expect(first.useStore.getState().assetSortOrder).toBe('name-asc')
+
+    first.useStore.getState().setAssetSortOrder('modified-desc')
+    expect(first.useStore.getState().assetSortOrder).toBe('modified-desc')
+
+    // Re-import without clearing localStorage: this is the "quit and reopen"
+    // path, and the header choice has to come back with it.
+    vi.resetModules()
+    const reloaded = await import('./store')
+    expect(reloaded.useStore.getState().assetSortOrder).toBe('modified-desc')
+  })
+
+  it('falls back to the default when the persisted value is junk', async () => {
+    installZen()
+    const { DEFAULT_PREFS } = await loadStore()
+    localStorage.setItem(
+      'zen:prefs:v2',
+      JSON.stringify({ ...DEFAULT_PREFS, assetSortOrder: 'nonsense' })
+    )
+    vi.resetModules()
+    const reloaded = await import('./store')
+    expect(reloaded.useStore.getState().assetSortOrder).toBe('name-asc')
   })
 })
 

@@ -182,6 +182,22 @@ export type NoteSortOrder =
   | 'name-asc'
   | 'name-desc'
 
+/** Which column the Assets view sorts by, and in which direction. Stored as one
+ *  `<column>-<dir>` string so it maps onto a single portable pref, the same
+ *  shape as `NoteSortOrder`. (#473) */
+export type AssetSortColumn = 'name' | 'used' | 'type' | 'size' | 'modified'
+export type AssetSortOrder =
+  | 'name-asc'
+  | 'name-desc'
+  | 'used-asc'
+  | 'used-desc'
+  | 'type-asc'
+  | 'type-desc'
+  | 'size-asc'
+  | 'size-desc'
+  | 'modified-asc'
+  | 'modified-desc'
+
 export type LineNumberMode = 'off' | 'absolute' | 'relative'
 
 /** Where the line-number gutter sits when content is centered: glued to the
@@ -228,6 +244,18 @@ const VALID_SORTS: NoteSortOrder[] = [
   'created-asc',
   'name-asc',
   'name-desc'
+]
+const VALID_ASSET_SORTS: AssetSortOrder[] = [
+  'name-asc',
+  'name-desc',
+  'used-asc',
+  'used-desc',
+  'type-asc',
+  'type-desc',
+  'size-asc',
+  'size-desc',
+  'modified-asc',
+  'modified-desc'
 ]
 const VALID_LINE_NUMBER_MODES: LineNumberMode[] = ['off', 'absolute', 'relative']
 const VALID_LINE_NUMBER_POSITIONS: LineNumberPosition[] = ['edge', 'text']
@@ -448,6 +476,8 @@ interface Prefs {
   sidebarWidth: number
   noteListWidth: number
   noteSortOrder: NoteSortOrder
+  /** Sort column + direction for the Assets view, kept across visits. (#473) */
+  assetSortOrder: AssetSortOrder
   groupByKind: boolean
   /** Auto-expand the sidebar tree to reveal the currently open note. */
   autoReveal: boolean
@@ -662,7 +692,7 @@ export function normalizeKanbanStatuses(raw: unknown): string[] {
 
 /**
  * Build the store patch that overlays a vault's per-vault view overrides (#292)
- * onto the 8 view prefs. Unset/invalid keys are omitted, so the live (global)
+ * onto the view prefs. Unset/invalid keys are omitted, so the live (global)
  * value is kept for them. Applied on every vault open.
  */
 export function viewPrefsFromVault(settings: VaultSettings | null | undefined): Partial<Store> {
@@ -671,6 +701,12 @@ export function viewPrefsFromVault(settings: VaultSettings | null | undefined): 
   const patch: Partial<Store> = {}
   if (typeof v.noteSortOrder === 'string' && VALID_SORTS.includes(v.noteSortOrder as NoteSortOrder)) {
     patch.noteSortOrder = v.noteSortOrder as NoteSortOrder
+  }
+  if (
+    typeof v.assetSortOrder === 'string' &&
+    VALID_ASSET_SORTS.includes(v.assetSortOrder as AssetSortOrder)
+  ) {
+    patch.assetSortOrder = v.assetSortOrder as AssetSortOrder
   }
   if (typeof v.groupByKind === 'boolean') patch.groupByKind = v.groupByKind
   if (
@@ -710,7 +746,7 @@ let pendingViewPatch: VaultViewSettings = {}
  *  being written too (it's the floating default for vaults with no override). (#292) */
 function persistVaultViewOverride(patch: VaultViewSettings): void {
   // Only persist per-vault when the user opted into per-vault scope; in 'global'
-  // scope the 8 setters keep writing the global config only. (#292)
+  // scope those setters keep writing the global config only. (#292)
   if (useStore.getState().viewSettingsScope !== 'vault') return
   pendingViewPatch = { ...pendingViewPatch, ...patch }
   if (viewPersistTimer) clearTimeout(viewPersistTimer)
@@ -773,6 +809,7 @@ export const DEFAULT_PREFS: Prefs = {
   sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   noteListWidth: 300,
   noteSortOrder: 'none',
+  assetSortOrder: 'name-asc',
   groupByKind: true,
   autoReveal: false,
   unifiedSidebar: true,
@@ -965,6 +1002,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       p.noteSortOrder && VALID_SORTS.includes(p.noteSortOrder)
         ? p.noteSortOrder
         : DEFAULT_PREFS.noteSortOrder,
+    assetSortOrder:
+      p.assetSortOrder && VALID_ASSET_SORTS.includes(p.assetSortOrder)
+        ? p.assetSortOrder
+        : DEFAULT_PREFS.assetSortOrder,
     groupByKind:
       typeof p.groupByKind === 'boolean' ? p.groupByKind : DEFAULT_PREFS.groupByKind,
     autoReveal:
@@ -1727,6 +1768,7 @@ function collectPrefs(s: {
   sidebarWidth: number
   noteListWidth: number
   noteSortOrder: NoteSortOrder
+  assetSortOrder: AssetSortOrder
   groupByKind: boolean
   autoReveal: boolean
   unifiedSidebar: boolean
@@ -1805,6 +1847,7 @@ function collectPrefs(s: {
     sidebarWidth: s.sidebarWidth,
     noteListWidth: s.noteListWidth,
     noteSortOrder: s.noteSortOrder,
+    assetSortOrder: s.assetSortOrder,
     groupByKind: s.groupByKind,
     autoReveal: s.autoReveal,
     unifiedSidebar: s.unifiedSidebar,
@@ -2265,6 +2308,7 @@ interface Store {
   sidebarWidth: number
   noteListWidth: number
   noteSortOrder: NoteSortOrder
+  assetSortOrder: AssetSortOrder
   groupByKind: boolean
   autoReveal: boolean
   unifiedSidebar: boolean
@@ -2661,6 +2705,8 @@ interface Store {
   setSidebarWidth: (px: number) => void
   setNoteListWidth: (px: number) => void
   setNoteSortOrder: (order: NoteSortOrder) => void
+  /** Set the Assets view sort column + direction. (#473) */
+  setAssetSortOrder: (order: AssetSortOrder) => void
   /** Move a note before/after a sibling in its folder's manual order (#224). */
   reorderNoteManually: (
     draggedPath: string,
@@ -3817,6 +3863,7 @@ export const useStore = create<Store>((set, get) => {
   sidebarWidth: loadPrefs().sidebarWidth,
   noteListWidth: loadPrefs().noteListWidth,
   noteSortOrder: loadPrefs().noteSortOrder,
+  assetSortOrder: loadPrefs().assetSortOrder,
   groupByKind: loadPrefs().groupByKind,
   autoReveal: loadPrefs().autoReveal,
   unifiedSidebar: loadPrefs().unifiedSidebar,
@@ -6072,6 +6119,11 @@ export const useStore = create<Store>((set, get) => {
     set({ noteSortOrder: order })
     savePrefs(collectPrefs(get()))
     persistVaultViewOverride({ noteSortOrder: order })
+  },
+  setAssetSortOrder: (order) => {
+    set({ assetSortOrder: order })
+    savePrefs(collectPrefs(get()))
+    persistVaultViewOverride({ assetSortOrder: order })
   },
   reorderNoteManually: (draggedPath, targetPath, position) => {
     const dir = parentDirOf(draggedPath)

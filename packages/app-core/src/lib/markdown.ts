@@ -101,6 +101,18 @@ function remarkWikilinks() {
         value: `<div class="excalidraw-embed-host" data-excalidraw-embed="${safeTarget}"${w}${h}></div>`
       }
     }
+    // A generic non-previewable file embedded as `![[file.tldraw]]` becomes an
+    // image node so it flows through the same attachment-chip path as
+    // `![](file.tldraw)`. PDF/audio/video keep their rich embeds (link node
+    // below → media embed). (#463)
+    if (bang === '!' && assetKind === 'file') {
+      return {
+        type: 'image',
+        url: target,
+        title: null,
+        alt: label
+      }
+    }
     if (bang === '!' && assetKind) {
       return {
         type: 'link',

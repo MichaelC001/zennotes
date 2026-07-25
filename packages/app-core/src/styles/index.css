@@ -3451,6 +3451,65 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   margin: 0.85rem;
 }
 
+/* #463 — attachment chip: denotes a non-previewable file (`.tldraw`, `.zip`, …)
+   embedded with image syntax `![](file.ext)`. Shared by the reading preview and
+   the editor's live-preview widget so they look identical. */
+:is(.prose-zen, .cm-editor) .local-file-attachment {
+  margin: 0.75rem 0;
+}
+
+:is(.prose-zen, .cm-editor) .local-file-attachment-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid theme("colors.paper.300");
+  background: color-mix(in srgb, theme("colors.paper.100") 90%, transparent);
+  padding: 0.45rem 0.7rem;
+  color: theme("colors.ink.700");
+  font-size: 0.9rem;
+  font-weight: 500;
+  /* The editor collapses the host line to `line-height: 0` (see
+     `cm-image-embed-line`); restore a normal line-height so the filename
+     isn't zeroed out, the same way the image caption does. */
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+:is(.prose-zen, .cm-editor) .local-file-attachment-button:hover {
+  border-color: rgb(var(--z-accent) / 0.5);
+  background: color-mix(in srgb, theme("colors.paper.200") 90%, transparent);
+}
+
+:is(.prose-zen, .cm-editor) .local-file-attachment-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: rgb(var(--z-accent));
+}
+
+:is(.prose-zen, .cm-editor) .local-file-attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:is(.prose-zen, .cm-editor) .local-file-attachment-open {
+  flex-shrink: 0;
+  opacity: 0.55;
+  font-size: 0.85rem;
+}
+
+:is(.prose-zen, .cm-editor) .local-file-attachment-inline {
+  color: rgb(var(--z-accent));
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--z-accent) / 0.4);
+  cursor: pointer;
+}
+
 /* Wiki links — Obsidian-style internal links: accent text with a soft underline,
    matching the editor's live-preview wikilink so they read as links rather than
    filled inline-code chips. (Julie: the old boxed style looked like inline code.) */
