@@ -7,6 +7,40 @@
 import { EditorSelection, type EditorState, type TransactionSpec } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 
+// Symmetric inline markers the formatting shortcuts insert empty (`toggleWrap`
+// drops the cursor between them). Ordered longest-first so `**|**` matches `**`
+// (bold) before `*` (italic), and `~~`/`==` before nothing shorter. (#468)
+const WRAP_MARKERS = ['**', '~~', '==', '*', '`', '$'] as const
+
+/** The cursor sits between an empty `marker` pair, e.g. `**|**` for `**`. */
+function isEmptyPairAt(state: EditorState, at: number, marker: string): boolean {
+  if (at - marker.length < 0 || at + marker.length > state.doc.length) return false
+  return (
+    state.sliceDoc(at - marker.length, at) === marker &&
+    state.sliceDoc(at, at + marker.length) === marker
+  )
+}
+
+/**
+ * A *longer* marker also forms an empty pair here, so the one being toggled is
+ * only the inner slice of it. Guards the empty-pair removal below: in a fresh
+ * `**|**`, Ctrl+I finds a `*` on each side and would otherwise delete the inner
+ * half of the bold pair — destroying the bold the user just started instead of
+ * nesting italic inside it. Same longest-marker-wins rule the Backspace handler
+ * follows (#468).
+ */
+function longerMarkerPairAt(state: EditorState, at: number, marker: string): boolean {
+  return WRAP_MARKERS.some((w) => w.length > marker.length && isEmptyPairAt(state, at, w))
+}
+
+/**
+ * `text` (the line up to the cursor) leaves `marker` open — an odd number of
+ * them, so the cursor is inside a span this marker started. A single `*` skips
+ * any occurrence that touches another `*`, so a `**bold**` earlier on the line
+ * isn't counted as two italics. Deliberately a count rather than a parse: the
+ * question is only which way the shortcut should lean, and a wrong guess just
+ * inserts the pair as before.
+ */
 function isInsideUnclosedMarker(text: string, marker: string): boolean {
   let count = 0
   let index = 0
@@ -24,11 +58,6 @@ function isInsideUnclosedMarker(text: string, marker: string): boolean {
   return count % 2 === 1
 }
 
-// Symmetric inline markers the formatting shortcuts insert empty (`toggleWrap`
-// drops the cursor between them). Ordered longest-first so `**|**` matches `**`
-// (bold) before `*` (italic), and `~~`/`==` before nothing shorter. (#468)
-const WRAP_MARKERS = ['**', '~~', '==', '*', '`', '$'] as const
-
 /**
  * When the cursor sits between two identical *empty* formatting markers — e.g.
  * `**|**` just inserted by Ctrl+B, or `` `|` `` — Backspace should remove the
@@ -40,11 +69,7 @@ export function formatMarkerBackspaceTransaction(state: EditorState): Transactio
   if (!sel.empty) return null
   const head = sel.head
   for (const m of WRAP_MARKERS) {
-    if (head - m.length < 0 || head + m.length > state.doc.length) continue
-    if (
-      state.sliceDoc(head - m.length, head) === m &&
-      state.sliceDoc(head, head + m.length) === m
-    ) {
+    if (isEmptyPairAt(state, head, m)) {
       return {
         changes: { from: head - m.length, to: head + m.length, insert: '' },
         selection: EditorSelection.cursor(head - m.length)
@@ -69,7 +94,7 @@ export function toggleWrap(view: EditorView, marker: string): boolean {
         const after = view.state.sliceDoc(from, Math.min(view.state.doc.length, from + m.length))
 
         if (after === m) {
-          if (before === m) {
+          if (before === m && !longerMarkerPairAt(view.state, from, m)) {
             // Empty pair: pressing the shortcut again removes the markers.
             return {
               changes: { from: from - m.length, to: from + m.length, insert: '' },

@@ -72,6 +72,22 @@ describe('toggleWrap', () => {
     expect(view.state.selection.main.head).toBe(0)
   })
 
+  it('nests italic inside a fresh bold pair instead of eating its markers', () => {
+    // `**|**` from Ctrl+B, then Ctrl+I: the `*` on each side belongs to the bold
+    // pair, so removing it would destroy the bold the user just started.
+    const view = mount('****', 2, 2)
+    toggleWrap(view, '*')
+    expect(view.state.doc.toString()).toBe('******')
+    expect(view.state.selection.main.head).toBe(3)
+  })
+
+  it('toggles bold off inside a bold+italic pair, leaving the italic', () => {
+    const view = mount('******', 3, 3)
+    toggleWrap(view, '**')
+    expect(view.state.doc.toString()).toBe('**')
+    expect(view.state.selection.main.head).toBe(1)
+  })
+
   it('does not treat a cursor before a later opening marker as active formatting', () => {
     const view = mount('**done** **next**', 9, 9) // cursor before the second opening **
     toggleWrap(view, '**')
