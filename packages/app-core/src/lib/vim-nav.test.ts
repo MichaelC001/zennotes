@@ -12,10 +12,13 @@ vi.mock('@replit/codemirror-vim', () => ({
 
 import {
   getVisiblePanels,
+  getVisiblePanelsNow,
   hintTargetOpensNote,
   isVimAwaitingArgument,
   resolveNextPanel,
-  shouldYieldToHomeNav
+  shouldYieldToHomeNav,
+  type Panel,
+  type PanelVisibility
 } from './vim-nav'
 
 function el(html: string): HTMLElement {
@@ -109,34 +112,96 @@ describe('isVimAwaitingArgument (#147 — Space is the Vim arg, not the leader)'
   })
 })
 
-describe('getVisiblePanels — calendar in the focus cycle (#285)', () => {
+describe('getVisiblePanels — the focus cycle (#285, #477)', () => {
+  const visibility = (over: Partial<PanelVisibility> = {}): PanelVisibility => ({
+    sidebarOpen: true,
+    noteListOpen: true,
+    unifiedSidebar: false,
+    connectionsOpen: false,
+    commentsOpen: false,
+    outlineOpen: false,
+    calendarOpen: false,
+    tasksViewOpen: false,
+    ...over
+  })
+
   it('appends the calendar last (after connections/comments) when open', () => {
-    expect(getVisiblePanels(true, true, false, false, false, false, true)).toEqual([
+    expect(getVisiblePanels(visibility({ calendarOpen: true }))).toEqual([
       'sidebar',
       'notelist',
       'editor',
       'calendar'
     ])
-    expect(getVisiblePanels(true, true, false, true, true, false, true)).toEqual([
+    expect(
+      getVisiblePanels(visibility({ connectionsOpen: true, commentsOpen: true, calendarOpen: true }))
+    ).toEqual(['sidebar', 'notelist', 'editor', 'connections', 'comments', 'calendar'])
+  })
+
+  it('omits the calendar when it is closed', () => {
+    expect(getVisiblePanels(visibility())).not.toContain('calendar')
+    expect(getVisiblePanels(visibility({ calendarOpen: false }))).not.toContain('calendar')
+  })
+
+  it('slots the outline between comments and calendar, matching how they render (#477)', () => {
+    expect(
+      getVisiblePanels(
+        visibility({
+          connectionsOpen: true,
+          commentsOpen: true,
+          outlineOpen: true,
+          calendarOpen: true
+        })
+      )
+    ).toEqual([
       'sidebar',
       'notelist',
       'editor',
       'connections',
       'comments',
+      'outline',
       'calendar'
     ])
-  })
-
-  it('omits the calendar when it is closed (default arg)', () => {
-    expect(getVisiblePanels(true, true, false, false, false)).not.toContain('calendar')
-    expect(getVisiblePanels(true, true, false, false, false, false, false)).not.toContain('calendar')
+    expect(getVisiblePanels(visibility())).not.toContain('outline')
   })
 
   it('resolveNextPanel reaches the calendar from the editor and stays at the edge', () => {
-    const panels = getVisiblePanels(true, true, false, false, false, false, true)
+    const panels = getVisiblePanels(visibility({ calendarOpen: true }))
     expect(resolveNextPanel('editor', 'right', panels)).toBe('calendar')
     // Calendar is the right-most panel, so going further right is a no-op.
     expect(resolveNextPanel('calendar', 'right', panels)).toBe('calendar')
     expect(resolveNextPanel('calendar', 'left', panels)).toBe('editor')
+  })
+
+  it('reads the open side panels off the DOM so both navigations see the same list (#477)', () => {
+    document.body.innerHTML = `
+      <div data-connections-panel></div>
+      <div data-outline-panel></div>
+      <div data-calendar-panel></div>
+    `
+    expect(
+      getVisiblePanelsNow({
+        sidebarOpen: true,
+        noteListOpen: false,
+        unifiedSidebar: false,
+        tasksViewOpen: false
+      })
+    ).toEqual(['sidebar', 'editor', 'connections', 'outline', 'calendar'])
+    document.body.innerHTML = ''
+  })
+
+  it('walks every open panel in order, so no panel is a dead end (#477)', () => {
+    const panels = getVisiblePanels(
+      visibility({ connectionsOpen: true, commentsOpen: true, outlineOpen: true, calendarOpen: true })
+    )
+    const walk: Panel[] = ['editor']
+    for (let i = 0; i < 4; i++) {
+      const next = resolveNextPanel(walk[walk.length - 1], 'right', panels)
+      if (!next) break
+      walk.push(next)
+    }
+    expect(walk).toEqual(['editor', 'connections', 'comments', 'outline', 'calendar'])
+    // …and back again.
+    expect(resolveNextPanel('outline', 'left', panels)).toBe('comments')
+    expect(resolveNextPanel('connections', 'left', panels)).toBe('editor')
   })
 })

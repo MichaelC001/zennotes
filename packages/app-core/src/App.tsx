@@ -268,6 +268,7 @@ function App(): JSX.Element {
   const setEmbedDrawingPaletteOpen = useStore((s) => s.setEmbedDrawingPaletteOpen)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const noteListOpen = useStore((s) => s.noteListOpen)
+  const focusedPanel = useStore((s) => s.focusedPanel)
   const zenMode = useStore((s) => s.zenMode)
   const paneLayout = useStore((s) => s.paneLayout)
   const activePaneId = useStore((s) => s.activePaneId)
@@ -946,7 +947,14 @@ function App(): JSX.Element {
   }
 
   return (
-    <div className="zn-app-shell flex w-screen flex-col bg-paper-100 text-ink-900">
+    // `data-focused-panel` mirrors the store's focused panel onto the DOM. Panel
+    // focus is otherwise invisible for the right-side panels (they don't all take
+    // DOM focus), which makes pane navigation impossible to assert from outside
+    // the app — this is what the keyboard-navigation smoke checks read. (#477)
+    <div
+      className="zn-app-shell flex w-screen flex-col bg-paper-100 text-ink-900"
+      data-focused-panel={focusedPanel ?? 'none'}
+    >
       {!zenMode && <TitleBar />}
       <div className="flex min-h-0 flex-1">
         {!zenMode && sidebarOpen && <Sidebar />}

@@ -2454,6 +2454,9 @@ interface Store {
   paneStickyModes: Record<string, PaneMode>
   noteListCursorIndex: number
   connectionsCursorIndex: number
+  /** Row cursor for the Outline panel, mirroring the connections cursor so
+   *  pane navigation can restore where you were. (#477) */
+  outlineCursorIndex: number
   connectionPreview: ConnectionPreviewState | null
   editorViewRef: EditorView | null
   pendingTitleFocusPath: string | null
@@ -2826,6 +2829,7 @@ interface Store {
   setSidebarCursorIndex: (idx: number) => void
   setNoteListCursorIndex: (idx: number) => void
   setConnectionsCursorIndex: (idx: number) => void
+  setOutlineCursorIndex: (idx: number) => void
   setConnectionPreview: (preview: ConnectionPreviewState | null) => void
   setEditorViewRef: (view: EditorView | null) => void
 
@@ -3917,6 +3921,7 @@ export const useStore = create<Store>((set, get) => {
   paneStickyModes: {},
   noteListCursorIndex: 0,
   connectionsCursorIndex: 0,
+  outlineCursorIndex: 0,
   connectionPreview: null,
   editorViewRef: null,
   pendingTitleFocusPath: null,
@@ -6855,6 +6860,7 @@ export const useStore = create<Store>((set, get) => {
     ),
   setNoteListCursorIndex: (idx) => set({ noteListCursorIndex: idx }),
   setConnectionsCursorIndex: (idx) => set({ connectionsCursorIndex: idx }),
+  setOutlineCursorIndex: (idx) => set({ outlineCursorIndex: idx }),
   setConnectionPreview: (preview) => set({ connectionPreview: preview }),
   setEditorViewRef: (view) => set({ editorViewRef: view }),
   setActivePane: (paneId) => {

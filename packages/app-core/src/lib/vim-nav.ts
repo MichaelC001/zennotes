@@ -48,30 +48,73 @@ export type Panel =
   | 'editor'
   | 'connections'
   | 'comments'
+  | 'outline'
   | 'calendar'
   | 'hoverpreview'
   | 'tasks'
   | 'tags'
 
-export function getVisiblePanels(
-  sidebarOpen: boolean,
-  noteListOpen: boolean,
-  unifiedSidebar: boolean,
-  connectionsOpen: boolean,
-  commentsOpen: boolean,
-  tasksViewOpen = false,
-  calendarOpen = false
-): Panel[] {
+export interface PanelVisibility {
+  sidebarOpen: boolean
+  noteListOpen: boolean
+  unifiedSidebar: boolean
+  connectionsOpen: boolean
+  commentsOpen: boolean
+  outlineOpen: boolean
+  calendarOpen: boolean
+  tasksViewOpen: boolean
+}
+
+/** Every panel on screen, ordered left to right — the focus order both pane
+ *  navigations walk. The editor-pane side panels follow the order EditorPane
+ *  renders them in: connections, comments, outline, calendar. (#285, #477) */
+export function getVisiblePanels(visibility: PanelVisibility): Panel[] {
   const panels: Panel[] = []
-  if (sidebarOpen) panels.push('sidebar')
-  if (noteListOpen && !unifiedSidebar) panels.push('notelist')
-  panels.push(tasksViewOpen ? 'tasks' : 'editor')
-  if (connectionsOpen) panels.push('connections')
-  if (commentsOpen) panels.push('comments')
-  // The calendar is the right-most of the editor-pane side panels (it renders
-  // after connections/comments), so it's last in the focus order. (#285)
-  if (calendarOpen) panels.push('calendar')
+  if (visibility.sidebarOpen) panels.push('sidebar')
+  if (visibility.noteListOpen && !visibility.unifiedSidebar) panels.push('notelist')
+  panels.push(visibility.tasksViewOpen ? 'tasks' : 'editor')
+  if (visibility.connectionsOpen) panels.push('connections')
+  if (visibility.commentsOpen) panels.push('comments')
+  if (visibility.outlineOpen) panels.push('outline')
+  if (visibility.calendarOpen) panels.push('calendar')
   return panels
+}
+
+/** DOM marker each editor-pane side panel renders, used to tell whether it is
+ *  currently on screen. They live inside the active EditorPane rather than in
+ *  app-level state, so the live DOM is the only honest source. */
+const PANEL_MARKERS = {
+  connections: '[data-connections-panel]',
+  comments: '[data-comments-panel]',
+  outline: '[data-outline-panel]',
+  calendar: '[data-calendar-panel]'
+} as const
+
+/**
+ * The visible panel list as it stands right now: app-level columns from the
+ * store, editor-pane side panels from the DOM. Both entry points into pane
+ * navigation — vim's `<C-w>hjkl` and the always-on `Alt+hjkl` — resolve their
+ * target through this, so the two can never drift apart the way they had by
+ * 2.18 (Alt+hjkl stopped at Connections and neither reached the Outline). (#477)
+ */
+export function getVisiblePanelsNow(state: {
+  sidebarOpen: boolean
+  noteListOpen: boolean
+  unifiedSidebar: boolean
+  tasksViewOpen: boolean
+}): Panel[] {
+  const onScreen = (selector: string): boolean =>
+    typeof document !== 'undefined' && document.querySelector(selector) !== null
+  return getVisiblePanels({
+    sidebarOpen: state.sidebarOpen,
+    noteListOpen: state.noteListOpen,
+    unifiedSidebar: state.unifiedSidebar,
+    tasksViewOpen: state.tasksViewOpen,
+    connectionsOpen: onScreen(PANEL_MARKERS.connections),
+    commentsOpen: onScreen(PANEL_MARKERS.comments),
+    outlineOpen: onScreen(PANEL_MARKERS.outline),
+    calendarOpen: onScreen(PANEL_MARKERS.calendar)
+  })
 }
 
 /** Move left (h/k) or right (l/j) through the visible panel list. */

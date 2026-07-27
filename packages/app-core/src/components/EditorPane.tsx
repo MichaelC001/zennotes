@@ -3329,8 +3329,21 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         setActivePane(paneId)
         setFocusedPanel('editor')
       }}
-      onFocusCapture={() => {
+      onFocusCapture={(e) => {
         setActivePane(paneId)
+        // The right-side panels live inside this pane, so focusing one of them
+        // bubbles up here. Claiming 'editor' then would undo the panel focus
+        // that pane navigation just set — which is why `<C-w>l` onto the
+        // calendar used to bounce back to the editor, making it a dead end in
+        // the focus cycle. Only the editor's own surfaces claim it. (#477)
+        if (
+          e.target instanceof HTMLElement &&
+          e.target.closest(
+            '[data-connections-panel],[data-comments-panel],[data-outline-panel],[data-calendar-panel]'
+          )
+        ) {
+          return
+        }
         setFocusedPanel('editor')
       }}
     >

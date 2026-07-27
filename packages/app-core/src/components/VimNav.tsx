@@ -5,7 +5,7 @@ import { HintOverlay } from './HintOverlay'
 import { WhichKeyOverlay, type WhichKeyItem } from './WhichKeyOverlay'
 import {
   clearEditorPendingVimStatus,
-  getVisiblePanels,
+  getVisiblePanelsNow,
   hintTargetOpensNote,
   isEditorInsertMode,
   isEditorFocused,
@@ -14,7 +14,7 @@ import {
   shouldYieldToHomeNav
 } from '../lib/vim-nav'
 import { isCalendarToggleAvailable } from '../lib/vault-layout'
-import { focusPaneInDirection } from '../lib/pane-nav'
+import { focusPanel, focusPaneInDirection } from '../lib/pane-nav'
 import { findLeaf } from '../lib/pane-layout'
 import { boundedIndexCount, clampIndex, moveIndex } from '../lib/index-navigation'
 import {
@@ -46,7 +46,12 @@ function escapeForAttr(value: string): string {
   return value.replace(/["\\]/g, '\\$&')
 }
 
-type IndexedDatasetKey = 'sidebarIdx' | 'notelistIdx' | 'connectionsIdx' | 'commentsIdx'
+type IndexedDatasetKey =
+  | 'sidebarIdx'
+  | 'notelistIdx'
+  | 'connectionsIdx'
+  | 'commentsIdx'
+  | 'outlineIdx'
 
 /**
  * Global vim-style keyboard navigation layer.
@@ -688,15 +693,12 @@ export function VimNav(): JSX.Element | null {
           return
         }
 
-        const panels = getVisiblePanels(
-          state.sidebarOpen,
-          state.noteListOpen,
-          state.unifiedSidebar,
-          document.querySelector('[data-connections-panel]') !== null,
-          document.querySelector('[data-comments-panel]') !== null,
-          isTasksViewActive(state),
-          document.querySelector('[data-calendar-panel]') !== null
-        )
+        const panels = getVisiblePanelsNow({
+          sidebarOpen: state.sidebarOpen,
+          noteListOpen: state.noteListOpen,
+          unifiedSidebar: state.unifiedSidebar,
+          tasksViewOpen: isTasksViewActive(state)
+        })
         const direction =
           matchesSequenceToken(e, overrides, 'vim.paneFocusLeft') ||
           matchesSequenceToken(e, overrides, 'vim.paneFocusUp') ||
@@ -719,64 +721,9 @@ export function VimNav(): JSX.Element | null {
         const next = direction ? resolveNextPanel(currentPanel, direction, panels) : null
         if (!next) return
 
-        if (next === 'sidebar' && !state.sidebarOpen) state.toggleSidebar()
-        state.setFocusedPanel(next)
-        if (next === 'editor') {
-          state.editorViewRef?.focus()
-        } else if (next === 'tasks') {
-          // Tasks panel doesn't own a single focusable element — its
-          // keyboard handler fires off window keydown. Just blur whatever
-          // had DOM focus so the sidebar/notelist stop intercepting keys.
-          ;(document.activeElement as HTMLElement)?.blur()
-        } else if (next === 'comments') {
-          ;(document.activeElement as HTMLElement)?.blur()
-          requestAnimationFrame(() => {
-            focusCommentsPanel(state)
-          })
-        } else if (next === 'calendar') {
-          // Focus the calendar so its own handler takes over; the CalendarPanel
-          // also focuses itself via its focusedPanel effect as a backstop. (#285)
-          ;(document.activeElement as HTMLElement)?.blur()
-          requestAnimationFrame(() => {
-            document
-              .querySelector<HTMLElement>('[data-calendar-panel]')
-              ?.focus({ preventScroll: true })
-          })
-        } else {
-          // Steal focus away from the editor so it stops processing keys
-          ;(document.activeElement as HTMLElement)?.blur()
-          requestAnimationFrame(() => {
-            const selector =
-              next === 'sidebar'
-                ? '[data-sidebar-idx]'
-                : next === 'notelist'
-                  ? '[data-notelist-idx]'
-                  : '[data-connections-idx]'
-            const datasetKey =
-              next === 'sidebar'
-                ? 'sidebarIdx' as const
-                : next === 'notelist'
-                  ? 'notelistIdx' as const
-                  : 'connectionsIdx' as const
-            const cursorIndex =
-              next === 'sidebar'
-                ? state.sidebarCursorIndex
-                : next === 'notelist'
-                  ? state.noteListCursorIndex
-                  : state.connectionsCursorIndex
-            const setIndex =
-              next === 'sidebar'
-                ? state.setSidebarCursorIndex
-                : next === 'notelist'
-                  ? state.setNoteListCursorIndex
-                  : state.setConnectionsCursorIndex
-            const items = getIndexedElements(selector, datasetKey)
-            if (items.length > 0) {
-              const pos = findPositionByIndex(items, datasetKey, cursorIndex)
-              scrollToIndexedElement(items[pos], datasetKey, setIndex)
-            }
-          })
-        }
+        // Focusing is shared with the always-on `Alt+hjkl` path so both walk the
+        // same panels and land the same way. (#477)
+        focusPanel(next, direction === 'left' ? 'h' : 'l')
         return
       }
 
@@ -1134,6 +1081,11 @@ export function VimNav(): JSX.Element | null {
 
       if (state.focusedPanel === 'comments') {
         handleCommentsKey(e, state)
+        return
+      }
+
+      if (state.focusedPanel === 'outline') {
+        handleOutlineKey(e, state)
         return
       }
 
@@ -1550,6 +1502,85 @@ export function VimNav(): JSX.Element | null {
       state.setConnectionPreview(null)
       focusEditor()
       return
+    }
+  }
+
+  /**
+   * Outline panel navigation, mirroring the connections panel: j/k (or the
+   * arrows) walk the headings, Enter / l jumps the editor to the one under the
+   * cursor, h / Escape hands focus back. Before #477 the Outline was the one
+   * right-side panel keyboard navigation couldn't reach at all.
+   */
+  function handleOutlineKey(e: KeyboardEvent, state: ReturnType<typeof useStore.getState>): void {
+    const key = e.key
+    const overrides = state.keymapOverrides
+    const target = e.target instanceof HTMLElement ? e.target : null
+    // The heading filter is a real text field — let it keep its own keys.
+    if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return
+
+    const items = getIndexedElements('[data-outline-idx]', 'outlineIdx')
+    const max = items.length - 1
+    const currentPos = findPositionByIndex(items, 'outlineIdx', state.outlineCursorIndex)
+    const wantsHandledKey =
+      matchesSequenceToken(e, overrides, 'nav.moveDown') ||
+      matchesSequenceToken(e, overrides, 'nav.moveUp') ||
+      matchesSequenceToken(e, overrides, 'nav.jumpBottom') ||
+      sequenceTokenFromEvent(e) === getSequenceTokens(overrides, 'nav.jumpTop')[0] ||
+      matchesSequenceToken(e, overrides, 'nav.openSideItem') ||
+      matchesSequenceToken(e, overrides, 'nav.back') ||
+      key === 'Enter' ||
+      key === 'Escape' ||
+      key === 'ArrowDown' ||
+      key === 'ArrowUp' ||
+      key === 'ArrowLeft' ||
+      key === 'ArrowRight'
+    if (!wantsHandledKey) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+
+    if (items.length === 0) {
+      if (key === 'Escape' || matchesSequenceToken(e, overrides, 'nav.back') || key === 'ArrowLeft') {
+        focusEditor()
+      }
+      return
+    }
+
+    if (matchesSequenceToken(e, overrides, 'nav.moveDown') || key === 'ArrowDown') {
+      scrollToIndexedElement(items[Math.min(currentPos + 1, max)], 'outlineIdx', state.setOutlineCursorIndex)
+      return
+    }
+    if (matchesSequenceToken(e, overrides, 'nav.moveUp') || key === 'ArrowUp') {
+      scrollToIndexedElement(items[Math.max(currentPos - 1, 0)], 'outlineIdx', state.setOutlineCursorIndex)
+      return
+    }
+    if (matchesSequenceToken(e, overrides, 'nav.jumpBottom')) {
+      scrollToIndexedElement(items[max], 'outlineIdx', state.setOutlineCursorIndex)
+      return
+    }
+    if (
+      advanceSequence(
+        e,
+        getKeymapBinding(overrides, 'nav.jumpTop'),
+        jumpTopPending,
+        jumpTopTimer,
+        () => scrollToIndexedElement(items[0], 'outlineIdx', state.setOutlineCursorIndex),
+        () => {
+          e.preventDefault()
+          e.stopImmediatePropagation()
+        },
+        300
+      )
+    ) {
+      return
+    }
+    if (key === 'Enter' || matchesSequenceToken(e, overrides, 'nav.openSideItem') || key === 'ArrowRight') {
+      // The row owns the jump (EditorPane wires it to its own pane's view), so
+      // click it rather than re-deriving the target line here.
+      items[currentPos]?.click()
+      return
+    }
+    if (matchesSequenceToken(e, overrides, 'nav.back') || key === 'ArrowLeft' || key === 'Escape') {
+      focusEditor()
     }
   }
 
