@@ -56,6 +56,29 @@ describe('toggleWrap', () => {
     expect(view.state.selection.main.head).toBe(3) // between == and ==
   })
 
+  it('moves past the closing marker when toggling off an active empty-selection wrap', () => {
+    const view = mount('**bold** text', 6, 6) // cursor before closing **
+    toggleWrap(view, '**')
+    expect(view.state.doc.toString()).toBe('**bold** text')
+    expect(view.state.selection.main.empty).toBe(true)
+    expect(view.state.selection.main.head).toBe(8)
+  })
+
+  it('removes an untouched empty pair when pressing the shortcut again', () => {
+    const view = mount('****', 2, 2) // between the opening and closing **
+    toggleWrap(view, '**')
+    expect(view.state.doc.toString()).toBe('')
+    expect(view.state.selection.main.empty).toBe(true)
+    expect(view.state.selection.main.head).toBe(0)
+  })
+
+  it('does not treat a cursor before a later opening marker as active formatting', () => {
+    const view = mount('**done** **next**', 9, 9) // cursor before the second opening **
+    toggleWrap(view, '**')
+    expect(view.state.doc.toString()).toBe('**done** ******next**')
+    expect(view.state.selection.main.head).toBe(11)
+  })
+
   it('works for the other markers', () => {
     for (const [marker, expected] of [
       ['~~', 'a ~~b~~ c'],

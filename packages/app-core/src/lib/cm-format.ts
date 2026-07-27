@@ -7,6 +7,23 @@
 import { EditorSelection, type EditorState, type TransactionSpec } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 
+function isInsideUnclosedMarker(text: string, marker: string): boolean {
+  let count = 0
+  let index = 0
+  while (index < text.length) {
+    const found = text.indexOf(marker, index)
+    if (found === -1) break
+    if (
+      marker !== '*' ||
+      (text[found - 1] !== '*' && text[found + marker.length] !== '*')
+    ) {
+      count++
+    }
+    index = found + marker.length
+  }
+  return count % 2 === 1
+}
+
 // Symmetric inline markers the formatting shortcuts insert empty (`toggleWrap`
 // drops the cursor between them). Ordered longest-first so `**|**` matches `**`
 // (bold) before `*` (italic), and `~~`/`==` before nothing shorter. (#468)
@@ -48,6 +65,31 @@ export function toggleWrap(view: EditorView, marker: string): boolean {
     view.state.changeByRange((range) => {
       const { from, to } = range
       if (from === to) {
+        const before = view.state.sliceDoc(Math.max(0, from - m.length), from)
+        const after = view.state.sliceDoc(from, Math.min(view.state.doc.length, from + m.length))
+
+        if (after === m) {
+          if (before === m) {
+            // Empty pair: pressing the shortcut again removes the markers.
+            return {
+              changes: { from: from - m.length, to: from + m.length, insert: '' },
+              range: EditorSelection.cursor(from - m.length)
+            }
+          }
+
+          const line = view.state.doc.lineAt(from)
+          const lineBefore = view.state.sliceDoc(line.from, from)
+          if (isInsideUnclosedMarker(lineBefore, m)) {
+            // Cursor is just before the closing marker from a previously inserted
+            // pair. Treat the shortcut as leaving/toggling off formatting instead
+            // of inserting another marker pair inside it.
+            return {
+              changes: [],
+              range: EditorSelection.cursor(from + m.length)
+            }
+          }
+        }
+
         // No selection: insert the pair and drop the cursor between them.
         return {
           changes: { from, insert: m + m },
