@@ -1,3 +1,4 @@
+import { parseFrontmatterFields, unquote } from './frontmatter'
 import type { NoteFolder } from './ipc'
 import { FENCE_RE, TASK_LINE_RE } from './tasklists'
 
@@ -97,18 +98,6 @@ interface NoteDefaults {
 }
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/
-
-function unquote(v: string): string {
-  const trimmed = v.trim()
-  if (trimmed.length >= 2) {
-    const first = trimmed[0]
-    const last = trimmed[trimmed.length - 1]
-    if ((first === '"' || first === "'") && first === last) {
-      return trimmed.slice(1, -1)
-    }
-  }
-  return trimmed
-}
 
 function normalizePriority(raw: string | undefined): TaskPriority | undefined {
   if (!raw) return undefined
@@ -341,48 +330,6 @@ const DONE_STATUSES = new Set(['done', 'complete', 'completed', 'x'])
  *  (#450). Kept out of the active/done buckets, collected under Cancelled. */
 export const CANCELLED_STATUSES = new Set(['cancelled', 'canceled'])
 
-/** Parse a leading frontmatter block into flat fields, handling scalars, inline
- *  arrays (`tags: [a, b]`) and block lists (`tags:` then `  - a`). Keys are
- *  lower-cased; values are a string, or string[] for a list. Best-effort and
- *  never throws — just enough YAML for task files, not a full parser. */
-function parseTaskFrontmatter(block: string): Record<string, string | string[]> {
-  const data: Record<string, string | string[]> = {}
-  let listKey: string | null = null
-  for (const rawLine of block.split('\n')) {
-    if (!rawLine.trim() || rawLine.trim().startsWith('#')) continue
-    const item = rawLine.match(/^\s*-\s+(.*)$/)
-    if (listKey && /^\s/.test(rawLine) && item) {
-      const arr = data[listKey]
-      if (Array.isArray(arr)) arr.push(unquote(item[1]))
-      continue
-    }
-    const kv = rawLine.match(/^([A-Za-z0-9_][\w-]*)\s*:\s*(.*)$/)
-    if (!kv) {
-      listKey = null
-      continue
-    }
-    const key = kv[1].toLowerCase()
-    const rest = kv[2].trim()
-    if (rest === '') {
-      // Bare key: a block list may follow on indented `- item` lines.
-      listKey = key
-      data[key] = []
-      continue
-    }
-    listKey = null
-    if (rest.startsWith('[') && rest.endsWith(']')) {
-      data[key] = rest
-        .slice(1, -1)
-        .split(',')
-        .map((s) => unquote(s))
-        .filter((s) => s.length > 0)
-    } else {
-      data[key] = unquote(rest)
-    }
-  }
-  return data
-}
-
 function asArray(v: string | string[] | undefined): string[] {
   if (v == null) return []
   return Array.isArray(v) ? v : [v]
@@ -404,7 +351,7 @@ export function parseTaskFile(body: string, ctx: ParseTasksContext): VaultTask |
   const normalized = body.replace(/\r\n/g, '\n')
   const m = normalized.match(FRONTMATTER_RE)
   if (!m) return null
-  const fm = parseTaskFrontmatter(m[1])
+  const fm = parseFrontmatterFields(m[1])
 
   const tags = asArray(fm.tags).map((t) => t.replace(/^#/, '').toLowerCase())
   if (!tags.includes(TASK_FILE_TAG)) return null

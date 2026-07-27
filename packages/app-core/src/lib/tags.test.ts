@@ -33,6 +33,14 @@ describe('extractTags — code fences are never scanned for tags (#293)', () => 
     ])
   })
 
+  it('splits a bare frontmatter scalar into separate tags', () => {
+    // `tags: daily, work` is two tags everywhere else that reads this field,
+    // and a tag can hold neither a comma nor a space. (#444)
+    expect(extractTags('---\ntags: daily, work\n---\nbody')).toEqual(['daily', 'work'])
+    expect(extractTags('---\ntags: solo\n---\nbody')).toEqual(['solo'])
+    expect(extractTags('---\ntags: "#quoted two"\n---\nbody')).toEqual(['quoted', 'two'])
+  })
+
   it('supports block-list frontmatter tags', () => {
     expect(extractTags('---\ntags:\n  - daily\n  - "#log"\n---\n\nbody')).toEqual(['daily', 'log'])
   })

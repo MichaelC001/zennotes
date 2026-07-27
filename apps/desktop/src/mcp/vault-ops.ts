@@ -403,12 +403,18 @@ function stripCodeContent(body: string): string {
   return lines.join('\n').replace(/`[^`\n]*`/g, ' ')
 }
 
+/** Frontmatter `tags` plus inline `#tags`. A bare scalar splits on commas and
+ *  whitespace, since `tags: daily, work` is two tags and a tag can contain
+ *  neither. Kept in sync with `frontmatterTags` in
+ *  packages/shared-domain/src/frontmatter.ts (#444). */
 function extractTags(body: string): string[] {
   const seen = new Set<string>()
   const fm = body.match(FRONTMATTER_RE)
-  for (const tag of asArray(fm ? parseTaskFrontmatter(fm[1] ?? '').tags : undefined)) {
-    const normalized = tag.trim().replace(/^#/, '')
-    if (normalized) seen.add(normalized)
+  for (const raw of asArray(fm ? parseTaskFrontmatter(fm[1] ?? '').tags : undefined)) {
+    for (const part of raw.trim().split(/[,\s]+/)) {
+      const normalized = part.replace(/^#/, '').trim()
+      if (normalized) seen.add(normalized)
+    }
   }
 
   const markdownBody = body.replace(FRONTMATTER_RE, '')
@@ -1049,7 +1055,7 @@ const CANCELLED_STATUSES = new Set(['cancelled', 'canceled'])
  *  arrays (`tags: [a, b]`) and block lists (`tags:` then `  - a`). Keys are
  *  lower-cased; values are a string, or string[] for a list. Best-effort and
  *  never throws — just enough YAML for task files, not a full parser. Kept in
- *  sync with parseTaskFrontmatter in packages/shared-domain/src/tasks.ts. */
+ *  sync with parseFrontmatterFields in packages/shared-domain/src/frontmatter.ts. */
 function parseTaskFrontmatter(block: string): Record<string, string | string[]> {
   const data: Record<string, string | string[]> = {}
   let listKey: string | null = null
