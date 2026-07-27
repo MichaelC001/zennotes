@@ -290,8 +290,34 @@ function sameTaskIdentity(a: VaultTask, b: VaultTask): boolean {
   return a.sourcePath === b.sourcePath && a.taskIndex === b.taskIndex
 }
 
-function taskIdentityKey(task: VaultTask): string {
+/** Identity of a task on the board: the note it lives in plus its position in
+ *  that note. Survives a column move, which only rewrites the task's tokens. */
+export function taskIdentityKey(task: VaultTask): string {
   return `${task.sourcePath}\0${task.taskIndex}`
+}
+
+/**
+ * Where the keyboard cursor belongs once a card has moved to another column:
+ * on the moved card itself, wherever the rebuilt board put it.
+ *
+ * Index arithmetic is not enough. The card rarely lands at the top of its new
+ * column (columns sort by priority and due date), and when the last card
+ * leaves a discovered-value column that column disappears, shifting every
+ * column to its right down one — so the old "target column index, card 0"
+ * could land on a different task entirely, which the next Shift+H/L would then
+ * move by mistake. (#492)
+ */
+export function cursorAfterCardMove(
+  columns: Column[],
+  targetColumnId: string,
+  movedTaskKey: string
+): { colIdx: number; cardIdx: number } {
+  const colIdx = columns.findIndex((column) => column.id === targetColumnId)
+  if (colIdx < 0) return { colIdx: Math.max(0, columns.length - 1), cardIdx: 0 }
+  const cardIdx = columns[colIdx].tasks.findIndex(
+    (task) => taskIdentityKey(task) === movedTaskKey
+  )
+  return { colIdx, cardIdx: Math.max(0, cardIdx) }
 }
 
 function sameFields(a: Record<string, string> = {}, b: Record<string, string> = {}): boolean {
@@ -595,7 +621,8 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
       movable.splice(to, 0, moved)
       setKanbanColumnOrder(groupBy, movable)
       setColIdx(to)
-      setCardIdx(0)
+      // Reordering columns doesn't touch the cards inside them, so the focused
+      // card travels with its column rather than being dropped for card 0.
     },
     [colIdx, groupBy, setKanbanColumnOrder]
   )
@@ -865,9 +892,14 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
       const targetColumn = cols[clamped]
       const mutations = dropMutationsFor(groupBy, targetColumn.id, task, today)
       if (!mutations || mutations.length === 0) return
+      const movedKey = taskIdentityKey(task)
       moveTaskOnBoard(task, mutations, targetColumn.id, null)
-      setColIdx(clamped)
-      setCardIdx(0)
+      // The board rebuild is flushed synchronously, so columnsRef already holds
+      // the post-move columns: read the card's new home out of them instead of
+      // assuming it sits at the top of the column we aimed at. (#492)
+      const next = cursorAfterCardMove(columnsRef.current, targetColumn.id, movedKey)
+      setColIdx(next.colIdx)
+      setCardIdx(next.cardIdx)
     },
     [cardIdx, colIdx, dndEnabled, groupBy, moveTaskOnBoard, today]
   )

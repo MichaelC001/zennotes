@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { arrangeColumns, NO_VALUE_COLUMN_ID, type Column } from './TasksKanban'
+import type { VaultTask } from '@shared/tasks'
+import {
+  arrangeColumns,
+  cursorAfterCardMove,
+  NO_VALUE_COLUMN_ID,
+  taskIdentityKey,
+  type Column
+} from './TasksKanban'
 
 function col(id: string): Column {
   return { id, label: id, tasks: [] }
@@ -46,5 +53,60 @@ describe('arrangeColumns', () => {
     const built = [col('backlog'), col('done')]
     // 'review' was deleted from the vault but lingers in the saved order.
     expect(ids(arrangeColumns(built, ['review', 'done', 'backlog']))).toEqual(['done', 'backlog'])
+  })
+})
+
+function task(sourcePath: string, taskIndex: number, text = 'task'): VaultTask {
+  return { text, checked: false, sourcePath, taskIndex } as unknown as VaultTask
+}
+
+function colWith(id: string, tasks: VaultTask[]): Column {
+  return { id, label: id, tasks }
+}
+
+describe('cursorAfterCardMove (#492)', () => {
+  const mover = task('inbox/board.md', 2, 'Mover')
+  const anchor = task('inbox/board.md', 0, 'Anchor')
+
+  it('lands on the moved card, not on the top of its new column', () => {
+    // Columns sort by priority and due date, so a moved card usually arrives
+    // below the cards already there.
+    const columns = [colWith('backlog', []), colWith('doing', [anchor, mover])]
+    expect(cursorAfterCardMove(columns, 'doing', taskIdentityKey(mover))).toEqual({
+      colIdx: 1,
+      cardIdx: 1
+    })
+  })
+
+  it('finds the target column by id after an emptied column disappears', () => {
+    // `backlog` held only the moved card, so the rebuilt board drops it and
+    // every column to its right shifts down one index.
+    const columns = [colWith('doing', [anchor, mover]), colWith('review', [])]
+    expect(cursorAfterCardMove(columns, 'doing', taskIdentityKey(mover))).toEqual({
+      colIdx: 0,
+      cardIdx: 1
+    })
+  })
+
+  it('keeps the cursor in the target column when the card is not found there', () => {
+    const columns = [colWith('backlog', []), colWith('doing', [anchor])]
+    expect(cursorAfterCardMove(columns, 'doing', taskIdentityKey(mover))).toEqual({
+      colIdx: 1,
+      cardIdx: 0
+    })
+  })
+
+  it('clamps to the last column when the target is gone entirely', () => {
+    const columns = [colWith('backlog', []), colWith('doing', [anchor])]
+    expect(cursorAfterCardMove(columns, 'vanished', taskIdentityKey(mover))).toEqual({
+      colIdx: 1,
+      cardIdx: 0
+    })
+  })
+
+  it('distinguishes two tasks from the same note', () => {
+    const columns = [colWith('doing', [anchor, mover])]
+    expect(cursorAfterCardMove(columns, 'doing', taskIdentityKey(anchor)).cardIdx).toBe(0)
+    expect(cursorAfterCardMove(columns, 'doing', taskIdentityKey(mover)).cardIdx).toBe(1)
   })
 })
