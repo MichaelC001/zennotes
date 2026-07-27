@@ -11,6 +11,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { normalizeBaseUrl } from '../main/remote/connection'
 
 export type NoteFolder = 'inbox' | 'quick' | 'archive' | 'trash'
 const FOLDERS: NoteFolder[] = ['inbox', 'quick', 'archive', 'trash']
@@ -269,6 +270,69 @@ export async function readKnownVaultsFromConfig(): Promise<KnownVault[]> {
   }
 
   out.sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0))
+  return out
+}
+
+export interface KnownRemoteProfile {
+  id: string
+  name: string
+  baseUrl: string
+  authToken: string | null
+  lastConnectedAt: number | null
+}
+
+/**
+ * Every ZenNotes server the app has been connected to, newest first. The
+ * desktop app writes these under `remoteWorkspaceProfiles` when you use
+ * Settings → Vault → "Connect to Server..."; the CLI reads the same list so
+ * `--server <name>` names a server you already set up in the GUI (#493).
+ *
+ * The legacy single-server `remoteWorkspace` key is folded in too, matching
+ * how the main process migrates it, so a config written before profiles
+ * existed still gives the CLI something to name.
+ */
+export async function readRemoteProfilesFromConfig(): Promise<KnownRemoteProfile[]> {
+  const parsed = await readConfigFile()
+  const out: KnownRemoteProfile[] = []
+  const seenBaseUrls = new Set<string>()
+
+  const rawList = Array.isArray(parsed?.remoteWorkspaceProfiles)
+    ? parsed.remoteWorkspaceProfiles
+    : []
+  for (const entry of rawList) {
+    if (!entry || typeof entry !== 'object') continue
+    const { id, name, baseUrl, authToken, lastConnectedAt } = entry as Record<string, unknown>
+    if (typeof baseUrl !== 'string' || !baseUrl.trim()) continue
+    if (typeof name !== 'string' || !name.trim()) continue
+    const normalizedUrl = normalizeBaseUrl(baseUrl)
+    seenBaseUrls.add(normalizedUrl)
+    out.push({
+      id: typeof id === 'string' && id.trim() ? id : normalizedUrl,
+      name: name.trim(),
+      baseUrl: normalizedUrl,
+      authToken: typeof authToken === 'string' && authToken.trim() ? authToken : null,
+      lastConnectedAt: typeof lastConnectedAt === 'number' ? lastConnectedAt : null
+    })
+  }
+
+  const legacy = parsed?.remoteWorkspace
+  if (legacy && typeof legacy === 'object') {
+    const { baseUrl, authToken } = legacy as Record<string, unknown>
+    if (typeof baseUrl === 'string' && baseUrl.trim()) {
+      const normalizedUrl = normalizeBaseUrl(baseUrl)
+      if (!seenBaseUrls.has(normalizedUrl)) {
+        out.push({
+          id: normalizedUrl,
+          name: 'ZenNotes Server',
+          baseUrl: normalizedUrl,
+          authToken: typeof authToken === 'string' && authToken.trim() ? authToken : null,
+          lastConnectedAt: null
+        })
+      }
+    }
+  }
+
+  out.sort((a, b) => (b.lastConnectedAt ?? 0) - (a.lastConnectedAt ?? 0))
   return out
 }
 
@@ -1215,10 +1279,7 @@ export async function scanAllTasks(root: string): Promise<VaultTask[]> {
  *  toggle flips its frontmatter `status` (and `completedDate`) instead of an
  *  inline checkbox. */
 export async function toggleTask(root: string, taskId: string): Promise<VaultTask | null> {
-  const hashIdx = taskId.lastIndexOf('#')
-  if (hashIdx < 0) throw new Error(`Malformed task id: ${taskId}`)
-  const rel = taskId.slice(0, hashIdx)
-  const indexStr = taskId.slice(hashIdx + 1)
+  const { rel, indexStr } = splitTaskId(taskId)
 
   // File task: metadata lives in frontmatter, not a `- [ ]` checkbox line.
   if (indexStr === 'task') {
@@ -1233,25 +1294,59 @@ export async function toggleTask(root: string, taskId: string): Promise<VaultTas
     }
     const current = parseTaskFile(body, ctx)
     if (!current) return null
-    // Flip: if currently done, reopen it; otherwise mark it done.
-    let next: string
-    if (current.checked) {
-      next = setFrontmatterScalar(body, 'status', 'open')
-      next = setFrontmatterScalar(next, 'completedDate', null)
-    } else {
-      next = setFrontmatterScalar(body, 'status', 'done')
-      next = setFrontmatterScalar(next, 'completedDate', todayIsoLocal())
-    }
+    const next = toggleFileTaskInBody(body, current.checked)
     await fs.writeFile(abs, next, 'utf8')
     return parseTaskFile(next, ctx)
   }
 
+  const targetIndex = parseTaskIndex(taskId, indexStr)
+  const abs = resolveSafe(root, rel)
+  const body = await fs.readFile(abs, 'utf8')
+  const newBody = toggleTaskInBody(body, targetIndex)
+  if (newBody == null) return null
+  await fs.writeFile(abs, newBody, 'utf8')
+  const folder = folderOf(root, abs)
+  if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
+  const parsed = parseTasksFromBody(newBody, {
+    path: toPosix(path.relative(root, abs)),
+    title: path.basename(abs, path.extname(abs)),
+    folder
+  })
+  return parsed[targetIndex] ?? null
+}
+
+/** Split "<path>#<taskIndex>" into its halves. `indexStr` is the literal
+ *  `task` for a whole-note file task. */
+export function splitTaskId(taskId: string): { rel: string; indexStr: string } {
+  const hashIdx = taskId.lastIndexOf('#')
+  if (hashIdx < 0) throw new Error(`Malformed task id: ${taskId}`)
+  return { rel: taskId.slice(0, hashIdx), indexStr: taskId.slice(hashIdx + 1) }
+}
+
+/** Flip a file task's frontmatter `status` (and its `completedDate`). */
+export function toggleFileTaskInBody(body: string, currentlyChecked: boolean): string {
+  // If it is currently done, reopen it; otherwise mark it done.
+  if (currentlyChecked) {
+    const reopened = setFrontmatterScalar(body, 'status', 'open')
+    return setFrontmatterScalar(reopened, 'completedDate', null)
+  }
+  const done = setFrontmatterScalar(body, 'status', 'done')
+  return setFrontmatterScalar(done, 'completedDate', todayIsoLocal())
+}
+
+/** The `#<n>` half of a task id, validated. Throws the same way for a local
+ *  and a remote vault, so a typo reads identically either side. */
+export function parseTaskIndex(taskId: string, indexStr: string): number {
   const targetIndex = Number.parseInt(indexStr, 10)
   if (!Number.isInteger(targetIndex) || targetIndex < 0) {
     throw new Error(`Malformed task index in id: ${taskId}`)
   }
-  const abs = resolveSafe(root, rel)
-  const body = await fs.readFile(abs, 'utf8')
+  return targetIndex
+}
+
+/** Flip the nth `- [ ]` checkbox in a body, skipping fenced code. Null when
+ *  the body holds no task at that index — the caller reports it as gone. */
+export function toggleTaskInBody(body: string, targetIndex: number): string | null {
   const normalized = body.replace(/\r\n/g, '\n')
   const lines = normalized.split('\n')
   let taskIndex = 0
@@ -1299,16 +1394,7 @@ export async function toggleTask(root: string, taskId: string): Promise<VaultTas
     }
   )
   lines[lineNumber] = toggled
-  const newBody = lines.join('\n') + (body.endsWith('\n') && !normalized.endsWith('\n') ? '\n' : '')
-  await fs.writeFile(abs, newBody, 'utf8')
-  const folder = folderOf(root, abs)
-  if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
-  const parsed = parseTasksFromBody(newBody, {
-    path: toPosix(path.relative(root, abs)),
-    title: path.basename(abs, path.extname(abs)),
-    folder
-  })
-  return parsed[targetIndex] ?? null
+  return lines.join('\n') + (body.endsWith('\n') && !normalized.endsWith('\n') ? '\n' : '')
 }
 
 /* ---------- Convenience edits ---------------------------------------- */
@@ -1317,32 +1403,43 @@ function trimTrailingNewlines(s: string): string {
   return s.replace(/\n+$/g, '')
 }
 
+/* The body transforms below are exported as pure functions so the `zn` CLI's
+ * remote backend can apply the identical edit to a body it fetched over HTTP
+ * (#493). A remote note is read and written through the server's API, but the
+ * edit in between has to be the same one a local note gets, or `zn append`
+ * would mean two different things depending on where the vault lives. */
+
+/** The note body with `text` added after a blank line. */
+export function appendToBody(body: string, text: string): string {
+  const normalized = body.replace(/\r\n/g, '\n')
+  const sep = normalized.endsWith('\n') || normalized.length === 0 ? '' : '\n'
+  return (
+    normalized + sep + (normalized.length > 0 ? '\n' : '') + trimTrailingNewlines(text) + '\n'
+  )
+}
+
 export async function appendToNote(root: string, rel: string, text: string): Promise<NoteMeta> {
   const abs = resolveSafe(root, rel)
   const body = await fs.readFile(abs, 'utf8')
-  const normalized = body.replace(/\r\n/g, '\n')
-  const sep = normalized.endsWith('\n') || normalized.length === 0 ? '' : '\n'
-  const next = normalized + sep + (normalized.length > 0 ? '\n' : '') + trimTrailingNewlines(text) + '\n'
-  await fs.writeFile(abs, next, 'utf8')
+  await fs.writeFile(abs, appendToBody(body, text), 'utf8')
   const folder = folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
 }
 
-export async function prependToNote(root: string, rel: string, text: string): Promise<NoteMeta> {
-  const abs = resolveSafe(root, rel)
-  const body = await fs.readFile(abs, 'utf8')
+/** The note body with `text` inserted at the top, below any frontmatter. */
+export function prependToBody(body: string, text: string): string {
   const normalized = body.replace(/\r\n/g, '\n')
   const fm = normalized.match(FRONTMATTER_RE)
   const snippet = trimTrailingNewlines(text) + '\n\n'
-  let next: string
-  if (fm) {
-    const after = normalized.slice(fm[0].length)
-    next = fm[0] + snippet + after
-  } else {
-    next = snippet + normalized
-  }
-  await fs.writeFile(abs, next, 'utf8')
+  if (fm) return fm[0] + snippet + normalized.slice(fm[0].length)
+  return snippet + normalized
+}
+
+export async function prependToNote(root: string, rel: string, text: string): Promise<NoteMeta> {
+  const abs = resolveSafe(root, rel)
+  const body = await fs.readFile(abs, 'utf8')
+  await fs.writeFile(abs, prependToBody(body, text), 'utf8')
   const folder = folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
@@ -1406,14 +1503,19 @@ export async function insertAtLine(
 
 export async function backlinks(root: string, rel: string): Promise<NoteMeta[]> {
   const abs = resolveSafe(root, rel)
-  const targetTitle = path.basename(abs, path.extname(abs)).toLowerCase()
   const all = await listNotes(root)
-  const refs: NoteMeta[] = []
-  for (const meta of all) {
-    if (meta.path === toPosix(path.relative(root, abs))) continue
-    if (meta.wikilinks.some((w) => w.toLowerCase() === targetTitle)) {
-      refs.push(meta)
-    }
-  }
-  return refs
+  return backlinksIn(all, toPosix(path.relative(root, abs)))
+}
+
+/** Which of `notes` wikilink to the note at `relPath` (a vault-relative posix
+ *  path), matching on title and never counting the note itself. Pure so the
+ *  CLI's remote backend gets the same answer from a listing it fetched. */
+export function backlinksIn(notes: NoteMeta[], relPath: string): NoteMeta[] {
+  const fileName = relPath.split('/').pop() ?? relPath
+  const dot = fileName.lastIndexOf('.')
+  const targetTitle = (dot > 0 ? fileName.slice(0, dot) : fileName).toLowerCase()
+  return notes.filter(
+    (meta) =>
+      meta.path !== relPath && meta.wikilinks.some((w) => w.toLowerCase() === targetTitle)
+  )
 }

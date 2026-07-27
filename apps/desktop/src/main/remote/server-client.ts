@@ -20,6 +20,11 @@ import type {
 } from '@shared/ipc'
 import type { VaultTask } from '@shared/tasks'
 import WebSocket from 'ws'
+import {
+  connectionErrorMessage,
+  normalizeBaseUrl,
+  requestErrorMessage
+} from './connection'
 
 export interface RemoteServerClientOptions {
   baseUrl: string
@@ -28,32 +33,8 @@ export interface RemoteServerClientOptions {
 
 type JsonRequestInit = Omit<RequestInit, 'body'> & { body?: unknown }
 
-/**
- * Message for a transport-level failure — the request never got a response.
- *
- * On macOS 15+ a connection to anything on the local network needs the Local
- * Network privacy permission. Without it the OS drops the attempt before a
- * single packet leaves the machine, which surfaces here as a bare "fetch
- * failed" and looks exactly like a server that is down. The app now declares
- * `NSLocalNetworkUsageDescription` so macOS prompts on first use, but a user
- * who dismissed that prompt lands back here — so say where to turn it on. (#481)
- */
-export function connectionErrorMessage(
-  baseUrl: string,
-  error: unknown,
-  platform: NodeJS.Platform = process.platform
-): string {
-  const detail =
-    error instanceof Error && error.message ? ` Could not reach the server: ${error.message}.` : ''
-  const localNetworkHint =
-    platform === 'darwin'
-      ? ' If the server is on your local network, check that ZenNotes is allowed under System Settings → Privacy & Security → Local Network.'
-      : ''
-  return (
-    `Could not connect to the ZenNotes server at ${baseUrl}. ` +
-    `Make sure the server is running and the URL is correct.${detail}${localNetworkHint}`
-  )
-}
+// Re-exported for the callers that grew up importing it from here.
+export { connectionErrorMessage }
 
 export class RemoteServerClient {
   readonly baseUrl: string
@@ -347,22 +328,9 @@ export class RemoteServerClient {
     }
     if (!response.ok) {
       const text = await response.text().catch(() => '')
-      if (response.status === 401) {
-        throw new Error(
-          `The ZenNotes server rejected the connection. Check the auth token for ${this.baseUrl} and try again.`
-        )
-      }
-      throw new Error(
-        `Remote server request failed (${response.status} ${response.statusText}) for ${path}${text ? `: ${text}` : ''}`
-      )
+      throw new Error(requestErrorMessage(this.baseUrl, path, response, text))
     }
     if (response.status === 204) return undefined as T
     return (await response.json()) as T
   }
-}
-
-function normalizeBaseUrl(value: string): string {
-  const trimmed = value.trim()
-  const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
-  return normalized.replace(/\/+$/, '')
 }
