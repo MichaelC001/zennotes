@@ -25,6 +25,12 @@ export interface PromptOptions {
    * The typed value stays reachable with ArrowUp / Ctrl+K (for a new path).
    */
   autoHighlightFirst?: boolean
+  /**
+   * The value is a technical string (URL, auth token, path) — turn off the
+   * touch keyboard's auto-capitalize/correct, which corrupts such input on
+   * iOS ("zn-…" becomes "Zn-…"). No effect with hardware keyboards.
+   */
+  plainInput?: boolean
   /** Return an error string to block submission, or null/undefined to allow. */
   validate?: (value: string) => string | null | undefined
 }
@@ -161,6 +167,9 @@ export function PromptModal({
           ref={inputRef}
           value={value}
           placeholder={options.placeholder}
+          autoCapitalize={options.plainInput ? 'none' : undefined}
+          autoCorrect={options.plainInput ? 'off' : undefined}
+          spellCheck={options.plainInput ? false : undefined}
           onChange={(e) => {
             setValue(e.target.value)
             setError(null)

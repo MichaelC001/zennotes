@@ -3113,7 +3113,8 @@ async function ensureWebServerSession(
     description:
       'This ZenNotes server requires its auth token before notes can be accessed in the browser.',
     placeholder: 'Enter the server auth token',
-    okLabel: 'Sign In'
+    okLabel: 'Sign In',
+    plainInput: true
   })
   if (!token?.trim()) return false
 
@@ -7976,17 +7977,14 @@ export const useStore = create<Store>((set, get) => {
         detail: profile.vaultPath ?? undefined
       }))
       const baseUrl = await promptApp({
-        title: 'Connect to ZenNotes Server',
+        title: 'Connect to Remote Vault',
         description:
-          'Enter the base URL for the ZenNotes server, for example `http://localhost:7878` or `https://notes.example.com`.',
+          "Your ZenNotes server's address, like http://localhost:7878 or https://notes.example.com.",
         initialValue: currentRemote?.baseUrl ?? 'http://localhost:7878',
         placeholder: 'http://localhost:7878',
         okLabel: 'Next',
+        plainInput: true,
         suggestions: profileSuggestions,
-        suggestionsHint:
-          profileSuggestions.length > 0
-            ? 'Saved remote workspaces are suggested here.'
-            : undefined,
         validate: (value) => {
           try {
             // eslint-disable-next-line no-new
@@ -8000,20 +7998,14 @@ export const useStore = create<Store>((set, get) => {
       if (!baseUrl) return
 
       const normalizedBaseUrl = normalizeServerBaseUrl(baseUrl)
-      const matchingBaseProfile =
-        get().remoteWorkspaceProfiles.find(
-          (profile) => normalizeServerBaseUrl(profile.baseUrl) === normalizedBaseUrl
-        ) ?? null
 
       const authToken = await promptApp({
-        title: 'Server Auth Token',
-        description:
-          matchingBaseProfile?.hasCredential
-            ? 'If this server needs a different token than the one already stored for the saved remote, enter it here. Otherwise leave this blank.'
-            : 'If your ZenNotes server requires a bearer token, enter it here. Otherwise leave this blank.',
+        title: 'Auth Token',
+        description: "The server's auth token — leave blank if it doesn't need one.",
         placeholder: 'Optional',
         okLabel: 'Connect',
-        allowEmptySubmit: true
+        allowEmptySubmit: true,
+        plainInput: true
       })
       if (authToken == null) return
 
