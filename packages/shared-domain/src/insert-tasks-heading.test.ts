@@ -68,4 +68,51 @@ describe('insertTasksUnderTasksHeading (#452)', () => {
     const body = '## Tasks\n\n- [ ] a\n'
     expect(insertTasksUnderTasksHeading(body, [])).toBe(body)
   })
+
+  describe('a horizontal rule ends the section (#483)', () => {
+    it('inserts above a rule that follows the task list, matching the issue example', () => {
+      const body = '## Tasks\n- [ ] Task 1\n- [ ] Task 2\n\n-----\n\n## Notes\n'
+      const out = insertTasksUnderTasksHeading(body, ['- [ ] Forwarded task'])
+      expect(out).toBe(
+        '## Tasks\n- [ ] Task 1\n- [ ] Task 2\n- [ ] Forwarded task\n\n-----\n\n## Notes\n'
+      )
+    })
+
+    it('handles every thematic-break spelling', () => {
+      // Daily-note templates separate sections with whichever of these the
+      // author likes; all of them close the Tasks section.
+      for (const rule of ['---', '***', '___', '- - -', '*****', '   ---']) {
+        const body = `## Tasks\n- [ ] Task 1\n\n${rule}\n\n## Notes\n`
+        const out = insertTasksUnderTasksHeading(body, ['- [ ] Forwarded'])
+        expect(out, `rule ${JSON.stringify(rule)}`).toBe(
+          `## Tasks\n- [ ] Task 1\n- [ ] Forwarded\n\n${rule}\n\n## Notes\n`
+        )
+      }
+    })
+
+    it('still appends under Tasks when the rule closes the note', () => {
+      const body = '## Tasks\n- [ ] Task 1\n\n---\n'
+      const out = insertTasksUnderTasksHeading(body, ['- [ ] Forwarded'])
+      expect(out).toBe('## Tasks\n- [ ] Task 1\n- [ ] Forwarded\n\n---\n')
+    })
+
+    it('treats an empty Tasks section followed by a rule as empty', () => {
+      const body = '## Tasks\n\n---\n\n## Notes\n'
+      const out = insertTasksUnderTasksHeading(body, ['- [ ] Forwarded'])
+      expect(out).toBe('## Tasks\n\n- [ ] Forwarded\n---\n\n## Notes\n')
+    })
+
+    it('ignores a rule inside a fenced code block', () => {
+      const body = '## Tasks\n- [ ] Task 1\n\n```md\n---\n```\n\n## Notes\n'
+      const out = insertTasksUnderTasksHeading(body, ['- [ ] Forwarded'])
+      // The fence is still section content, so the task lands after it.
+      expect(out).toBe('## Tasks\n- [ ] Task 1\n\n```md\n---\n```\n- [ ] Forwarded\n\n## Notes\n')
+    })
+
+    it('does not mistake a task line or a short dash run for a rule', () => {
+      const body = '## Tasks\n- [ ] Task 1\n- -\n\n## Notes\n'
+      const out = insertTasksUnderTasksHeading(body, ['- [ ] Forwarded'])
+      expect(out).toBe('## Tasks\n- [ ] Task 1\n- -\n- [ ] Forwarded\n\n## Notes\n')
+    })
+  })
 })

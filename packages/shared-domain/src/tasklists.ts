@@ -432,6 +432,10 @@ export function extractUncheckedTaskBlocks(markdown: string): {
 const TASKS_HEADING_RE = /^ {0,3}(#{1,6})\s+Tasks\s*$/i
 /** Any ATX heading; group 1's length is the level (number of `#`). */
 const ANY_HEADING_RE = /^ {0,3}(#{1,6})\s+/
+/** A CommonMark thematic break: three or more `-`, `*` or `_`, optionally
+ *  spaced, on a line of their own. A `- [ ] task` line can't match, since the
+ *  line must be nothing but the marker character and whitespace. */
+const THEMATIC_BREAK_RE = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/
 
 /**
  * Place forwarded / rolled-over task lines into a destination note body.
@@ -441,9 +445,15 @@ const ANY_HEADING_RE = /^ {0,3}(#{1,6})\s+/
  * after its last non-blank line, before the next heading of the same or a
  * higher level — so forwarded tasks stay grouped with the section rather than
  * landing at the bottom of the note (#452). Otherwise they are appended to the
- * end of the note, the long-standing behaviour. Heading lines inside fenced
- * code blocks are ignored, so a `## Tasks` line in a code sample isn't mistaken
- * for the real heading.
+ * end of the note, the long-standing behaviour.
+ *
+ * A horizontal rule closes the section too, not just a heading. Date-based
+ * templates commonly separate sections with `---`, and taking only headings as
+ * boundaries made the rule itself the section's last line — so forwarded tasks
+ * landed *below* the separator, outside the list they belong to (#483).
+ *
+ * Both heading and rule lines inside fenced code blocks are ignored, so a
+ * `## Tasks` or `---` in a code sample can't be mistaken for structure.
  */
 export function insertTasksUnderTasksHeading(body: string, taskLines: string[]): string {
   if (taskLines.length === 0) return body
@@ -506,6 +516,10 @@ export function insertTasksUnderTasksHeading(body: string, taskLines: string[]):
     if (inFence) continue
     const hm = lines[i].match(ANY_HEADING_RE)
     if (hm && hm[1].length <= headingLevel) {
+      sectionEnd = i
+      break
+    }
+    if (THEMATIC_BREAK_RE.test(lines[i])) {
       sectionEnd = i
       break
     }
