@@ -7,8 +7,10 @@ import {
   clearEditorPendingVimStatus,
   getVisiblePanelsNow,
   hintTargetOpensNote,
-  isEditorInsertMode,
   isEditorFocused,
+  isEditorInsertMode,
+  isEditorVisualMode,
+  jumplistKeepsChord,
   isVimAwaitingArgument,
   resolveNextPanel,
   shouldYieldToHomeNav
@@ -474,14 +476,24 @@ export function VimNav(): JSX.Element | null {
       // Vim jumplist navigation (Ctrl+O back / Ctrl+I forward) is checked BEFORE
       // the inline-format shortcuts below: on Linux/Windows `Mod` is Ctrl, so
       // Vim's forward binding (Ctrl+I) collides with the italic shortcut (Mod+I).
-      // In Vim normal/visual mode the jumplist must win; only in insert mode (or
-      // with Vim off) does Ctrl+I fall through to italic. (#373)
+      // In Vim normal mode the jumplist must win; in insert mode (or with Vim
+      // off) Ctrl+I falls through to italic. (#373)
+      //
+      // Visual mode sides with italic: a selection is standing and every other
+      // format chord (Mod+B and friends) already applies to it, so having this
+      // one jump to another note instead — discarding the selection — was the
+      // odd one out. Ctrl+O keeps its jumplist meaning in visual mode; only the
+      // chord that collides with a format shortcut yields. (#488)
       const wantsJumpBack = matchesSequenceToken(e, overrides, 'vim.historyBack')
       const wantsJumpForward = matchesSequenceToken(e, overrides, 'vim.historyForward')
       if (
         (wantsJumpBack || wantsJumpForward) &&
-        state.vimMode &&
-        !isEditorInsertMode(state.editorViewRef, state.vimMode)
+        jumplistKeepsChord({
+          vimMode: state.vimMode,
+          insertMode: isEditorInsertMode(state.editorViewRef, state.vimMode),
+          visualMode: isEditorVisualMode(state.editorViewRef, state.vimMode),
+          chordIsFormatShortcut: matchesShortcutBinding(e, 'Mod+I')
+        })
       ) {
         e.preventDefault()
         e.stopImmediatePropagation()

@@ -12,6 +12,8 @@ vi.mock('@replit/codemirror-vim', () => ({
 
 import {
   getVisiblePanels,
+  isEditorVisualMode,
+  jumplistKeepsChord,
   getVisiblePanelsNow,
   hintTargetOpensNote,
   isVimAwaitingArgument,
@@ -203,5 +205,62 @@ describe('getVisiblePanels — the focus cycle (#285, #477)', () => {
     // …and back again.
     expect(resolveNextPanel('outline', 'left', panels)).toBe('comments')
     expect(resolveNextPanel('connections', 'left', panels)).toBe('editor')
+  })
+})
+
+describe('isEditorVisualMode (#488 — Ctrl+I italicises a Vim selection)', () => {
+  const view = {} as unknown as EditorView // getCM is mocked, so the view is unused
+
+  it('is true in visual mode, so the format chord can claim Ctrl+I', () => {
+    cmMock.vim = { visualMode: true, insertMode: false }
+    expect(isEditorVisualMode(view, true)).toBe(true)
+  })
+
+  it('is false in normal and insert mode, leaving the jumplist alone', () => {
+    cmMock.vim = { visualMode: false, insertMode: false }
+    expect(isEditorVisualMode(view, false || true)).toBe(false)
+    cmMock.vim = { visualMode: false, insertMode: true }
+    expect(isEditorVisualMode(view, true)).toBe(false)
+  })
+
+  it('is false with Vim mode off, whatever the editor state says', () => {
+    cmMock.vim = { visualMode: true }
+    expect(isEditorVisualMode(view, false)).toBe(false)
+  })
+
+  it('is false with no vim state, and for a null view', () => {
+    cmMock.vim = null
+    expect(isEditorVisualMode(view, true)).toBe(false)
+    expect(isEditorVisualMode(null, true)).toBe(false)
+  })
+})
+
+describe('jumplistKeepsChord (#488 — Ctrl+I italicises a Vim selection)', () => {
+  // On Linux and Windows `Mod` is Ctrl, so Vim's forward jump and the italic
+  // shortcut are the same chord; on macOS they are not.
+  const linux = { chordIsFormatShortcut: true }
+  const mac = { chordIsFormatShortcut: false }
+
+  it('keeps the chord in normal mode, collision or not', () => {
+    expect(jumplistKeepsChord({ vimMode: true, insertMode: false, visualMode: false, ...linux })).toBe(true)
+    expect(jumplistKeepsChord({ vimMode: true, insertMode: false, visualMode: false, ...mac })).toBe(true)
+  })
+
+  it('yields in visual mode where the chord is also the italic shortcut', () => {
+    expect(jumplistKeepsChord({ vimMode: true, insertMode: false, visualMode: true, ...linux })).toBe(false)
+  })
+
+  it('keeps the chord in visual mode where nothing collides (macOS Ctrl+I)', () => {
+    expect(jumplistKeepsChord({ vimMode: true, insertMode: false, visualMode: true, ...mac })).toBe(true)
+  })
+
+  it('yields in insert mode and with Vim off', () => {
+    expect(jumplistKeepsChord({ vimMode: true, insertMode: true, visualMode: false, ...linux })).toBe(false)
+    expect(jumplistKeepsChord({ vimMode: false, insertMode: false, visualMode: false, ...linux })).toBe(false)
+  })
+
+  it('keeps Ctrl+O in visual mode — only the colliding chord yields', () => {
+    // Ctrl+O is never a format shortcut, so it reads as no collision.
+    expect(jumplistKeepsChord({ vimMode: true, insertMode: false, visualMode: true, chordIsFormatShortcut: false })).toBe(true)
   })
 })

@@ -143,6 +143,45 @@ export function isEditorInsertMode(view: EditorView | null, vimMode: boolean): b
 }
 
 /**
+ * True when codemirror-vim is in visual (or visual-line/block) mode — there is
+ * a Vim selection standing, waiting for something to be done to it.
+ *
+ * Used to decide who owns Ctrl+I: with a selection live, italic is what the
+ * chord is for, while the jumplist would throw the selection away. (#488)
+ */
+export function isEditorVisualMode(view: EditorView | null, vimMode: boolean): boolean {
+  if (!view || !vimMode) return false
+  const cm = getCM(view)
+  return cm?.state.vim?.visualMode === true
+}
+
+/**
+ * Whether Vim's jumplist keeps a chord, or hands it to the inline-format
+ * shortcuts.
+ *
+ * The two collide only where `Mod` is Ctrl (Linux and Windows): there, Vim's
+ * forward-jump `Ctrl+I` is also the italic shortcut. Normal mode gives the
+ * jumplist the chord (#373). Visual mode gives it to italic: a selection is
+ * standing, every other format chord already applies to it, and jumping to
+ * another note would throw it away (#488). Insert mode, and Vim off, always
+ * mean format.
+ *
+ * `chordIsFormatShortcut` is what keeps this from costing macOS anything —
+ * there `Ctrl+I` is not the italic shortcut (`Cmd+I` is), so nothing collides
+ * and the jumplist keeps working in every mode.
+ */
+export function jumplistKeepsChord(opts: {
+  vimMode: boolean
+  insertMode: boolean
+  visualMode: boolean
+  chordIsFormatShortcut: boolean
+}): boolean {
+  if (!opts.vimMode || opts.insertMode) return false
+  if (opts.visualMode && opts.chordIsFormatShortcut) return false
+  return true
+}
+
+/**
  * True when codemirror-vim is mid-command, waiting for a character or motion
  * argument — e.g. after `f`/`t`/`F`/`T`/`r`, an operator like `d`/`c`, or a
  * pending count. In that state the next key (including Space) belongs to the Vim
