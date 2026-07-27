@@ -56,7 +56,7 @@ export const HELP_QUICK_START: HelpCard[] = [
   {
     title: 'Format a selection',
     body:
-      'Select text to pop up a formatting toolbar — bold, italic, strikethrough, highlight, code, math, link, comment, and a “Turn into” menu that re-types the block (Text, Heading 1–3, lists, quote, code). The same actions have keyboard shortcuts that work on every platform, in or out of Vim mode: Mod+B bold, Mod+I italic, Mod+E code, Mod+K link, Shift+Mod+S strikethrough, Shift+Mod+H highlight, Shift+Mod+M math (Mod is ⌘ on macOS, Ctrl on Windows/Linux). Press Mod+/ to focus the toolbar and walk it with the arrow keys; Enter applies, Esc returns to the text.'
+      'Select text to pop up a formatting toolbar — bold, italic, strikethrough, highlight, code, math, link, comment, and a “Turn into” menu that re-types the block (Text, Heading 1–3, lists, quote, code). The same actions have keyboard shortcuts that work on every platform, in or out of Vim mode: Mod+B bold, Mod+I italic, Mod+E code, Mod+K link, Shift+Mod+S strikethrough, Shift+Mod+H highlight, Shift+Mod+M math (Mod is ⌘ on macOS, Ctrl on Windows/Linux). Press Mod+/ to focus the toolbar and walk it with the arrow keys; Enter applies, Esc returns to the text. Once a formatted word is typed, **Alt+]** steps the cursor past the closing markers so you can keep writing outside them, and **Alt+[** steps back over the previous ones — repeat either to walk the line pair by pair, brackets included. Pressing the format shortcut a second time (Mod+B again) also leaves the span. All three work in Vim mode and out of it, and the two hops can be rebound in Settings → Keymaps.'
   },
   {
     title: 'Switch between write and read modes',

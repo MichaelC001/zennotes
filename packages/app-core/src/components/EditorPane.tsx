@@ -53,6 +53,7 @@ import { isImeComposing } from '../lib/ime'
 import { resolveCodeLanguage } from '../lib/cm-code-languages'
 import { markdownListIndentPlugin } from '../lib/cm-markdown-list-indent'
 import { forwardOnCheckboxArrow } from '../lib/cm-forward-task'
+import { hopMarkerBackward, hopMarkerForward } from '../lib/cm-marker-hop'
 import { completionKeymapForEditor, completionNavKeymap } from '../lib/cm-completion-nav'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
 import { toCodeMirrorKey, vimHalfPageKeymap } from '../lib/vim-half-page-keymap'
@@ -285,6 +286,16 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
     {
       key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.moveLineDown')),
       run: moveLineDown
+    },
+    // Step across inline markers, so a formatted word can be finished without
+    // reaching for the arrow keys. Mode-agnostic like the line moves. (#490)
+    {
+      key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.hopMarkerForward')),
+      run: hopMarkerForward
+    },
+    {
+      key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.hopMarkerBackward')),
+      run: hopMarkerBackward
     },
     // Inline-format shortcuts (bold/italic/code/strike/highlight/math/link). In
     // Vim mode VimNav owns these (its window handler also resolves the Ctrl+I
