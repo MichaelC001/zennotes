@@ -209,6 +209,7 @@
       "extendInfo": {
         "CFBundleName": "ZenNotes",
         "CFBundleDisplayName": "ZenNotes",
+        "NSLocalNetworkUsageDescription": "ZenNotes needs local network access to connect to a self-hosted ZenNotes server on your network.",
         "CFBundleDocumentTypes": [
           {
             "CFBundleTypeName": "Markdown Document",

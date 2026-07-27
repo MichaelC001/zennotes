@@ -28,6 +28,33 @@ export interface RemoteServerClientOptions {
 
 type JsonRequestInit = Omit<RequestInit, 'body'> & { body?: unknown }
 
+/**
+ * Message for a transport-level failure — the request never got a response.
+ *
+ * On macOS 15+ a connection to anything on the local network needs the Local
+ * Network privacy permission. Without it the OS drops the attempt before a
+ * single packet leaves the machine, which surfaces here as a bare "fetch
+ * failed" and looks exactly like a server that is down. The app now declares
+ * `NSLocalNetworkUsageDescription` so macOS prompts on first use, but a user
+ * who dismissed that prompt lands back here — so say where to turn it on. (#481)
+ */
+export function connectionErrorMessage(
+  baseUrl: string,
+  error: unknown,
+  platform: NodeJS.Platform = process.platform
+): string {
+  const detail =
+    error instanceof Error && error.message ? ` Could not reach the server: ${error.message}.` : ''
+  const localNetworkHint =
+    platform === 'darwin'
+      ? ' If the server is on your local network, check that ZenNotes is allowed under System Settings → Privacy & Security → Local Network.'
+      : ''
+  return (
+    `Could not connect to the ZenNotes server at ${baseUrl}. ` +
+    `Make sure the server is running and the URL is correct.${detail}${localNetworkHint}`
+  )
+}
+
 export class RemoteServerClient {
   readonly baseUrl: string
   readonly authToken: string | null
@@ -316,13 +343,7 @@ export class RemoteServerClient {
         body: hasBody ? JSON.stringify(init!.body) : undefined
       })
     } catch (error) {
-      const message =
-        error instanceof Error && error.message
-          ? ` Could not reach the server: ${error.message}.`
-          : ''
-      throw new Error(
-        `Could not connect to the ZenNotes server at ${this.baseUrl}. Make sure the server is running and the URL is correct.${message}`
-      )
+      throw new Error(connectionErrorMessage(this.baseUrl, error))
     }
     if (!response.ok) {
       const text = await response.text().catch(() => '')
