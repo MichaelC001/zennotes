@@ -71,6 +71,7 @@ export function HomeView({
   const createAndOpen = useStore((s) => s.createAndOpen)
   const newDatabase = useStore((s) => s.newDatabase)
   const newDrawing = useStore((s) => s.newDrawing)
+  const setTemplatePaletteOpen = useStore((s) => s.setTemplatePaletteOpen)
   const openTodayDailyNote = useStore((s) => s.openTodayDailyNote)
   const openWeeklyNoteForDate = useStore((s) => s.openWeeklyNoteForDate)
 
@@ -255,7 +256,41 @@ export function HomeView({
               ))}
             </ul>
           ) : (
-            <EmptyHint text="No notes yet — create one to start writing." />
+            <div className="mt-1.5 flex flex-col gap-2">
+              {(
+                [
+                  {
+                    label: 'New note',
+                    icon: NotePlusIcon,
+                    run: () => void createAndOpen('inbox', '')
+                  },
+                  {
+                    label: 'New from template',
+                    icon: DocumentTextIcon,
+                    run: () => setTemplatePaletteOpen(true)
+                  },
+                  {
+                    label: 'New database',
+                    icon: DatabaseIcon,
+                    run: () => void newDatabase()
+                  }
+                ] as const
+              ).map(({ label, icon: EmptyIcon, run }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={run}
+                  className="group flex items-center gap-3 rounded-lg border border-paper-300/70 bg-paper-100/60 px-3 py-2.5 text-left text-sm text-ink-800 transition-colors hover:bg-paper-200/60 focus:bg-paper-200/70 focus:outline-none"
+                >
+                  <EmptyIcon
+                    width={15}
+                    height={15}
+                    className="shrink-0 text-ink-400 group-hover:text-ink-600"
+                  />
+                  {label}
+                </button>
+              ))}
+            </div>
           )}
         </section>
 
