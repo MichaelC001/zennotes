@@ -159,6 +159,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'math_renderer',
     comment: 'katex | typst: typesetter for $…$ / $$…$$ math'
   },
+  typstTagPreambles: {
+    section: 'editor',
+    tomlKey: 'typst_tag_preambles',
+    comment: 'true | false — prepend Typst definitions from notes in a `typst` folder, chosen by a note\'s tags'
+  },
   looseMathDelimiters: {
     section: 'editor',
     tomlKey: 'loose_math_delimiters',

@@ -440,6 +440,8 @@ export function SettingsModal(): JSX.Element {
   const completedTaskStyle = useStore((s) => s.completedTaskStyle);
   const setCompletedTaskStyle = useStore((s) => s.setCompletedTaskStyle);
   const mathRenderer = useStore((s) => s.mathRenderer);
+  const typstTagPreambles = useStore((s) => s.typstTagPreambles);
+  const setTypstTagPreambles = useStore((s) => s.setTypstTagPreambles);
   const setMathRenderer = useStore((s) => s.setMathRenderer);
   const looseMathDelimiters = useStore((s) => s.looseMathDelimiters);
   const setLooseMathDelimiters = useStore((s) => s.setLooseMathDelimiters);
@@ -2176,6 +2178,15 @@ export function SettingsModal(): JSX.Element {
                   ]}
                   onChange={(next) => setMathRenderer(next)}
                 />
+                {mathRenderer === "typst" && (
+                  <ToggleRow
+                    label="Typst definitions from tags"
+                    description="Prepend shared Typst definitions to a note's formulas based on its tags, so the same notation can mean different things per subject. Write a preamble as an ordinary note in a folder named `typst`, titled with the tag path in dots — `typst/physics.md` applies to #physics, `typst/physics.mechanics.md` to #physics/mechanics, layered general to specific. Preamble notes sync and are editable like any other note."
+                    value={typstTagPreambles}
+                    settingId="typst-tag-preambles"
+                    onChange={setTypstTagPreambles}
+                  />
+                )}
                 <ToggleRow
                   label="Relaxed $$ math delimiters"
                   description="Render a $$…$$ display block even when text sits before the opening $$ (`Note: $$…$$`) or after the closing $$ (`$$…$$ done`), like LaTeX. Off by default; the surrounding text moves to its own line in the reading view, while the editor keeps showing the raw source. Leave off if you write literal $$ in prose."

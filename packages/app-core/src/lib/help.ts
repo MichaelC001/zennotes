@@ -162,6 +162,11 @@ export const HELP_HOW_TO_GUIDES: HelpCard[] = [
       'Prefer ZenNotes in a browser instead of the desktop app? Pull the prebuilt, multi-arch image from Docker Hub with `docker pull adibhanna/zennotes`, generate a login token and keep a copy (`openssl rand -hex 32`), then start the container with your vault mounted:\n`docker run -d -p 127.0.0.1:7878:7878 \\\n  -e ZENNOTES_AUTH_TOKEN=<your-token> \\\n  -v "$HOME/Documents/MyVault:/workspace" \\\n  -v "$HOME/zennotes-data:/data" \\\n  adibhanna/zennotes:latest`\nThe server binds to 0.0.0.0, so it will not start without that token — open http://localhost:7878 and paste the token on first connect. Your notes stay as ordinary .md files on the host, and the desktop app can point at the same server. The full walkthrough, including reverse-proxy and TLS hardening, lives at zennotes.org/docs.'
   },
   {
+    title: 'Share Typst definitions across notes with tags',
+    body:
+      'With the **Typst** math renderer, Settings → Editor → **Typst definitions from tags** lets a note\'s tags decide which Typst definitions its formulas compile against — so `vector()` can be an arrow in physics and bold in maths without redefining it in every note. Write a preamble as an ordinary note inside a folder named `typst`, titled with the tag path in dots: `typst/physics.md` applies to `#physics`, `typst/physics.mechanics.md` to `#physics/mechanics`. Nested tags layer general → specific, so the narrower tag wins, and a note carrying several tags gets them in alphabetical order so the same tags always compile the same way. Preamble notes are ordinary notes: they sync, they are searchable, and editing one re-renders every note that uses it. Off by default, and it costs nothing when off.'
+  },
+  {
     title: 'Connect the desktop app to a self-hosted server',
     body:
       'Settings → Vault → Remote workspace takes the server URL and its token. **On macOS**, a server on your own network also needs the system Local Network permission: macOS asks the first time ZenNotes reaches a local address, and if you dismiss that prompt the connection fails with no packets sent and no further warning — it looks exactly like a server that is down. Turn it back on under System Settings → Privacy & Security → Local Network. A server reached over the public internet is unaffected.'

@@ -27,6 +27,12 @@ import type { VaultTask } from '@shared/tasks'
 import { isExcalidrawPath, isObsidianExcalidrawPath } from '@shared/excalidraw'
 import { TASKS_TAB_PATH, isTasksTabPath, parseTasksFromBody, toIsoDateLocal } from '@shared/tasks'
 import {
+  isTypstPreamblePath,
+  preambleKeyFromTitle,
+  resolveTypstPreamble,
+  type TypstPreambleNote
+} from './lib/typst-preamble'
+import {
   composeTaskFile,
   setTaskFileStatus,
   setTaskFileCancelled,
@@ -432,6 +438,8 @@ interface Prefs {
   /** Typesetter for `$…$` / `$$…$$` math (KaTeX or Typst), in both the editor
    *  live preview and the reading view. */
   mathRenderer: MathRenderer
+  /** Prepend Typst definitions to a note's formulas based on its tags (#486). */
+  typstTagPreambles: boolean
   /** Relax `$$…$$` display math so prose before the open fence (`Note: $$…$$`)
    *  or after the close fence (`$$…$$ done`) still renders in the reading view.
    *  Off by default; the editor keeps showing source for those shapes. */
@@ -777,6 +785,7 @@ export const DEFAULT_PREFS: Prefs = {
   renderTablesInLivePreview: true,
   completedTaskStyle: 'none',
   mathRenderer: 'katex',
+  typstTagPreambles: false,
   looseMathDelimiters: false,
   keepViewModeAcrossNotes: false,
   markdownSnippets: true,
@@ -914,6 +923,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       p.mathRenderer === 'typst' || p.mathRenderer === 'katex'
         ? p.mathRenderer
         : DEFAULT_PREFS.mathRenderer,
+    typstTagPreambles:
+      typeof p.typstTagPreambles === 'boolean'
+        ? p.typstTagPreambles
+        : DEFAULT_PREFS.typstTagPreambles,
     looseMathDelimiters:
       typeof p.looseMathDelimiters === 'boolean'
         ? p.looseMathDelimiters
@@ -1770,6 +1783,7 @@ function collectPrefs(s: {
   renderTablesInLivePreview: boolean
   completedTaskStyle: CompletedTaskStyle
   mathRenderer: MathRenderer
+  typstTagPreambles: boolean
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
   markdownSnippets: boolean
@@ -1849,6 +1863,7 @@ function collectPrefs(s: {
     renderTablesInLivePreview: s.renderTablesInLivePreview,
     completedTaskStyle: s.completedTaskStyle,
     mathRenderer: s.mathRenderer,
+    typstTagPreambles: s.typstTagPreambles,
     looseMathDelimiters: s.looseMathDelimiters,
     keepViewModeAcrossNotes: s.keepViewModeAcrossNotes,
     markdownSnippets: s.markdownSnippets,
@@ -2246,6 +2261,9 @@ interface Store {
   /** The user dismissed the vault-root notice for the current vault (#216). */
   rootContentBannerDismissed: boolean
   notes: NoteMeta[]
+  /** Bodies of the vault's Typst preamble notes, loaded when the tag-preamble
+   *  setting is on. Empty otherwise, so the feature costs nothing when off. */
+  typstPreambleNotes: TypstPreambleNote[]
   folders: FolderEntry[]
   assetFiles: AssetMeta[]
   assetUndoStack: AssetUndoEntry[]
@@ -2306,6 +2324,7 @@ interface Store {
   renderTablesInLivePreview: boolean
   completedTaskStyle: CompletedTaskStyle
   mathRenderer: MathRenderer
+  typstTagPreambles: boolean
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
   /** Auto-close markdown delimiters while typing. Persisted. */
@@ -2634,6 +2653,8 @@ interface Store {
     offset: number,
     options?: { scrollMode?: 'center' | 'start' }
   ) => Promise<void>
+  /** Reload the vault's Typst preamble notes (tag-driven math definitions). */
+  refreshTypstPreambles: () => Promise<void>
   jumpToPreviousNote: () => Promise<void>
   jumpToNextNote: () => Promise<void>
   applyChange: (ev: VaultChangeEvent) => Promise<void>
@@ -2711,6 +2732,7 @@ interface Store {
   setRenderTablesInLivePreview: (on: boolean) => void
   setCompletedTaskStyle: (style: CompletedTaskStyle) => void
   setMathRenderer: (renderer: MathRenderer) => void
+  setTypstTagPreambles: (on: boolean) => void
   setLooseMathDelimiters: (on: boolean) => void
   setKeepViewModeAcrossNotes: (on: boolean) => void
   setMarkdownSnippets: (on: boolean) => void
@@ -3809,6 +3831,7 @@ export const useStore = create<Store>((set, get) => {
   rootContentBannerDismissed: false,
   manualNoteOrder: {},
   notes: [],
+  typstPreambleNotes: [],
   folders: [],
   assetFiles: [],
   assetUndoStack: [],
@@ -3856,6 +3879,7 @@ export const useStore = create<Store>((set, get) => {
   renderTablesInLivePreview: loadPrefs().renderTablesInLivePreview,
   completedTaskStyle: loadPrefs().completedTaskStyle,
   mathRenderer: loadPrefs().mathRenderer,
+  typstTagPreambles: loadPrefs().typstTagPreambles,
   looseMathDelimiters: loadPrefs().looseMathDelimiters,
   keepViewModeAcrossNotes: loadPrefs().keepViewModeAcrossNotes,
   markdownSnippets: loadPrefs().markdownSnippets,
@@ -5040,6 +5064,27 @@ export const useStore = create<Store>((set, get) => {
     })
   },
 
+  refreshTypstPreambles: async () => {
+    const state = get()
+    if (!state.typstTagPreambles) {
+      if (state.typstPreambleNotes.length) set({ typstPreambleNotes: [] })
+      return
+    }
+    const candidates = state.notes.filter(
+      (note) => note.folder !== 'trash' && isTypstPreamblePath(note.path)
+    )
+    const loaded: TypstPreambleNote[] = []
+    for (const note of candidates) {
+      try {
+        const body = get().noteContents[note.path]?.body ?? (await window.zen.readNote(note.path)).body
+        loaded.push({ key: preambleKeyFromTitle(note.title), body })
+      } catch (err) {
+        console.error('typst preamble read failed', note.path, err)
+      }
+    }
+    set({ typstPreambleNotes: loaded })
+  },
+
   jumpToPreviousNote: async () => {
     await jumpThroughNoteHistory('back')
   },
@@ -5137,6 +5182,9 @@ export const useStore = create<Store>((set, get) => {
         })
         return next
       })
+      // The note list is where preamble notes are discovered, so keep them in
+      // step with it (no-op unless the setting is on). (#486)
+      if (get().typstTagPreambles) void get().refreshTypstPreambles()
     } catch (err) {
       console.error('refresh failed', err)
     }
@@ -5405,6 +5453,11 @@ export const useStore = create<Store>((set, get) => {
       const writtenBody = content.body
       lastWrittenByPath.set(path, writtenBody)
       const meta = await window.zen.writeNote(path, writtenBody)
+      // Saving a Typst preamble note changes the definitions every note tagged
+      // for it compiles against — reload so open panes repaint. (#486)
+      if (get().typstTagPreambles && isTypstPreamblePath(path)) {
+        void get().refreshTypstPreambles()
+      }
       set((cur) => {
         const dirty = { ...cur.noteDirty, [path]: false }
         return {
@@ -5997,6 +6050,12 @@ export const useStore = create<Store>((set, get) => {
   setMathRenderer: (renderer) => {
     set({ mathRenderer: renderer })
     savePrefs(collectPrefs(get()))
+  },
+  setTypstTagPreambles: (on) => {
+    set({ typstTagPreambles: on })
+    savePrefs(collectPrefs(get()))
+    if (on) void get().refreshTypstPreambles()
+    else set({ typstPreambleNotes: [] })
   },
   setLooseMathDelimiters: (on) => {
     set({ looseMathDelimiters: on })

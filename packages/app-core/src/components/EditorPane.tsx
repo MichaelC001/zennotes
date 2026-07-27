@@ -105,6 +105,7 @@ import { LazyDiagramTabView, LazyPreview as Preview } from './LazyPreview'
 import { ConnectionsPanel } from './ConnectionsPanel'
 import { OutlinePanel } from './OutlinePanel'
 import { CalendarPanel } from './CalendarPanel'
+import { selectTypstPreambleFor } from '../lib/typst-preamble-select'
 import { CommentsPanel, type CommentDraft } from './CommentsPanel'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { promptApp } from '../lib/prompt-requests'
@@ -344,7 +345,11 @@ function markdownSyntaxHighlightExtensions(): Extension[] {
  * frontmatter-properties panel is intentionally excluded — it depends on
  * the PR's breaking database restructure.
  */
-function wysiwygExtensions(renderTables: boolean, mathRenderer: MathRenderer): Extension[] {
+function wysiwygExtensions(
+  renderTables: boolean,
+  mathRenderer: MathRenderer,
+  typstPreamble: string
+): Extension[] {
   return [
     livePreviewPlugin,
     codeBlockFlairPlugin,
@@ -356,16 +361,21 @@ function wysiwygExtensions(renderTables: boolean, mathRenderer: MathRenderer): E
     ...taskMetadataExtension,
     ...highlightExtension,
     ...wikilinkRenderExtension,
-    mathRenderExtension(mathRenderer),
+    mathRenderExtension(mathRenderer, typstPreamble),
     embedRenderExtension,
     urlPasteMenuExtension
   ]
 }
 
-/** Current live-preview extension set, pulling both gating prefs from the store. */
-function currentWysiwygExtensions(): Extension[] {
+/** Current live-preview extension set, pulling the gating prefs from the store.
+ *  `notePath` selects that note's tag-driven Typst preamble (#486). */
+function currentWysiwygExtensions(notePath: string | null): Extension[] {
   const s = useStore.getState()
-  return wysiwygExtensions(s.renderTablesInLivePreview, s.mathRenderer)
+  return wysiwygExtensions(
+    s.renderTablesInLivePreview,
+    s.mathRenderer,
+    selectTypstPreambleFor(s, notePath)
+  )
 }
 
 const paperHighlight = HighlightStyle.define([
@@ -756,6 +766,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const folderLabels = resolveSystemFolderLabels(systemFolderLabels)
   const vaultSettings = useStore((s) => s.vaultSettings)
   const autoCalendarPanel = useStore((s) => s.autoCalendarPanel)
+  // Tag-driven Typst definitions for this pane's note (#486); '' unless the
+  // setting is on, Typst is the renderer, and the note's tags match a preamble.
+  const typstPreamble = useStore((s) => selectTypstPreambleFor(s, content?.path ?? null))
 
   const modesByPath = useStore((s) => s.paneModes[paneId]) ?? EMPTY_PANE_MODES
   const setPaneModeForPath = useStore((s) => s.setPaneModeForPath)
@@ -1572,7 +1585,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           ),
           livePreviewCompartment.of(
             s0.livePreview && !deferInitialRichMarkdown
-              ? wysiwygExtensions(s0.renderTablesInLivePreview, s0.mathRenderer)
+              ? wysiwygExtensions(
+                  s0.renderTablesInLivePreview,
+                  s0.mathRenderer,
+                  selectTypstPreambleFor(s0, initialPath)
+                )
               : []
           ),
           lineNumbersCompartment.of(lineNumberExtension(s0.lineNumberMode)),
@@ -1759,7 +1776,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             markdownSyntaxCompartment.reconfigure(markdownSyntaxHighlightExtensions())
           ]
           if (useStore.getState().livePreview) {
-            restoreEffects.push(livePreviewCompartment.reconfigure(currentWysiwygExtensions()))
+            restoreEffects.push(
+              livePreviewCompartment.reconfigure(currentWysiwygExtensions(initialPath))
+            )
           }
           view.dispatch({ effects: restoreEffects })
         }, LARGE_DOC_LIVE_PREVIEW_DEFER_MS)
@@ -1852,7 +1871,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         markdownSyntaxCompartment.reconfigure(markdownSyntaxHighlightExtensions())
       )
       if (livePreviewEnabled && livePreviewCompartment) {
-        effects.push(livePreviewCompartment.reconfigure(currentWysiwygExtensions()))
+        effects.push(livePreviewCompartment.reconfigure(currentWysiwygExtensions(nextPath)))
       }
     }
     const dispatchStartedAt = performance.now()
@@ -1916,7 +1935,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           markdownSyntaxCompartment.reconfigure(markdownSyntaxHighlightExtensions())
         ]
         if (useStore.getState().livePreview && livePreviewCompartment) {
-          restoreEffects.push(livePreviewCompartment.reconfigure(currentWysiwygExtensions()))
+          restoreEffects.push(
+            livePreviewCompartment.reconfigure(currentWysiwygExtensions(viewPathRef.current))
+          )
         }
         view.dispatch({
           effects: restoreEffects
@@ -1971,13 +1992,20 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             markdownSyntaxCompartment.reconfigure(markdownSyntaxHighlightExtensions())
           )
         }
-        effects.push(comp.reconfigure(currentWysiwygExtensions()))
+        effects.push(comp.reconfigure(currentWysiwygExtensions(viewPathRef.current)))
         view.dispatch({ effects })
       }
       return
     }
-    view.dispatch({ effects: comp.reconfigure(livePreview ? currentWysiwygExtensions() : []) })
-  }, [livePreview, renderTablesInLivePreview, mathRenderer])
+    view.dispatch({
+      effects: comp.reconfigure(
+        livePreview ? currentWysiwygExtensions(viewPathRef.current) : []
+      )
+    })
+    // `typstPreamble` is in the deps so retagging a note — or editing the
+    // preamble note it points at — reconfigures this pane and repaints its
+    // formulas with the new definitions. (#486)
+  }, [livePreview, renderTablesInLivePreview, mathRenderer, typstPreamble])
   useEffect(() => {
     const view = viewRef.current
     const comp = lineNumbersCompartmentRef.current

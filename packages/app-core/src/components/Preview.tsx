@@ -9,6 +9,7 @@ import {
 } from "../lib/markdown";
 import { expandEmbeds, hasNoteEmbeds } from "../lib/transclusion";
 import { todayIso } from "../lib/task-metadata-tokens";
+import { selectTypstPreambleFor } from "../lib/typst-preamble-select";
 import { useStore } from "../store";
 import { resolveAuto, THEMES } from "../lib/themes";
 import {
@@ -526,6 +527,11 @@ export const Preview = memo(function Preview({
     () => assetFiles.map((asset) => asset.path).join("\n"),
     [assetFiles],
   );
+  // Tag-driven Typst definitions for this note (#486). Empty unless the setting
+  // is on and the note's tags match a preamble, so most notes pay one lookup.
+  const typstPreamble = useStore((s) => selectTypstPreambleFor(s, notePath));
+  const typstPreambleRef = useRef(typstPreamble);
+  typstPreambleRef.current = typstPreamble;
   const notesRef = useRef(notes);
   const markdownRef = useRef(markdown);
   const notePathRef = useRef(notePath);
@@ -944,7 +950,7 @@ export const Preview = memo(function Preview({
       // Typst math (a no-op when the KaTeX renderer is active, since it emits no
       // `.zen-typst-math` placeholders). Recolored to currentColor, so a theme
       // switch needs no re-render.
-      await renderTypstMath(root);
+      await renderTypstMath(root, typstPreambleRef.current);
       if (cancelled) return;
       renderEmbeds(root);
       renderBookmarks(root);
@@ -1016,6 +1022,9 @@ export const Preview = memo(function Preview({
     pinnedAssetPath,
     pinnedRefVisible,
     togglePinnedRefVisible,
+    // Editing a note's tags, or the preamble note itself, changes the Typst
+    // definitions its formulas compile against — re-render when it moves (#486).
+    typstPreamble,
     vault?.root,
   ]);
 
