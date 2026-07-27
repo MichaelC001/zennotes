@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { setTaskCancelledAtIndex, TASK_LINE_RE } from './tasklists'
-import { parseTasksFromBody, groupTasks, parseTaskFile, type ParseTasksContext } from './tasks'
+import {
+  bucketTasksByDueDate,
+  groupTasks,
+  isTaskOpen,
+  parseTaskFile,
+  parseTasksFromBody,
+  tasksDueOn,
+  type ParseTasksContext
+} from './tasks'
 import { setTaskFileCancelled } from './frontmatter'
 
 const ctx: ParseTasksContext = { path: 'inbox/t.md', title: 't', folder: 'inbox' }
@@ -33,6 +41,38 @@ describe('task cancelling primitives (#450)', () => {
     expect(g.today.map((t) => t.content)).toEqual(['open'])
     expect(g.done.map((t) => t.content)).toEqual(['done'])
     expect(g.forwarded.map((t) => t.content)).toEqual(['gone [[X]]'])
+  })
+
+  it('keeps cancelled tasks off the calendar surfaces (#476)', () => {
+    const tasks = parseTasksFromBody(
+      [
+        '- [ ] open due:2026-07-27',
+        '- [-] scrapped due:2026-07-27',
+        '- [x] done due:2026-07-27',
+        '- [>] gone due:2026-07-27 [[X]]',
+        '- [-] scrapped undated'
+      ].join('\n'),
+      ctx
+    )
+
+    // The sidepanel calendar (tasksDueOn) and the Tasks calendar
+    // (bucketTasksByDueDate) both drop cancelled tasks — they used to render
+    // them with an empty checkbox, alongside the actionable ones. A forwarded
+    // `[>]` origin stays: its copy in the target note has no due date.
+    expect(tasksDueOn(tasks, '2026-07-27').map((t) => t.content)).toEqual(['open', 'gone [[X]]'])
+
+    const buckets = bucketTasksByDueDate(tasks)
+    expect(buckets.get('2026-07-27')?.map((t) => t.content)).toEqual(['open', 'gone [[X]]'])
+    // Undated cancelled tasks stay out of the calendar's "No date" strip too.
+    expect(buckets.get('unscheduled')).toBeUndefined()
+  })
+
+  it('isTaskOpen treats only done and cancelled as closed', () => {
+    const [open, scrapped, done, forwarded] = parseTasksFromBody(
+      '- [ ] a\n- [-] b\n- [x] c\n- [>] d [[X]]',
+      ctx
+    )
+    expect([open, scrapped, done, forwarded].map(isTaskOpen)).toEqual([true, false, false, true])
   })
 
   it('reads a file-task `status: cancelled` as cancelled, and writes it', () => {

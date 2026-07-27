@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { NoteContent, NoteMeta } from '@shared/ipc'
 import {
   inferDailyTaskDueDates,
+  isTaskOpen,
   parseTasksFromBody,
   tasksDueOn,
   type VaultTask,
@@ -297,7 +298,7 @@ export function CalendarPanel({ note }: { note: NoteContent }): JSX.Element {
           path: n.path,
           title: n.title,
           folder: n.folder,
-        }).filter((t) => !t.checked).length
+        }).filter(isTaskOpen).length
         updates.push([n.path, { sig, words: countWords(body), openTasks }])
       }
       if (!cancelled && updates.length) {

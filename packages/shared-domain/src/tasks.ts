@@ -538,13 +538,25 @@ export function toIsoDateLocal(d: Date): string {
   return toIsoDate(d)
 }
 
+/**
+ * True when a task still counts as open on the calendar surfaces: not done and
+ * not cancelled. `@waiting` tasks stay open — they keep their date (#236) — and
+ * so does a forwarded `[>]` origin: its copy in the target note is written
+ * without the `due:` token, so dropping the origin would take the task off the
+ * calendar entirely. A `[-]` cancelled task is abandoned outright, so it has no
+ * business sitting next to actionable ones. (#450, #476)
+ */
+export function isTaskOpen(task: VaultTask): boolean {
+  return !task.checked && !task.cancelled
+}
+
 /** Tasks scheduled for the given local date (ISO YYYY-MM-DD). Excludes done
- *  (checked) tasks but KEEPS `@waiting` tasks, so a waiting task with a due date
- *  still appears on its date — matching `bucketTasksByDueDate` and the Tasks
- *  calendar. Without this the sidepanel calendar under-counted `@waiting` tasks
- *  the Tasks calendar showed. (#311, complementing #236) */
+ *  (checked) and cancelled tasks but KEEPS `@waiting` tasks, so a waiting task
+ *  with a due date still appears on its date — matching `bucketTasksByDueDate`
+ *  and the Tasks calendar. Without this the sidepanel calendar under-counted
+ *  `@waiting` tasks the Tasks calendar showed. (#311, complementing #236) */
 export function tasksDueOn(tasks: VaultTask[], iso: string): VaultTask[] {
-  return tasks.filter((t) => !t.checked && t.due === iso)
+  return tasks.filter((t) => isTaskOpen(t) && t.due === iso)
 }
 
 /**
@@ -571,16 +583,16 @@ export function inferDailyTaskDueDates(
   return changed ? out : tasks
 }
 
-/** Bucket tasks by `due` ISO date. Done (checked) tasks are skipped; waiting
- *  tasks are kept so a `@waiting` task with a due date still appears on the
- *  calendar on its date (#236). Tasks without a due date land in the special
- *  `'unscheduled'` key. */
+/** Bucket tasks by `due` ISO date. Done (checked) and cancelled tasks are
+ *  skipped (see `isTaskOpen`); waiting tasks are kept so a `@waiting` task with
+ *  a due date still appears on the calendar on its date (#236). Tasks without a
+ *  due date land in the special `'unscheduled'` key. */
 export function bucketTasksByDueDate(
   tasks: VaultTask[]
 ): Map<string, VaultTask[]> {
   const map = new Map<string, VaultTask[]>()
   for (const task of tasks) {
-    if (task.checked) continue
+    if (!isTaskOpen(task)) continue
     const key = task.due ?? 'unscheduled'
     const list = map.get(key)
     if (list) list.push(task)
