@@ -819,6 +819,63 @@ describe('note jump history with database tabs', () => {
   })
 })
 
+describe('note jump history for offset opens (#484)', () => {
+  // Opening a note *at an offset* — a template's `{{cursor}}`, a vault-search
+  // hit, a `[[note#heading]]` link — went straight to the raw tab primitive and
+  // recorded nothing, so Ctrl+O skipped straight past the note you left. After
+  // "New Note from Template" with only one note behind you, it did nothing at
+  // all, which is how this was reported.
+  it('records where you came from, so Ctrl+O returns there', async () => {
+    installZen({
+      readNote: vi
+        .fn()
+        .mockImplementation(async (path: string) => makeNote('body text', path))
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().selectNote('inbox/From.md')
+    expect(useStore.getState().selectedPath).toBe('inbox/From.md')
+
+    await useStore.getState().openNoteAtOffset('inbox/Target.md', 4)
+    expect(useStore.getState().selectedPath).toBe('inbox/Target.md')
+    expect(useStore.getState().noteBackstack.map((l) => l.path)).toContain('inbox/From.md')
+
+    await useStore.getState().jumpToPreviousNote()
+    expect(useStore.getState().selectedPath).toBe('inbox/From.md')
+  })
+
+  it('leaves the forward stack ready after jumping back', async () => {
+    installZen({
+      readNote: vi
+        .fn()
+        .mockImplementation(async (path: string) => makeNote('body text', path))
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().selectNote('inbox/From.md')
+    await useStore.getState().openNoteAtOffset('inbox/Target.md', 4)
+    await useStore.getState().jumpToPreviousNote()
+    expect(useStore.getState().selectedPath).toBe('inbox/From.md')
+
+    await useStore.getState().jumpToNextNote()
+    expect(useStore.getState().selectedPath).toBe('inbox/Target.md')
+  })
+
+  it('does not record a jump to the note already open', async () => {
+    installZen({
+      readNote: vi
+        .fn()
+        .mockImplementation(async (path: string) => makeNote('body text', path))
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().selectNote('inbox/Same.md')
+    const before = useStore.getState().noteBackstack.length
+    await useStore.getState().openNoteAtOffset('inbox/Same.md', 8)
+    expect(useStore.getState().noteBackstack.length).toBe(before)
+  })
+})
+
 describe('database deletion', () => {
   it('forgets a deleted database instead of re-reading the gone file', async () => {
     const csvPath = 'quick/Untitled Database.csv'

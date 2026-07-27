@@ -1634,6 +1634,35 @@ function appendNoteJumpHistory(
     : next
 }
 
+/**
+ * The jump stacks after a user-initiated navigation from wherever they are to
+ * `nextPath`: the current spot goes on the backstack and the forward stack is
+ * dropped, exactly as `Ctrl+O` / `Ctrl+I` expect.
+ *
+ * Every path that opens a note *because the user asked to go somewhere* runs
+ * through this. Opening at an offset (a template's `{{cursor}}`, a vault-search
+ * hit, a `[[note#heading]]` link) used to bypass it by going straight to
+ * `openNoteInPane`, the low-level "add a tab" primitive, so those jumps left no
+ * trail — creating a note from a template stranded you with a dead Ctrl+O. (#484)
+ */
+function noteHistoryAfterJump(
+  state: {
+    selectedPath: string | null
+    editorViewRef: EditorView | null
+    noteBackstack: NoteJumpLocation[]
+    noteForwardstack: NoteJumpLocation[]
+  },
+  nextPath: string
+): { noteBackstack: NoteJumpLocation[]; noteForwardstack: NoteJumpLocation[] } {
+  if (!isJumpHistoryTabPath(state.selectedPath) || state.selectedPath === nextPath) {
+    return { noteBackstack: state.noteBackstack, noteForwardstack: state.noteForwardstack }
+  }
+  return {
+    noteBackstack: appendNoteJumpHistory(state.noteBackstack, captureNoteJumpLocation(state)),
+    noteForwardstack: []
+  }
+}
+
 function rewriteNoteJumpHistory(
   history: NoteJumpLocation[],
   rewrite: (path: string) => string
@@ -3512,18 +3541,9 @@ export const useStore = create<Store>((set, get) => {
         state.paneLayout
       set({
         paneLayout: nextLayout,
-        noteBackstack:
-          historyMode === 'push' &&
-          isJumpHistoryTabPath(state.selectedPath) &&
-          state.selectedPath !== relPath
-            ? appendNoteJumpHistory(state.noteBackstack, captureNoteJumpLocation(state))
-            : state.noteBackstack,
-        noteForwardstack:
-          historyMode === 'push' &&
-          isJumpHistoryTabPath(state.selectedPath) &&
-          state.selectedPath !== relPath
-            ? []
-            : state.noteForwardstack,
+        ...(historyMode === 'push'
+          ? noteHistoryAfterJump(state, relPath)
+          : { noteBackstack: state.noteBackstack, noteForwardstack: state.noteForwardstack }),
         pendingJumpLocation: null,
         loadingNote: false,
         ...activeFieldsFrom(nextLayout, state.activePaneId, state.noteContents, state.noteDirty)
@@ -3545,14 +3565,10 @@ export const useStore = create<Store>((set, get) => {
     }
 
     const latest = get()
-    const shouldPushHistory =
-      historyMode === 'push' &&
-      isJumpHistoryTabPath(latest.selectedPath) &&
-      latest.selectedPath !== relPath
-    const nextBackstack = shouldPushHistory
-      ? appendNoteJumpHistory(latest.noteBackstack, captureNoteJumpLocation(latest))
-      : latest.noteBackstack
-    const nextForwardstack = shouldPushHistory ? [] : latest.noteForwardstack
+    const { noteBackstack: nextBackstack, noteForwardstack: nextForwardstack } =
+      historyMode === 'push'
+        ? noteHistoryAfterJump(latest, relPath)
+        : { noteBackstack: latest.noteBackstack, noteForwardstack: latest.noteForwardstack }
 
     set({ loadingNote: true })
     try {
@@ -5007,7 +5023,11 @@ export const useStore = create<Store>((set, get) => {
     }
     set({
       pendingJumpLocation,
-      focusedPanel: 'editor'
+      focusedPanel: 'editor',
+      // Opening at an offset is still a jump the user should be able to undo
+      // with Ctrl+O, so it records where they came from. `openNoteInPane`
+      // below is the raw tab primitive and keeps no history of its own. (#484)
+      ...noteHistoryAfterJump(state, relPath)
     })
     await get().openNoteInPane(state.activePaneId, relPath)
     set((s) => {
