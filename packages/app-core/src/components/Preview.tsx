@@ -8,6 +8,7 @@ import {
   setMarkdownMathRenderer,
 } from "../lib/markdown";
 import { expandEmbeds, hasNoteEmbeds } from "../lib/transclusion";
+import { todayIso } from "../lib/task-metadata-tokens";
 import { useStore } from "../store";
 import { resolveAuto, THEMES } from "../lib/themes";
 import {
@@ -888,6 +889,19 @@ export const Preview = memo(function Preview({
         const li = input.closest<HTMLLIElement>("li.task-list-item");
         if (li) {
           li.classList.toggle("task-self-done", input.checked);
+          // Due chips are rendered date-neutral (the HTML is cached and outlives
+          // "today"), so the overdue tint is decided here, at attach time, the
+          // same rule the editor uses: past due and the task still open. (#479)
+          const today = todayIso();
+          li.querySelectorAll<HTMLElement>(":scope .zen-task-due[data-due]").forEach(
+            (chip) => {
+              const due = chip.dataset.due ?? "";
+              chip.classList.toggle(
+                "zen-task-due-overdue",
+                !input.checked && due !== "" && due < today,
+              );
+            },
+          );
           if (!li.querySelector(":scope > .task-item-body")) {
             const own = Array.from(li.childNodes).filter((node) => {
               if (node === input) return false;

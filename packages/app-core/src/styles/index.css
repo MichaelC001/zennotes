@@ -5210,34 +5210,57 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
 
 /* Task metadata on task lines (#454): priorities, due dates, and @fields get
    the same at-a-glance cues as the Tasks view, so they stand out from the task
-   text in source notes. Priority is coloured text (like the Tasks view); due
-   dates and @fields are small chips. */
-.cm-wysiwyg .cm-editor .cm-task-prio {
+   text. All three are chips — a tinted background plus the coloured text — and
+   the editor (`cm-task-*`, from CodeMirror decorations) and the reading preview
+   (`zen-task-*`, from the remark plugin) share one set of rules so a task line
+   looks identical either side of a split. (#479)
+
+   Priority started as coloured text alone, which quietly failed on the palettes
+   where those hues sit near the foreground: on the default Gruvbox dark the
+   `!med` amber lands within ΔE ~20 of the body text, so the marker read as
+   plain bold text and the three levels were hard to tell apart. The tint
+   carries the distinction even when the hue can't. */
+.cm-wysiwyg .cm-editor .cm-task-prio,
+.prose-zen .zen-task-prio {
   font-weight: 600;
+  border-radius: 0.35em;
+  padding: 0 0.3em;
+  font-style: normal;
 }
-.cm-wysiwyg .cm-editor .cm-task-prio-high {
+.cm-wysiwyg .cm-editor .cm-task-prio-high,
+.prose-zen .zen-task-prio-high {
   color: rgb(var(--z-red));
+  background-color: rgb(var(--z-red) / 0.16);
 }
-.cm-wysiwyg .cm-editor .cm-task-prio-med {
+.cm-wysiwyg .cm-editor .cm-task-prio-med,
+.prose-zen .zen-task-prio-med {
   color: rgb(var(--z-yellow));
+  background-color: rgb(var(--z-yellow) / 0.16);
 }
-.cm-wysiwyg .cm-editor .cm-task-prio-low {
+.cm-wysiwyg .cm-editor .cm-task-prio-low,
+.prose-zen .zen-task-prio-low {
   color: rgb(var(--z-blue));
+  background-color: rgb(var(--z-blue) / 0.16);
 }
-.cm-wysiwyg .cm-editor .cm-task-meta {
+.cm-wysiwyg .cm-editor .cm-task-meta,
+.prose-zen .zen-task-meta {
   border-radius: 0.35em;
   padding: 0 0.3em;
   font-size: 0.92em;
+  font-style: normal;
 }
-.cm-wysiwyg .cm-editor .cm-task-due {
+.cm-wysiwyg .cm-editor .cm-task-due,
+.prose-zen .zen-task-due {
   color: rgb(var(--z-blue));
   background-color: rgb(var(--z-blue) / 0.12);
 }
-.cm-wysiwyg .cm-editor .cm-task-due-overdue {
+.cm-wysiwyg .cm-editor .cm-task-due-overdue,
+.prose-zen .zen-task-due-overdue {
   color: rgb(var(--z-red));
   background-color: rgb(var(--z-red) / 0.14);
 }
-.cm-wysiwyg .cm-editor .cm-task-field {
+.cm-wysiwyg .cm-editor .cm-task-field,
+.prose-zen .zen-task-field {
   color: rgb(var(--z-purple));
   background-color: rgb(var(--z-purple) / 0.12);
 }

@@ -18,6 +18,7 @@ import { recordRendererPerf } from './perf'
 import { classifyLocalAssetHref } from './local-assets'
 import { parseEmbedSizeHint } from './excalidraw-preview'
 import { parseColWidthsComment } from './markdown-table'
+import { scanTaskMetadata, type TaskMetaToken } from './task-metadata-tokens'
 
 /**
  * Remark plugin: `[[target]]` and `[[target|label]]` → link nodes
@@ -266,6 +267,78 @@ function remarkHashtags() {
       }
       p.children.splice(index, 1, ...next)
       return [SKIP, index + next.length]
+    })
+  }
+}
+
+/**
+ * Remark plugin: task metadata (`!high`, `due:2026-01-31`, `@waiting`) inside a
+ * task list item becomes chips, matching what the editor shows for the same
+ * line (#454, #479). Only GFM task items are scanned — `listItem.checked` is
+ * non-null exactly for those — and only their own content: nested lists are
+ * skipped here because each nested item is visited in its own right.
+ *
+ * Inline code is a separate mdast node, so `` `!high` `` is never touched.
+ * The due chip carries `data-due` rather than an overdue class: whether a date
+ * is overdue depends on today, which the rendered HTML outlives (it is cached),
+ * so the Preview component decides that when it attaches the DOM.
+ */
+function remarkTaskMetadata() {
+  const SKIP_TYPES = new Set(['list', 'link', 'linkReference', 'inlineCode', 'code', 'html'])
+
+  const chipFor = (token: TaskMetaToken): AnyNode => {
+    const className =
+      token.kind === 'priority'
+        ? ['zen-task-prio', `zen-task-prio-${token.level}`]
+        : token.kind === 'due'
+          ? ['zen-task-meta', 'zen-task-due']
+          : ['zen-task-meta', 'zen-task-field']
+    const hProperties: Record<string, unknown> = { className }
+    if (token.kind === 'due' && token.date) hProperties['data-due'] = token.date
+    return {
+      type: 'emphasis',
+      data: { hName: 'span', hProperties },
+      children: [{ type: 'text', value: token.text }]
+    } as AnyNode
+  }
+
+  const splitText = (parent: AnyParent, index: number): number => {
+    const value = (parent.children[index] as unknown as { value: string }).value
+    const tokens = scanTaskMetadata(value)
+    if (tokens.length === 0) return 1
+    const next: AnyNode[] = []
+    let last = 0
+    for (const token of tokens) {
+      if (token.start > last) {
+        next.push({ type: 'text', value: value.slice(last, token.start) } as AnyNode)
+      }
+      next.push(chipFor(token))
+      last = token.end
+    }
+    if (last < value.length) {
+      next.push({ type: 'text', value: value.slice(last) } as AnyNode)
+    }
+    parent.children.splice(index, 1, ...next)
+    return next.length
+  }
+
+  const walk = (parent: AnyParent): void => {
+    for (let i = 0; i < parent.children.length; i++) {
+      const child = parent.children[i] as AnyNode & { children?: AnyNode[] }
+      if (SKIP_TYPES.has(child.type)) continue
+      if (child.type === 'text') {
+        i += splitText(parent, i) - 1
+        continue
+      }
+      if (Array.isArray(child.children)) walk(child as unknown as AnyParent)
+    }
+  }
+
+  return (tree: MdRoot): void => {
+    visit(tree, 'listItem', (node) => {
+      const item = node as unknown as AnyParent & { checked?: boolean | null }
+      if (item.checked === null || item.checked === undefined) return
+      walk(item)
     })
   }
 }
@@ -599,6 +672,7 @@ function createProcessor(mathRenderer: 'katex' | 'typst') {
   const rehyped = withTypst
     .use(remarkWikilinks)
     .use(remarkHashtags)
+    .use(remarkTaskMetadata)
     .use(remarkHighlight)
     .use(remarkCallouts)
     .use(remarkSourceLines)
