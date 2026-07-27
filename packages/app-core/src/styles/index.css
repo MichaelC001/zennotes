@@ -2202,9 +2202,11 @@ html[data-completed-task-style="gray-strikethrough"] .cm-editor .cm-task-done * 
 .cm-editor .tok-heading4 {
   font-size: 1.15em;
 }
+/* No text-transform: a heading is the author's text, so `##### Fifth heading`
+ * must read "Fifth heading" and not "FIFTH HEADING". H5 already separates from
+ * H4 above and H6 below by size, and from body text by weight. (#478) */
 .cm-editor .tok-heading5 {
   font-size: 1em;
-  text-transform: uppercase;
   letter-spacing: 0;
 }
 .cm-editor .tok-heading6 {
@@ -2694,11 +2696,12 @@ html[data-completed-task-style="gray-strikethrough"] .cm-editor .cm-task-done * 
   margin-top: var(--z-prose-section-gap);
   margin-bottom: var(--z-prose-heading-gap);
 }
+/* Same as the editor's `.tok-heading5`: no text-transform, so the rendered
+ * heading keeps the case the author typed. (#478) */
 .prose-zen h5 {
   font-size: 1em;
   margin-top: var(--z-prose-section-gap);
   margin-bottom: var(--z-prose-heading-gap);
-  text-transform: uppercase;
   letter-spacing: 0;
 }
 .prose-zen h6 {
