@@ -6,7 +6,9 @@ import { history } from '@codemirror/commands'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Text } from '@codemirror/state'
 import {
+  tableBlockAt,
   tablePlugin,
   nextWordStart,
   prevWordStart,
@@ -429,5 +431,42 @@ describe('table cell link following (#445)', () => {
     cell?.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true }))
     expect(selectNote).toHaveBeenCalledWith('Target-Note.md')
     view.destroy()
+  })
+})
+
+describe('tableBlockAt — the fallback when the parse has not caught up (#485)', () => {
+  const doc = (text: string) => Text.of(text.split('\n'))
+
+  it('finds the table around a position, header row to last row', () => {
+    const text = 'intro\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nafter'
+    const t = doc(text)
+    const inside = text.indexOf('| 1 | 2 |') + 2
+    const range = tableBlockAt(t, inside)
+    expect(range).not.toBeNull()
+    expect(text.slice(range!.from, range!.to)).toBe('| A | B |\n| --- | --- |\n| 1 | 2 |')
+  })
+
+  it('takes the trailing zen:cols marker with it, like the tree path does', () => {
+    const text = '| A | B |\n| --- | --- |\n| 1 | 2 |\n<!-- zen:cols=273,227 -->\ntail'
+    const t = doc(text)
+    const range = tableBlockAt(t, 3)
+    expect(text.slice(range!.from, range!.to)).toContain('zen:cols=273,227')
+  })
+
+  it('refuses a lone pipe line — that is prose, not a table', () => {
+    const t = doc('a | b is not a table\n| stray |\nplain')
+    expect(tableBlockAt(t, t.line(2).from + 2)).toBeNull()
+  })
+
+  it('returns null off the table', () => {
+    const t = doc('prose here\n\n| A |\n| --- |')
+    expect(tableBlockAt(t, 2)).toBeNull()
+  })
+
+  it('handles a table at the very start and end of the document', () => {
+    const text = '| A | B |\n| --- | --- |'
+    const t = doc(text)
+    const range = tableBlockAt(t, 0)
+    expect(range).toEqual({ from: 0, to: text.length })
   })
 })

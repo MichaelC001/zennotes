@@ -95,6 +95,32 @@ function colWidthsAfter(
   return widths ? { widths, to: next.to } : null
 }
 
+/**
+ * The table block containing `pos`, found by reading the document rather than
+ * the syntax tree: the run of `|` rows around that line, plus a trailing
+ * `zen:cols` marker.
+ *
+ * Backs up `tableRangeAt`. Markdown parsing is incremental, so a table that was
+ * just created or restructured can still be outside the parsed tree when the
+ * next action commits — and a commit that can't find its range throws the
+ * user's edit away without a word. Reported as an alignment that only takes
+ * effect the second time you choose it. (#485)
+ */
+export function tableBlockAt(doc: Text, pos: number): { from: number; to: number } | null {
+  const isRow = (text: string): boolean => text.trimStart().startsWith('|')
+  const line = doc.lineAt(Math.max(0, Math.min(pos, doc.length)))
+  if (!isRow(line.text)) return null
+  let first = line.number
+  while (first > 1 && isRow(doc.line(first - 1).text)) first--
+  let last = line.number
+  while (last < doc.lines && isRow(doc.line(last + 1).text)) last++
+  // A table is at least a header and its delimiter row; one `|` line on its own
+  // is prose, and rewriting it as a table would be a worse failure than none.
+  if (last - first < 1) return null
+  const ext = colWidthsAfter(doc, doc.line(last).to)
+  return { from: doc.line(first).from, to: ext ? ext.to : doc.line(last).to }
+}
+
 /** Find the enclosing `Table` node range for a doc position, or null. The range
  *  is extended over a trailing `zen:cols` width marker so re-serialization
  *  replaces both (no duplicate markers, no leaked raw comment). */
@@ -108,7 +134,7 @@ function tableRangeAt(view: EditorView, pos: number): { from: number; to: number
     if (!node.parent) break
     node = node.parent
   }
-  return null
+  return tableBlockAt(view.state.doc, pos)
 }
 
 /**
