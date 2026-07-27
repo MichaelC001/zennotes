@@ -85,7 +85,7 @@ const DELETED_ASSETS_DIR = 'deleted-assets'
 const DELETED_ASSET_META = '.zn-deleted.json'
 const VAULT_SETTINGS_FILE = 'vault.json'
 const NOTE_META_CACHE_FILE = 'note-meta-cache-v1.json'
-const NOTE_META_CACHE_VERSION = 2
+const NOTE_META_CACHE_VERSION = 3
 const NOTE_COMMENTS_DIR = 'comments'
 const NOTE_COMMENTS_SUFFIX = '.comments.json'
 const RESERVED_ROOT_NAMES = new Set<string>([...FOLDERS, ...ATTACHMENTS_DIRS, INTERNAL_VAULT_DIR])
@@ -1635,14 +1635,75 @@ function localAssetTargetKind(target: string): ImportedAssetKind | null {
   return 'file'
 }
 
-/** Pull unique `#tags` out of markdown text, ignoring fenced/inline code. */
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
+
+/** Pull unique tags from the first-class `tags` frontmatter field and inline `#tags`. */
 function extractTags(body: string): string[] {
-  if (!body.includes('#')) return []
-  const stripped = stripCodeContent(body)
-  const matches = stripped.match(/(?:^|\s)#(\p{L}[\p{L}\d_/-]*)/gu) || []
   const seen = new Set<string>()
-  for (const m of matches) seen.add(m.trim().slice(1))
+  for (const tag of extractFrontmatterTags(body)) seen.add(tag)
+
+  const markdownBody = body.replace(FRONTMATTER_RE, '')
+  if (markdownBody.includes('#')) {
+    const stripped = stripCodeContent(markdownBody)
+    const matches = stripped.match(/(?:^|\s)#(\p{L}[\p{L}\d_/-]*)/gu) || []
+    for (const m of matches) seen.add(m.trim().slice(1))
+  }
   return [...seen]
+}
+
+function extractFrontmatterTags(body: string): string[] {
+  const match = FRONTMATTER_RE.exec(body)
+  if (!match) return []
+  const data = parseSimpleFrontmatter(match[1] ?? '')
+  return data.get('tags') ?? []
+}
+
+function parseSimpleFrontmatter(block: string): Map<string, string[]> {
+  const data = new Map<string, string[]>()
+  let listKey: string | null = null
+  for (const rawLine of block.split(/\r?\n/)) {
+    const trimmed = rawLine.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+
+    const item = /^\s*-\s+(.*)$/.exec(rawLine)
+    if (listKey && /^\s/.test(rawLine) && item) {
+      const value = normalizeFrontmatterTag(item[1] ?? '')
+      if (value) data.set(listKey, [...(data.get(listKey) ?? []), value])
+      continue
+    }
+
+    const kv = /^([A-Za-z0-9_][\w-]*)\s*:\s*(.*)$/.exec(rawLine)
+    if (!kv) {
+      listKey = null
+      continue
+    }
+
+    const key = (kv[1] ?? '').toLowerCase()
+    const rest = (kv[2] ?? '').trim()
+    if (!rest) {
+      listKey = key
+      data.set(key, [])
+      continue
+    }
+
+    listKey = null
+    const values = rest.startsWith('[') && rest.endsWith(']')
+      ? rest.slice(1, -1).split(',')
+      : [rest]
+    data.set(key, values.map(normalizeFrontmatterTag).filter(Boolean))
+  }
+  return data
+}
+
+function normalizeFrontmatterTag(raw: string): string {
+  let value = raw.trim()
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1)
+  }
+  return value.trim().replace(/^#/, '')
 }
 
 /**

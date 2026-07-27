@@ -23,6 +23,19 @@ describe('extractTags — code fences are never scanned for tags (#293)', () => 
   it('extracts a real tag sitting right after a closed indented fence', () => {
     expect(extractTags('- item\n  ```\n  #include\n  ```\n  #after')).toEqual(['after'])
   })
+
+  it('includes first-class frontmatter tags', () => {
+    expect(extractTags('---\ntags: [frontmatter, "#quoted", project/nested]\ntitle: #ignored\n---\n\n#inline')).toEqual([
+      'frontmatter',
+      'quoted',
+      'project/nested',
+      'inline'
+    ])
+  })
+
+  it('supports block-list frontmatter tags', () => {
+    expect(extractTags('---\ntags:\n  - daily\n  - "#log"\n---\n\nbody')).toEqual(['daily', 'log'])
+  })
 })
 
 describe('matchesSelectedTags', () => {

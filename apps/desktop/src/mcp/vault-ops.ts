@@ -404,9 +404,16 @@ function stripCodeContent(body: string): string {
 }
 
 function extractTags(body: string): string[] {
-  const stripped = stripCodeContent(body)
-  const matches = stripped.match(/(?:^|\s)#(\p{L}[\p{L}\d_/-]*)/gu) || []
   const seen = new Set<string>()
+  const fm = body.match(FRONTMATTER_RE)
+  for (const tag of asArray(fm ? parseTaskFrontmatter(fm[1] ?? '').tags : undefined)) {
+    const normalized = tag.trim().replace(/^#/, '')
+    if (normalized) seen.add(normalized)
+  }
+
+  const markdownBody = body.replace(FRONTMATTER_RE, '')
+  const stripped = stripCodeContent(markdownBody)
+  const matches = stripped.match(/(?:^|\s)#(\p{L}[\p{L}\d_/-]*)/gu) || []
   for (const m of matches) seen.add(m.trim().slice(1))
   return [...seen]
 }
@@ -876,7 +883,7 @@ export async function searchText(
 
 /* ---------- Tasks ---------------------------------------------------- */
 
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
 // Optional whitespace after the colon so a spaced `due: 2026-01-01` parses like
 // `due:2026-01-01` (kept in sync with packages/shared-domain/src/tasks.ts). (#343)
 const INLINE_DUE_RE = /(?:^|\s)due:\s*(\S+)/i

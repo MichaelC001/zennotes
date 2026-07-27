@@ -624,6 +624,32 @@ describe('listNotes metadata parsing', () => {
     expect(note?.tags).toEqual(['realtag'])
   })
 
+  it('indexes frontmatter tags as first-class note tags', async () => {
+    const root = await makeTempDir('zennotes-meta-frontmatter-tags-')
+    await ensureVaultLayout(root)
+    const rel = 'inbox/frontmatter.md'
+    await writeFile(
+      path.join(root, rel),
+      '---\ntags: [frontmatter, "#quoted", project/nested]\ntitle: #ignored\n---\n\n#inline\n',
+      'utf8'
+    )
+
+    const notes = await listNotes(root)
+    const note = notes.find((n) => n.path === rel)
+    expect(note?.tags).toEqual(['frontmatter', 'quoted', 'project/nested', 'inline'])
+  })
+
+  it('indexes block-list frontmatter tags', async () => {
+    const root = await makeTempDir('zennotes-meta-frontmatter-tag-list-')
+    await ensureVaultLayout(root)
+    const rel = 'inbox/frontmatter-list.md'
+    await writeFile(path.join(root, rel), '---\ntags:\n  - daily\n  - "#log"\n---\n\nBody\n', 'utf8')
+
+    const notes = await listNotes(root)
+    const note = notes.find((n) => n.path === rel)
+    expect(note?.tags).toEqual(['daily', 'log'])
+  })
+
   it('detects only local asset references as attachments', async () => {
     const root = await makeTempDir('zennotes-meta-assets-')
     await ensureVaultLayout(root)
@@ -733,7 +759,7 @@ describe('listNotes metadata cache', () => {
     await writeFile(
       path.join(root, '.zennotes', 'note-meta-cache-v1.json'),
       `${JSON.stringify({
-        version: 2,
+        version: 3,
         entries: [
           {
             path: rel,

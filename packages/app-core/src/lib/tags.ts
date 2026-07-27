@@ -13,15 +13,75 @@
  *  - Heading markers (`#`, `##`, …) are not a hashtag because the
  *    character after the hash is a space, not a letter.
  */
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
+
 export function extractTags(body: string): string[] {
-  const stripped = stripCodeContent(body)
-  const regex = /(?:^|\s)#(\p{L}[\p{L}\d_/-]*)/gu
   const seen = new Set<string>()
+  for (const tag of extractFrontmatterTags(body)) seen.add(tag)
+
+  const markdownBody = body.replace(FRONTMATTER_RE, '')
+  const stripped = stripCodeContent(markdownBody)
+  const regex = /(?:^|\s)#(\p{L}[\p{L}\d_/-]*)/gu
   let m: RegExpExecArray | null
   while ((m = regex.exec(stripped)) !== null) {
     seen.add(m[1])
   }
   return [...seen]
+}
+
+function extractFrontmatterTags(body: string): string[] {
+  const match = FRONTMATTER_RE.exec(body)
+  if (!match) return []
+  const data = parseSimpleFrontmatter(match[1] ?? '')
+  return data.get('tags') ?? []
+}
+
+function parseSimpleFrontmatter(block: string): Map<string, string[]> {
+  const data = new Map<string, string[]>()
+  let listKey: string | null = null
+  for (const rawLine of block.split(/\r?\n/)) {
+    const trimmed = rawLine.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+
+    const item = /^\s*-\s+(.*)$/.exec(rawLine)
+    if (listKey && /^\s/.test(rawLine) && item) {
+      const value = normalizeFrontmatterTag(item[1] ?? '')
+      if (value) data.set(listKey, [...(data.get(listKey) ?? []), value])
+      continue
+    }
+
+    const kv = /^([A-Za-z0-9_][\w-]*)\s*:\s*(.*)$/.exec(rawLine)
+    if (!kv) {
+      listKey = null
+      continue
+    }
+
+    const key = (kv[1] ?? '').toLowerCase()
+    const rest = (kv[2] ?? '').trim()
+    if (!rest) {
+      listKey = key
+      data.set(key, [])
+      continue
+    }
+
+    listKey = null
+    const values = rest.startsWith('[') && rest.endsWith(']')
+      ? rest.slice(1, -1).split(',')
+      : [rest]
+    data.set(key, values.map(normalizeFrontmatterTag).filter(Boolean))
+  }
+  return data
+}
+
+function normalizeFrontmatterTag(raw: string): string {
+  let value = raw.trim()
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1)
+  }
+  return value.trim().replace(/^#/, '')
 }
 
 /**
