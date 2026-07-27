@@ -9,6 +9,14 @@
  */
 import { isTasksViewActive, useStore } from '../store'
 import { getVisiblePanelsNow, resolveNextPanel, type Panel } from './vim-nav'
+import {
+  ROW_PANEL_DEFS,
+  findPositionByIndex,
+  getIndexedElements,
+  getIndexedValue,
+  isRowPanel,
+  rowCursor
+} from './panel-rows'
 
 export type PaneDirection = 'h' | 'j' | 'k' | 'l'
 
@@ -110,59 +118,6 @@ function resolveNeighborPanel(
   return resolveNextPanel(current, direction === 'h' || direction === 'k' ? 'left' : 'right', panels)
 }
 
-/** Row-list panels: each renders `data-<name>-idx` rows and keeps its cursor in
- *  the store, so focusing one means restoring that cursor. */
-const ROW_PANELS = {
-  sidebar: { selector: '[data-sidebar-idx]', datasetKey: 'sidebarIdx' },
-  notelist: { selector: '[data-notelist-idx]', datasetKey: 'notelistIdx' },
-  connections: { selector: '[data-connections-idx]', datasetKey: 'connectionsIdx' },
-  outline: { selector: '[data-outline-idx]', datasetKey: 'outlineIdx' }
-} as const
-
-type RowPanel = keyof typeof ROW_PANELS
-
-function isRowPanel(panel: Panel): panel is RowPanel {
-  return panel in ROW_PANELS
-}
-
-function rowCursor(
-  panel: RowPanel,
-  state: ReturnType<typeof useStore.getState>
-): { index: number; setIndex: (idx: number) => void } {
-  switch (panel) {
-    case 'sidebar':
-      return { index: state.sidebarCursorIndex, setIndex: state.setSidebarCursorIndex }
-    case 'notelist':
-      return { index: state.noteListCursorIndex, setIndex: state.setNoteListCursorIndex }
-    case 'connections':
-      return { index: state.connectionsCursorIndex, setIndex: state.setConnectionsCursorIndex }
-    case 'outline':
-      return { index: state.outlineCursorIndex, setIndex: state.setOutlineCursorIndex }
-  }
-}
-
-/** The row carrying `targetIndex`, or — when the list changed under the stored
- *  cursor (rows collapsed, headings edited away) — the nearest row that still
- *  exists. Same clamp the vim handlers apply, so both entry points land on the
- *  same row. */
-function findIndexedElement(
-  selector: string,
-  datasetKey: 'sidebarIdx' | 'notelistIdx' | 'connectionsIdx' | 'outlineIdx',
-  targetIndex: number
-): HTMLElement | null {
-  const items = Array.from(document.querySelectorAll<HTMLElement>(selector))
-    .map((el) => ({
-      el,
-      index: Number(el.dataset[datasetKey])
-    }))
-    .filter((entry) => Number.isFinite(entry.index))
-    .sort((a, b) => a.index - b.index)
-  if (items.length === 0) return null
-  const exact = items.find((entry) => entry.index === targetIndex)
-  if (exact) return exact.el
-  return items[Math.max(0, Math.min(targetIndex, items.length - 1))].el
-}
-
 /**
  * Give `panel` keyboard focus, whichever kind of panel it is. One routine for
  * both pane navigations (and for any future entry point), because keeping two
@@ -196,14 +151,15 @@ export function focusPanel(panel: Panel, direction?: PaneDirection): void {
       return
     }
     if (!isRowPanel(panel)) return
-    const { selector, datasetKey } = ROW_PANELS[panel]
+    const { selector, datasetKey } = ROW_PANEL_DEFS[panel]
     const { index, setIndex } = rowCursor(panel, state)
-    const row = findIndexedElement(selector, datasetKey, index)
+    const items = getIndexedElements(selector, datasetKey)
+    const row = items[findPositionByIndex(items, datasetKey, index)]
     if (!row) return
     // Re-seat the cursor on the row we actually landed on, so the highlight and
     // the stored index agree even when the list shrank while we were away.
-    const landed = Number(row.dataset[datasetKey])
-    if (Number.isFinite(landed) && landed !== index) setIndex(landed)
+    const landed = getIndexedValue(row, datasetKey)
+    if (landed >= 0 && landed !== index) setIndex(landed)
     row.scrollIntoView({ block: 'nearest' })
   })
 }

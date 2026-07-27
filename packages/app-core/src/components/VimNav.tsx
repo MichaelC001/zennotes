@@ -15,6 +15,15 @@ import {
 } from '../lib/vim-nav'
 import { isCalendarToggleAvailable } from '../lib/vault-layout'
 import { focusPanel, focusPaneInDirection } from '../lib/pane-nav'
+import {
+  findPositionByIndex,
+  getIndexedElementByIndex,
+  getIndexedElements,
+  getIndexedValue,
+  scrollToIndexedElement,
+  scrollToIndexedIndex,
+  type IndexedDatasetKey
+} from '../lib/panel-rows'
 import { findLeaf } from '../lib/pane-layout'
 import { boundedIndexCount, clampIndex, moveIndex } from '../lib/index-navigation'
 import {
@@ -46,12 +55,6 @@ function escapeForAttr(value: string): string {
   return value.replace(/["\\]/g, '\\$&')
 }
 
-type IndexedDatasetKey =
-  | 'sidebarIdx'
-  | 'notelistIdx'
-  | 'connectionsIdx'
-  | 'commentsIdx'
-  | 'outlineIdx'
 
 /**
  * Global vim-style keyboard navigation layer.
@@ -1954,43 +1957,8 @@ export function VimNav(): JSX.Element | null {
     previewEl.scrollTo({ top: clamped, behavior: 'auto' })
   }
 
-  function getIndexedElements(
-    selector: string,
-    datasetKey: IndexedDatasetKey
-  ): HTMLElement[] {
-    return [...document.querySelectorAll<HTMLElement>(selector)]
-      .filter((el) => el.getClientRects().length > 0)
-      .sort((a, b) => {
-        const aRect = a.getBoundingClientRect()
-        const bRect = b.getBoundingClientRect()
-        const rowDelta = aRect.top - bRect.top
 
-        // Follow the actual rendered row order first, then fall back
-        // to the assigned index for stable ordering within the same row.
-        if (Math.abs(rowDelta) > 2) return rowDelta
 
-        const colDelta = aRect.left - bRect.left
-        if (Math.abs(colDelta) > 2) return colDelta
-
-        return getIndexedValue(a, datasetKey) - getIndexedValue(b, datasetKey)
-      })
-  }
-
-  function getIndexedValue(
-    el: HTMLElement | null,
-    datasetKey: IndexedDatasetKey
-  ): number {
-    const value = Number(el?.dataset[datasetKey] ?? -1)
-    return Number.isFinite(value) ? value : -1
-  }
-
-  function getIndexedElementByIndex(
-    items: HTMLElement[],
-    datasetKey: IndexedDatasetKey,
-    index: number
-  ): HTMLElement | undefined {
-    return items.find((item) => getIndexedValue(item, datasetKey) === index)
-  }
 
   function getNoteListItemCount(renderedCount: number): number {
     const raw = document.querySelector<HTMLElement>('[data-notelist-count]')?.dataset.notelistCount
@@ -1999,40 +1967,9 @@ export function VimNav(): JSX.Element | null {
   }
 
   /** Find position in sorted items array by stored cursor index (no DOM focus dependency). */
-  function findPositionByIndex(
-    items: HTMLElement[],
-    datasetKey: IndexedDatasetKey,
-    cursorIndex: number
-  ): number {
-    const exact = items.findIndex((item) => getIndexedValue(item, datasetKey) === cursorIndex)
-    if (exact >= 0) return exact
-    // Index not found (e.g. collapsed parent removed children) — clamp to valid range
-    return items.length === 0 ? 0 : Math.max(0, Math.min(cursorIndex, items.length - 1))
-  }
 
   /** Update the cursor index and scroll the element into view. */
-  function scrollToIndexedElement(
-    el: HTMLElement | undefined,
-    datasetKey: IndexedDatasetKey,
-    setIndex: (idx: number) => void
-  ): void {
-    if (!el) return
-    const idx = getIndexedValue(el, datasetKey)
-    if (idx < 0) return
-    setIndex(idx)
-    el.scrollIntoView({ block: 'nearest' })
-  }
 
-  function scrollToIndexedIndex(
-    items: HTMLElement[],
-    datasetKey: IndexedDatasetKey,
-    index: number,
-    setIndex: (idx: number) => void
-  ): void {
-    const target = getIndexedElementByIndex(items, datasetKey, index)
-    setIndex(index)
-    target?.scrollIntoView({ block: 'nearest' })
-  }
 
   function getCommentItems(): HTMLElement[] {
     return getIndexedElements('[data-comments-idx]', 'commentsIdx')

@@ -20,6 +20,13 @@ import { ExcalidrawEmbedMenuHost } from './components/ExcalidrawEmbedMenuHost'
 import { resolveQuickNoteTitle } from './lib/quick-note-title'
 import { isMacPlatform, matchesShortcut, matchesSequenceToken } from './lib/keymaps'
 import { focusPaneOrEdgePanel } from './lib/pane-nav'
+import {
+  activatePanelRow,
+  isRowPanel,
+  moveCommentCursor,
+  movePanelCursor,
+  type CursorMove
+} from './lib/panel-rows'
 import { requestPaneMode } from './lib/pane-mode'
 import { recordRendererPerf } from './lib/perf'
 import { focusEditorNormalMode } from './lib/editor-focus'
@@ -242,6 +249,56 @@ function AppUpdateNotice({
       )}
     </div>
   )
+}
+
+/**
+ * Keyboard handling inside a focused panel when Vim mode is off.
+ *
+ * VimNav owns panel keys, but its listener only exists in Vim mode — so without
+ * it, pane navigation could hand focus to a panel with no way to move inside it.
+ * This covers the keys that are universal everywhere else in the app: ↑/↓ move
+ * the row cursor, Home/End jump to the ends, Enter activates the row, Escape (or
+ * ←) hands focus back to the editor. Single-letter motions stay Vim-only.
+ *
+ * Returns nothing; the event is consumed only when a panel actually handled it,
+ * so unrelated keys still reach the app.
+ */
+function handlePanelKeyWithoutVim(e: KeyboardEvent, focusedPanel: string | null): void {
+  if (e.metaKey || e.ctrlKey || e.altKey) return
+  // Text entry inside a panel (the outline filter, a comment draft) keeps its keys.
+  const target = e.target instanceof HTMLElement ? e.target : null
+  if (target) {
+    const tag = target.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return
+  }
+  const isComments = focusedPanel === 'comments'
+  if (!isComments && !isRowPanel(focusedPanel)) return
+
+  const move: CursorMove | null =
+    e.key === 'ArrowDown' ? 'down' : e.key === 'ArrowUp' ? 'up' : e.key === 'Home' ? 'first' : e.key === 'End' ? 'last' : null
+
+  const consume = (): void => {
+    e.preventDefault()
+    e.stopImmediatePropagation()
+  }
+
+  if (move) {
+    const moved = isComments ? moveCommentCursor(move) : movePanelCursor(focusedPanel, move)
+    if (moved) consume()
+    return
+  }
+  if (e.key === 'Enter') {
+    // The comments panel has no single "open" action per card, so Enter is left
+    // to the card's own focused control there.
+    if (isComments) return
+    if (activatePanelRow(focusedPanel)) consume()
+    return
+  }
+  if (e.key === 'Escape' || e.key === 'ArrowLeft') {
+    consume()
+    useStore.getState().setFocusedPanel('editor')
+    focusEditorNormalMode()
+  }
 }
 
 function App(): JSX.Element {
@@ -848,10 +905,21 @@ function App(): JSX.Element {
             : matchesShortcut(e, overrides, 'global.focusPaneRight')
               ? 'l'
               : null
-      if (!paneDir) return
-      e.preventDefault()
-      e.stopImmediatePropagation()
-      focusPaneOrEdgePanel(paneDir)
+      if (paneDir) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        focusPaneOrEdgePanel(paneDir)
+        return
+      }
+
+      // With Vim mode ON, VimNav owns every key inside a focused panel. With it
+      // OFF that listener isn't installed at all, so `Alt+hjkl` could put focus
+      // in a panel there was then no way to drive — you could reach Connections
+      // or the Outline and not move a row. The universal keys (arrows, Enter,
+      // Escape) work here regardless of mode; the single-letter motions (j/k,
+      // gg/G) stay Vim-only, as everywhere else in the app.
+      if (state.vimMode) return
+      handlePanelKeyWithoutVim(e, state.focusedPanel)
     }
     window.addEventListener('keydown', handler)
     window.addEventListener('keydown', focusPaneHandler, true)
