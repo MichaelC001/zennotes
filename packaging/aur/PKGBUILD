@@ -16,7 +16,10 @@ pkgdesc="Keyboard-first, local-first Markdown notes with vim motions and live pr
 arch=('x86_64')
 url="https://github.com/ZenNotes/zennotes"
 license=('MIT')
-depends=('gtk3' 'nss' 'alsa-lib' 'libxss')
+# desktop-file-utils ships the alpm hook that rebuilds mimeinfo.cache, which is
+# what actually registers x-scheme-handler/zennotes from our .desktop file —
+# without it, zennotes:// deep links silently go nowhere on a minimal install.
+depends=('gtk3' 'nss' 'alsa-lib' 'libxss' 'desktop-file-utils')
 provides=('zennotes')
 conflicts=('zennotes')
 options=('!strip')

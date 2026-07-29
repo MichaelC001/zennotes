@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  candidatePathsFromArgv,
   isMarkdownFilePath,
   markdownPathsFromArgv,
   resolveMarkdownOpenTarget,
@@ -80,5 +81,27 @@ describe('markdownPathsFromArgv', () => {
 
   it('returns an empty array when there are no markdown arguments', () => {
     expect(markdownPathsFromArgv(['/path/to/ZenNotes'])).toEqual([])
+  })
+
+  it('decodes file:// URLs from a .desktop %U hand-off, deep links stay skipped', () => {
+    const argv = [
+      '/path/to/ZenNotes',
+      'file:///docs/Some%20Note.md',
+      'zennotes://open?path=x'
+    ]
+    expect(markdownPathsFromArgv(argv)).toEqual(['/docs/Some Note.md'])
+  })
+})
+
+describe('candidatePathsFromArgv file:// decoding', () => {
+  it('decodes folder and file URLs, skips other schemes and malformed URLs', () => {
+    const argv = [
+      '/path/to/ZenNotes',
+      'file:///home/user/notes',
+      'file://',
+      'zennotes://open?path=x',
+      '/plain/dir'
+    ]
+    expect(candidatePathsFromArgv(argv)).toEqual(['/home/user/notes', '/plain/dir'])
   })
 })
