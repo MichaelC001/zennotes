@@ -4656,7 +4656,11 @@ export function WorkflowsView(): JSX.Element {
             the edge of the window instead of taking its 20rem. */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {active && (
-            <div className="flex shrink-0 items-center gap-2 border-b border-paper-300/50 px-4 py-2">
+            // `flex-wrap`: buttons neither wrap their labels nor shrink (see
+            // ui/Button), so when this row truly runs out of width the action
+            // cluster drops to a second line rather than clipping Export and
+            // Delete off the edge of the pane.
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-paper-300/50 px-4 py-2">
               <h3 className="shrink-0 truncate text-sm font-semibold text-ink-900">
                 {active.workflow.name}
               </h3>
