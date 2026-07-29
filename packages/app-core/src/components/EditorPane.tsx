@@ -224,6 +224,7 @@ import {
 } from '../lib/pane-mode'
 import { resolveCommentAnchor, selectionToCommentAnchor } from '../lib/comments'
 import { ZEN_OPEN_EDITOR_CONTEXT_MENU_EVENT } from '../lib/keyboard-context-menu'
+import { armMiddleClickPasteGuard } from '../lib/middle-click-paste-guard'
 import {
   assetPathFromTab,
   assetTitleFromPath,
@@ -2874,9 +2875,20 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               e.preventDefault()
             }
           }}
+          onMouseUp={(e) => {
+            // Some Chromium paths run the Linux primary-selection paste as the
+            // mouseup default action, before auxclick can refuse it. (#498)
+            if (e.button === 1) {
+              e.preventDefault()
+            }
+          }}
           onAuxClick={(e) => {
             if (e.button === 1) {
               e.preventDefault()
+              // Under Wayland the paste can be delivered to the FOCUSED editor
+              // rather than to this tab, so cancelling events here is not
+              // enough on its own; the guard catches the paste itself. (#498)
+              armMiddleClickPasteGuard()
               void closeTabInPane(paneId, tab.path)
             }
           }}
