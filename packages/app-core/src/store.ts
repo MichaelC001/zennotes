@@ -4773,7 +4773,16 @@ export const useStore = create<Store>((set, get) => {
       return
     }
 
-    if (latestOpenBuffer) {
+    // The buffer route exists to MERGE with unsaved edits, so it is taken only
+    // when the note is genuinely dirty. `noteContents` also caches notes nobody
+    // has open (previews, workspace prefetch), and routing those through
+    // `updateNoteBody` hands the change to an editor autosave that has no
+    // editor: mark-dirty, wait, and hope. In a rapid Kanban chain the watcher
+    // reload from the PREVIOUS write then reloads the cache over the pending
+    // edit, and the move silently reverts on disk (#503). A clean note takes
+    // the disk write like any external edit; the cache is updated in the same
+    // breath so a third move in the chain never reads a stale base.
+    if (latestOpenBuffer && latestState.noteDirty[path]) {
       get().updateNoteBody(path, nextBody)
     } else {
       try {
@@ -4782,6 +4791,15 @@ export const useStore = create<Store>((set, get) => {
         console.error('writeNote (mutate) failed', err)
         if (hasOptimisticChange) void get().rescanTasksForPath(path)
         return
+      }
+      if (latestOpenBuffer) {
+        set((s) => {
+          const cached = s.noteContents[path]
+          // Only a still-clean cache entry is ours to move forward; a buffer
+          // the user dirtied since the read above keeps their text.
+          if (!cached || s.noteDirty[path]) return s
+          return { noteContents: { ...s.noteContents, [path]: { ...cached, body: nextBody } } }
+        })
       }
     }
   },
