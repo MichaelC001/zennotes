@@ -194,7 +194,7 @@ export function CustomCodeLanguagesSettings(): JSX.Element {
                     <span className="text-xs text-danger">error</span>
                   )}
                 </div>
-                <div className="mt-0.5 truncate font-mono text-[11px] text-ink-400">
+                <div className="mt-0.5 truncate font-mono text-2xs text-ink-400">
                   {language.error ?? language.aliases.join(" · ")}
                 </div>
               </div>

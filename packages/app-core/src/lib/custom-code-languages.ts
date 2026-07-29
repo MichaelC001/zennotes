@@ -60,6 +60,13 @@ class CustomCodeLanguageRegistry {
     for (const listener of this.listeners) listener();
   }
 
+  /** True when no language is installed and enabled, i.e. nothing here can
+   *  ever match a fence tag. Lets callers skip work entirely, which is the
+   *  common case: most vaults never install a grammar. */
+  get isEmpty(): boolean {
+    return this.byAlias.size === 0;
+  }
+
   resolve(tag: string): EngineLoadedLanguage | null {
     return this.byAlias.get(normalizeCodeFenceTag(tag)) ?? null;
   }

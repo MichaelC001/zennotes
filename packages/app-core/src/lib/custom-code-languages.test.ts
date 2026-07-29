@@ -76,4 +76,30 @@ describe("custom code language runtime", () => {
     view.destroy();
     host.remove();
   });
+
+  // The editor extension and the rehype plugin are installed unconditionally,
+  // so the no-languages case has to cost nothing rather than walk the tree.
+  it("stays inert when no grammar is installed", async () => {
+    await customCodeLanguageRegistry.replace([]);
+    expect(customCodeLanguageRegistry.isEmpty).toBe(true);
+
+    const source = "```gleam\nfn main {\n  let answer = 42\n}\n```";
+    expect(renderMarkdown(source)).not.toContain("hljs-keyword");
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({
+        doc: source,
+        extensions: [
+          markdownLanguage({ codeLanguages: resolveCodeLanguage }),
+          customCodeFenceHighlightExtension,
+        ],
+      }),
+    });
+    expect(host.querySelector(".tok-keyword")).toBeNull();
+    view.destroy();
+    host.remove();
+  });
 });

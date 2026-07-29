@@ -17,6 +17,10 @@ import { resolveCodeLanguage } from "./cm-code-languages";
 const refreshCustomLanguages = StateEffect.define<void>();
 
 function buildDecorations(view: EditorView): DecorationSet {
+  // The extension is installed unconditionally, but almost no vault has a
+  // custom grammar. Bail before walking the syntax tree so the common case
+  // costs nothing on every edit and every viewport change.
+  if (customCodeLanguageRegistry.isEmpty) return Decoration.none;
   const ranges: Array<{ from: number; to: number; className: string }> = [];
   syntaxTree(view.state).iterate({
     enter(node) {

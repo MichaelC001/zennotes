@@ -538,6 +538,8 @@ function rehypeMathDiagrams() {
 /** Highlight unknown fenced tags through the user-installed TextMate registry. */
 function rehypeCustomCodeLanguages() {
   return (tree: HastRoot): void => {
+    // Skip the tree walk when no grammar is installed — the usual case.
+    if (customCodeLanguageRegistry.isEmpty) return
     visit(tree, 'element', (node) => {
       if (node.tagName !== 'code') return
       const classNames = (node.properties?.className as string[] | undefined) ?? []
