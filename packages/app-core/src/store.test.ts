@@ -1328,3 +1328,135 @@ describe('deleteDatabaseRows (#391 — purge record-page schema mappings)', () =
     expect(doc.pages).toEqual({ r1: 'db.base/pages/r1.md' })
   })
 })
+
+describe('renameNote heading sync (#455)', () => {
+  const BODY = '# Untitled\n\nbody\n'
+  // `listNotes`/`renameNote` hand back NoteMeta — metadata only, no body. The
+  // buffer is the only place a body lives, so the fixtures must not carry one
+  // or a refresh would spread a stale body back over the rewritten heading.
+  function metaOf(path: string, title: string) {
+    const { body: _body, ...meta } = makeNote('', path)
+    return { ...meta, title }
+  }
+  const renamedMeta = metaOf('inbox/Groceries.md', 'Groceries')
+
+  function installRename(overrides: Record<string, unknown> = {}) {
+    const renameNote = vi.fn().mockResolvedValue(renamedMeta)
+    const writeNote = vi.fn().mockResolvedValue(renamedMeta)
+    const readNote = vi
+      .fn()
+      .mockImplementation((path: string) =>
+        Promise.resolve({ ...metaOf(path, 'Untitled'), body: BODY })
+      )
+    installZen({
+      renameNote,
+      writeNote,
+      readNote,
+      listNotes: vi.fn().mockResolvedValue([renamedMeta]),
+      ...overrides
+    })
+    return { renameNote, writeNote, readNote }
+  }
+
+  it('retitles the heading of a note that is not open, straight on disk', async () => {
+    const { writeNote, readNote } = installRename()
+    const { useStore } = await loadStore()
+
+    await useStore.getState().renameNote('inbox/Untitled.md', 'Groceries')
+
+    expect(readNote).toHaveBeenCalledWith('inbox/Groceries.md')
+    expect(writeNote).toHaveBeenCalledWith('inbox/Groceries.md', '# Groceries\n\nbody\n')
+  })
+
+  it('retitles through the buffer when the note is open, so panes repaint', async () => {
+    const { writeNote } = installRename()
+    const { useStore } = await loadStore()
+    await useStore.getState().selectNote('inbox/Untitled.md')
+
+    await useStore.getState().renameNote('inbox/Untitled.md', 'Groceries')
+
+    expect(useStore.getState().noteContents['inbox/Groceries.md']?.body).toBe(
+      '# Groceries\n\nbody\n'
+    )
+    expect(writeNote).toHaveBeenCalledWith('inbox/Groceries.md', '# Groceries\n\nbody\n')
+  })
+
+  it('leaves the body alone when the setting is off', async () => {
+    const { writeNote, readNote } = installRename()
+    const { useStore } = await loadStore()
+    useStore.getState().setSyncTitleHeadingOnRename(false)
+
+    await useStore.getState().renameNote('inbox/Untitled.md', 'Groceries')
+
+    expect(readNote).not.toHaveBeenCalled()
+    expect(writeNote).not.toHaveBeenCalled()
+  })
+
+  it('never invents a heading for a note that has none', async () => {
+    const { writeNote } = installRename({
+      readNote: vi
+        .fn()
+        .mockResolvedValue({ ...metaOf('inbox/Groceries.md', 'Groceries'), body: 'just prose\n' })
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().renameNote('inbox/Untitled.md', 'Groceries')
+
+    expect(writeNote).not.toHaveBeenCalled()
+  })
+
+  it('skips non-markdown notes', async () => {
+    const drawing = metaOf('inbox/Sketch.excalidraw', 'Sketch')
+    const { writeNote, readNote } = installRename({
+      renameNote: vi.fn().mockResolvedValue(drawing),
+      listNotes: vi.fn().mockResolvedValue([drawing])
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().renameNote('inbox/Untitled.excalidraw', 'Sketch')
+
+    expect(readNote).not.toHaveBeenCalled()
+    expect(writeNote).not.toHaveBeenCalled()
+  })
+
+  it('leaves an Obsidian drawing stored as .md alone', async () => {
+    const drawing = metaOf('inbox/Sketch.excalidraw.md', 'Sketch')
+    const { writeNote, readNote } = installRename({
+      renameNote: vi.fn().mockResolvedValue(drawing),
+      listNotes: vi.fn().mockResolvedValue([drawing])
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().renameNote('inbox/Old.excalidraw.md', 'Sketch')
+
+    expect(readNote).not.toHaveBeenCalled()
+    expect(writeNote).not.toHaveBeenCalled()
+  })
+
+  it('leaves a plain .md carrying the excalidraw-plugin marker alone', async () => {
+    const body = '---\nexcalidraw-plugin: parsed\n---\n\n# Excalidraw Data\n'
+    const { writeNote } = installRename({
+      readNote: vi
+        .fn()
+        .mockResolvedValue({ ...metaOf('inbox/Groceries.md', 'Groceries'), body })
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().renameNote('inbox/Untitled.md', 'Groceries')
+
+    expect(writeNote).not.toHaveBeenCalled()
+  })
+
+  it('keeps the rename when the heading rewrite fails', async () => {
+    const { writeNote } = installRename({
+      readNote: vi.fn().mockRejectedValue(new Error('gone'))
+    })
+    const { useStore } = await loadStore()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await useStore.getState().renameNote('inbox/Untitled.md', 'Groceries')
+
+    expect(writeNote).not.toHaveBeenCalled()
+    expect(useStore.getState().notes.map((n) => n.path)).toContain('inbox/Groceries.md')
+  })
+})

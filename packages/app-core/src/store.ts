@@ -24,7 +24,11 @@ import type {
   WorkspaceMode
 } from '@shared/ipc'
 import type { VaultTask } from '@shared/tasks'
-import { isExcalidrawPath, isObsidianExcalidrawPath } from '@shared/excalidraw'
+import {
+  isExcalidrawPath,
+  isObsidianExcalidrawMarkdown,
+  isObsidianExcalidrawPath
+} from '@shared/excalidraw'
 import { TASKS_TAB_PATH, isTasksTabPath, parseTasksFromBody, toIsoDateLocal } from '@shared/tasks'
 import {
   isTypstPreamblePath,
@@ -154,6 +158,7 @@ import {
   INITIAL_VISIBLE_NOTE_PREFETCH_BATCH_SIZE,
   selectInitialVisibleNotePrefetchPaths
 } from './lib/note-prefetch'
+import { retitleLeadingHeading } from './lib/note-heading-sync'
 import type { Panel } from './lib/vim-nav'
 import {
   allLeaves,
@@ -451,6 +456,10 @@ interface Prefs {
   /** Keep the current view mode (Edit / Split / Preview) when switching notes
    *  instead of resolving each note's own last mode. Off = per-note (default). */
   keepViewModeAcrossNotes: boolean
+  /** Renaming a note also rewrites its leading `# Heading` to the new title,
+   *  so the title line stops drifting from the filename. Never adds a heading
+   *  to a note that has none. (#455) */
+  syncTitleHeadingOnRename: boolean
   /** Auto-close markdown delimiters while typing: `**`+Space → `**|**`,
    *  ```` ``` ````+Enter expands a fenced block. Off restores plain typing. */
   markdownSnippets: boolean
@@ -796,6 +805,7 @@ export const DEFAULT_PREFS: Prefs = {
   typstTagPreambles: false,
   looseMathDelimiters: false,
   keepViewModeAcrossNotes: false,
+  syncTitleHeadingOnRename: true,
   markdownSnippets: true,
   autoPairs: true,
   autoPairQuotesInProse: false,
@@ -947,6 +957,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.keepViewModeAcrossNotes === 'boolean'
         ? p.keepViewModeAcrossNotes
         : DEFAULT_PREFS.keepViewModeAcrossNotes,
+    syncTitleHeadingOnRename:
+      typeof p.syncTitleHeadingOnRename === 'boolean'
+        ? p.syncTitleHeadingOnRename
+        : DEFAULT_PREFS.syncTitleHeadingOnRename,
     markdownSnippets:
       typeof p.markdownSnippets === 'boolean'
         ? p.markdownSnippets
@@ -1802,6 +1816,7 @@ function collectPrefs(s: {
   typstTagPreambles: boolean
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
+  syncTitleHeadingOnRename: boolean
   markdownSnippets: boolean
   autoPairs: boolean
   autoPairQuotesInProse: boolean
@@ -1883,6 +1898,7 @@ function collectPrefs(s: {
     typstTagPreambles: s.typstTagPreambles,
     looseMathDelimiters: s.looseMathDelimiters,
     keepViewModeAcrossNotes: s.keepViewModeAcrossNotes,
+    syncTitleHeadingOnRename: s.syncTitleHeadingOnRename,
     markdownSnippets: s.markdownSnippets,
     autoPairs: s.autoPairs,
     autoPairQuotesInProse: s.autoPairQuotesInProse,
@@ -2361,6 +2377,8 @@ interface Store {
   typstTagPreambles: boolean
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
+  /** Renaming a note rewrites its leading `# Heading` to match. Persisted. (#455) */
+  syncTitleHeadingOnRename: boolean
   /** Auto-close markdown delimiters while typing. Persisted. */
   markdownSnippets: boolean
   /** Auto-insert matching `[]`, `()`, and `{}` delimiters while typing. Persisted. */
@@ -2775,6 +2793,7 @@ interface Store {
   setTypstTagPreambles: (on: boolean) => void
   setLooseMathDelimiters: (on: boolean) => void
   setKeepViewModeAcrossNotes: (on: boolean) => void
+  setSyncTitleHeadingOnRename: (on: boolean) => void
   setMarkdownSnippets: (on: boolean) => void
   setAutoPairs: (on: boolean) => void
   setAutoPairQuotesInProse: (on: boolean) => void
@@ -3262,6 +3281,51 @@ function renameNoteState(
     noteComments: rewriteNoteCommentsPath(s.noteComments, oldPath, meta.path),
     activeCommentId: s.activeCommentId,
     ...activeFieldsFrom(ensured.layout, ensured.activePaneId, contents, dirty)
+  }
+}
+
+/**
+ * After a rename, bring the note's leading `# Heading` along with the new
+ * filename (#455). Opt-in via the `syncTitleHeadingOnRename` setting; a note
+ * with no leading H1 is never given one.
+ *
+ * Runs for both open and closed notes: an open note goes through the normal
+ * buffer + save path so every pane showing it repaints, while a closed one is
+ * patched straight on disk rather than being pulled into the buffer map.
+ * Callers should refresh notes afterwards so the excerpt catches up.
+ */
+async function syncHeadingAfterRename(
+  meta: NoteMeta,
+  get: () => {
+    syncTitleHeadingOnRename: boolean
+    noteContents: Record<string, NoteContent>
+    updateNoteBody: (path: string, body: string) => void
+    persistNote: (path: string) => Promise<void>
+  }
+): Promise<void> {
+  if (!get().syncTitleHeadingOnRename) return
+  // Markdown only, and never an Obsidian drawing: those are `.md` files whose
+  // headings (`# Excalidraw Data`) are structure, not a title.
+  if (!meta.path.toLowerCase().endsWith('.md')) return
+  if (isObsidianExcalidrawPath(meta.path)) return
+  try {
+    const open = get().noteContents[meta.path]
+    if (open) {
+      if (isObsidianExcalidrawMarkdown(open.body)) return
+      const next = retitleLeadingHeading(open.body, meta.title)
+      if (next === open.body) return
+      get().updateNoteBody(meta.path, next)
+      await get().persistNote(meta.path)
+      return
+    }
+    const content = await window.zen.readNote(meta.path)
+    if (isObsidianExcalidrawMarkdown(content.body)) return
+    const next = retitleLeadingHeading(content.body, meta.title)
+    if (next === content.body) return
+    await window.zen.writeNote(meta.path, next)
+  } catch (err) {
+    // The rename itself succeeded; a failed heading rewrite must not undo it.
+    console.error('syncHeadingAfterRename failed', err)
   }
 }
 
@@ -3934,6 +3998,7 @@ export const useStore = create<Store>((set, get) => {
   typstTagPreambles: loadPrefs().typstTagPreambles,
   looseMathDelimiters: loadPrefs().looseMathDelimiters,
   keepViewModeAcrossNotes: loadPrefs().keepViewModeAcrossNotes,
+  syncTitleHeadingOnRename: loadPrefs().syncTitleHeadingOnRename,
   markdownSnippets: loadPrefs().markdownSnippets,
   autoPairs: loadPrefs().autoPairs,
   autoPairQuotesInProse: loadPrefs().autoPairQuotesInProse,
@@ -5669,6 +5734,9 @@ export const useStore = create<Store>((set, get) => {
       await get().applyFavorites(
         rewriteFavoriteNotePath(get().vaultSettings.favorites, oldPath, meta.path)
       )
+      // Before the refresh so one listing picks up both the rename and the
+      // rewritten heading (excerpt, size).
+      await syncHeadingAfterRename(meta, get)
       await get().refreshNotes()
     } catch (err) {
       console.error('renameNote failed', err)
@@ -6149,6 +6217,10 @@ export const useStore = create<Store>((set, get) => {
   },
   setKeepViewModeAcrossNotes: (on) => {
     set({ keepViewModeAcrossNotes: on })
+    savePrefs(collectPrefs(get()))
+  },
+  setSyncTitleHeadingOnRename: (on) => {
+    set({ syncTitleHeadingOnRename: on })
     savePrefs(collectPrefs(get()))
   },
   setMarkdownSnippets: (on) => {
@@ -6950,6 +7022,7 @@ export const useStore = create<Store>((set, get) => {
       await get().persistNote(notePath)
       const copy = await window.zen.duplicateNote(notePath)
       const renamed = await window.zen.renameNote(copy.path, trimmedName)
+      await syncHeadingAfterRename(renamed, get)
       await get().refreshNotes()
       await get().selectNote(renamed.path)
       get().setFocusedPanel('editor')

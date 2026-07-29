@@ -449,6 +449,12 @@ export function SettingsModal(): JSX.Element {
   const setKeepViewModeAcrossNotes = useStore(
     (s) => s.setKeepViewModeAcrossNotes,
   );
+  const syncTitleHeadingOnRename = useStore(
+    (s) => s.syncTitleHeadingOnRename,
+  );
+  const setSyncTitleHeadingOnRename = useStore(
+    (s) => s.setSyncTitleHeadingOnRename,
+  );
   const markdownSnippets = useStore((s) => s.markdownSnippets);
   const setMarkdownSnippets = useStore((s) => s.setMarkdownSnippets);
   const autoPairs = useStore((s) => s.autoPairs);
@@ -1711,6 +1717,9 @@ export function SettingsModal(): JSX.Element {
         "tasks",
         "workflow",
         "workflows",
+        "rename",
+        "title",
+        "heading",
       ],
       searchItems: [
         {
@@ -1827,6 +1836,21 @@ export function SettingsModal(): JSX.Element {
             "latex",
             "relaxed",
             "loose",
+          ],
+        },
+        {
+          id: "sync-title-heading-on-rename",
+          title: "Sync title heading on rename",
+          description:
+            "Renaming a note rewrites its leading # heading to the new name.",
+          keywords: [
+            "rename",
+            "title",
+            "heading",
+            "h1",
+            "sync",
+            "filename",
+            "first line",
           ],
         },
         {
@@ -2141,6 +2165,7 @@ export function SettingsModal(): JSX.Element {
           searchIds: [
             "live-preview",
             "render-tables",
+            "sync-title-heading-on-rename",
             "markdown-overrides",
             "auto-pairs",
             "auto-pair-quotes-in-prose",
@@ -2220,6 +2245,13 @@ export function SettingsModal(): JSX.Element {
                   value={keepViewModeAcrossNotes}
                   settingId="keep-view-mode"
                   onChange={setKeepViewModeAcrossNotes}
+                />
+                <ToggleRow
+                  label="Sync title heading on rename"
+                  description="Renaming a note also rewrites its leading `# heading` to the new name, so the title line stops drifting from the filename. Only an existing top-level heading is rewritten — a note that opens with prose, a list, or a deeper heading is left alone, so deleting the `#` line opts that note out for good."
+                  value={syncTitleHeadingOnRename}
+                  settingId="sync-title-heading-on-rename"
+                  onChange={setSyncTitleHeadingOnRename}
                 />
                 <ToggleRow
                   label="Markdown snippets"

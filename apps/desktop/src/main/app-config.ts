@@ -97,6 +97,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'render_tables',
     comment: 'render tables as widgets in live preview; off keeps them as plain text'
   },
+  syncTitleHeadingOnRename: {
+    section: 'editor',
+    tomlKey: 'sync_title_heading_on_rename',
+    comment: "renaming a note rewrites its leading '# heading' to match"
+  },
   markdownSnippets: {
     section: 'editor',
     tomlKey: 'markdown_snippets',
