@@ -148,6 +148,8 @@ import {
   parseCustomTemplate,
   slugifyTemplateName
 } from '@shared/template-files'
+import { buildWorkflowIndex } from './lib/workflow-index'
+import type { WorkflowIndexEntry } from './lib/workflow-index'
 import {
   INITIAL_VISIBLE_NOTE_PREFETCH_BATCH_SIZE,
   selectInitialVisibleNotePrefetchPaths
@@ -343,6 +345,7 @@ async function refreshVaultIndexes(): Promise<void> {
     state.refreshNotes(),
     state.refreshAssets(),
     state.loadCustomTemplates(),
+    state.loadWorkflowIndex(),
     state.refreshRootContentHidden()
   ])
 }
@@ -2319,6 +2322,12 @@ interface Store {
   templatePaletteTarget: { folder: NoteFolder; subpath: string } | null
   /** Custom templates loaded from `.zennotes/templates/` (built-ins are constants). */
   customTemplates: NoteTemplate[]
+  /**
+   * The vault's workflows, summarized for surfaces outside the workflows view.
+   * The command palette builds its Run entries from this synchronously, which
+   * is why it is store state rather than a fetch when the palette opens.
+   */
+  workflowIndex: WorkflowIndexEntry[]
   query: string
   initialized: boolean
   workspaceRestored: boolean
@@ -2858,6 +2867,8 @@ interface Store {
   insertTemplateIntoActiveNote: (template: NoteTemplate) => void
   /** Reload custom templates from disk (called on vault open and after CRUD). */
   loadCustomTemplates: () => Promise<void>
+  /** Reload the workflow index (called with the vault indexes and after workflow CRUD). */
+  loadWorkflowIndex: () => Promise<void>
   saveCustomTemplate: (input: {
     slug: string
     raw: string
@@ -3893,6 +3904,7 @@ export const useStore = create<Store>((set, get) => {
   templatePaletteMode: 'create',
   templatePaletteTarget: null,
   customTemplates: [],
+  workflowIndex: [],
   query: '',
   initialized: false,
   workspaceRestored: false,
@@ -6789,6 +6801,20 @@ export const useStore = create<Store>((set, get) => {
     } catch (err) {
       console.error('loadCustomTemplates failed', err)
       set({ customTemplates: [] })
+    }
+  },
+
+  loadWorkflowIndex: async () => {
+    // A workspace with no workflow support (the web bridge, an old server)
+    // simply has none; the palette then offers no Run entries, same as a vault
+    // with an empty workflows directory.
+    if (typeof window.zen.listWorkflows !== 'function') return
+    try {
+      const files = await window.zen.listWorkflows()
+      set({ workflowIndex: buildWorkflowIndex(files) })
+    } catch (err) {
+      console.error('loadWorkflowIndex failed', err)
+      set({ workflowIndex: [] })
     }
   },
 

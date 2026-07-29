@@ -19,6 +19,7 @@ import { getKeymapDisplay, type KeymapId } from './keymaps'
 import { dispatchKeyboardContextMenu, findTabContextMenuTarget } from './keyboard-context-menu'
 import { resolveSystemFolderLabels } from './system-folder-labels'
 import { isCalendarToggleAvailable, noteFolderSubpath } from './vault-layout'
+import { runWorkflowById } from './workflow-trigger'
 import { DEMO_TOUR_START_PATH } from '@shared/demo-tour'
 
 const APP_WEBSITE_URL = 'https://zennotes.org'
@@ -1751,6 +1752,42 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
           return getState().connectRemoteWorkspaceProfile(profile.id)
         }
       })
+    }
+  }
+
+  /* ---------------- Workflows: the picker, and one Run entry each ---------------- */
+  // Built from the store's workflow index the same way the remote profiles
+  // above are built from theirs, so the palette always reflects the vault as
+  // of the moment it opened. Drafts are left out on purpose: a draft cannot
+  // run, and a row that only answers with an error is worse than no row.
+  {
+    const state = getState()
+    const runnableHere =
+      state.workflowsEnabled &&
+      state.workspaceMode !== 'remote' &&
+      window.zen.getAppInfo().runtime === 'desktop' &&
+      typeof window.zen.applyWorkflow === 'function'
+    if (runnableHere) {
+      // The browsable list, in the same drill-down shape as `Switch Vault…`.
+      cmds.push({
+        id: 'workflow.runPicker',
+        title: 'Run Workflow…',
+        category: 'Workflow',
+        keywords: 'workflow run list pick choose automation trigger pipeline',
+        run: () => {
+          /* handled by CommandPalette */
+        }
+      })
+      for (const entry of state.workflowIndex) {
+        if (entry.status !== 'active') continue
+        cmds.push({
+          id: `workflow.run.${entry.id}`,
+          title: `Run: ${entry.name}`,
+          category: 'Workflow',
+          keywords: `${entry.name} ${entry.description} ${entry.id} workflow run automation trigger pipeline`,
+          run: () => runWorkflowById(entry.id)
+        })
+      }
     }
   }
 

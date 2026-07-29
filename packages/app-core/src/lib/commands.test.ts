@@ -139,6 +139,41 @@ describe('Workflows feature switch', () => {
   })
 })
 
+describe('Workflow run entries', () => {
+  const INDEX = [
+    {
+      id: 'reading-log',
+      name: 'Reading log',
+      description: 'Keep the table in sync',
+      status: 'active' as const,
+      mutates: true
+    },
+    { id: 'half-idea', name: 'Half idea', description: '', status: 'draft' as const, mutates: false }
+  ]
+
+  it('lists one Run entry per active workflow and none for drafts', async () => {
+    ;(window.zen as unknown as Record<string, unknown>).applyWorkflow = vi.fn()
+    const { buildCommands, useStore } = await loadCommands()
+    useStore.setState({ workflowsEnabled: true, workspaceMode: 'local', workflowIndex: INDEX })
+
+    const commands = buildCommands()
+    const run = commands.find((c) => c.id === 'workflow.run.reading-log')
+    expect(run?.title).toBe('Run: Reading log')
+    expect(run?.category).toBe('Workflow')
+    // A draft cannot run, so the palette does not offer to.
+    expect(commands.some((c) => c.id === 'workflow.run.half-idea')).toBe(false)
+    // The browsable picker rides along, in the Switch Vault… drill-down shape.
+    expect(commands.find((c) => c.id === 'workflow.runPicker')?.title).toBe('Run Workflow…')
+  })
+
+  it('offers no Run entries where the bridge cannot apply a run', async () => {
+    // The stub bridge has no applyWorkflow, which is the web app's shape.
+    const { buildCommands, useStore } = await loadCommands()
+    useStore.setState({ workflowsEnabled: true, workspaceMode: 'local', workflowIndex: INDEX })
+    expect(buildCommands().some((c) => c.id.startsWith('workflow.run.'))).toBe(false)
+  })
+})
+
 describe('close-tab command shortcut', () => {
   // #242: in Vim mode Ctrl+W is the pane prefix, so the Mod+W label was wrong.
   it('shows :q in Vim mode and the Mod+W binding otherwise', async () => {
