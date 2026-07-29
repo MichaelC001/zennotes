@@ -117,6 +117,11 @@ export const HELP_HOW_TO_GUIDES: HelpCard[] = [
       'Run "New Drawing" from the command palette to create a `.excalidraw` file and open it in a built-in Excalidraw editor tab. Drawings are first-class vault files — they appear in the sidebar, can be moved and archived like notes, and auto-refresh when edited. To embed a drawing inside a note, use "Embed Existing Drawing…" (pick from a searchable list) or "Embed New Drawing" (create one at the cursor and switch to its editor). The embed syntax is `![[name.excalidraw]]`, the same as images, and supports optional size hints like `![[name.excalidraw|600]]` or `![[name.excalidraw|600x400]]`. Clicking an embed opens the drawing in a new tab. Obsidian-style `.excalidraw.md` files are also supported.'
   },
   {
+    title: 'Automate repetitive edits with Workflows',
+    body:
+      'Workflows turn a vault ritual (find the notes tagged `#book`, keep the ones rated 4 or higher, write them as a table into the reading log, tag the rest `#someday`) into a file you run with one key. The feature is off by default: turn it on once under Settings → Workflows and the view appears in the sidebar (also `Space a` in Vim mode, or "Open Workflows" in the command palette). Start from the recipe gallery ("New workflow"): each recipe is an ordinary `.md` file that copies into `.zennotes/workflows/` and opens in the same editor as anything you write yourself, as a canvas and as text, whichever you prefer. Press `R` (or the Run button) and nothing happens blind: a dry-run confirmation lists every change first, grouped and counted, and after you apply, Undo restores every file the run wrote, byte for byte. You can also run any active workflow without opening the view at all: every one is a command-palette entry, and "Run Workflow…" opens a picker; the receipt arrives as a toast carrying the Undo button. New workflows start as inert drafts until you activate them, and importing a workflow someone shared is a review, never an install.'
+  },
+  {
     title: 'Turn a CSV into a database',
     body:
       'Run “New Database” from the command palette (or right-click a folder in the sidebar → New database) to create one, or just open an existing `.csv` file from the vault. ZenNotes stores the data as `<Name>.csv` plus a small `<Name>.csv.base.json` sidecar that holds field types, select options, and your saved views. Edit cells inline in the Table view, group records in a Board by any select field, switch the raw-CSV toggle to see the underlying file, and press `o` on a row to open it as a full Markdown page whose frontmatter mirrors the row’s properties. The whole grid is keyboard-driven — see the Database grid shortcuts.'
@@ -358,6 +363,11 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
     title: 'Updates are release-driven',
     body:
       'In-app updates read the published GitHub release feed. That means update checks, download prompts, and release notes are all driven by the same public releases you can open manually from the app menu or command palette.'
+  },
+  {
+    title: 'Workflows plan first and write second',
+    body:
+      'A workflow is a plain `.md` file under `.zennotes/workflows/`: frontmatter plus one pipeline per line, like `good = books | where rating >= 4`. Wires carry sets of notes, so every wire on the canvas shows the live count flowing through it, and the canvas and the text are lossless projections of the same file (layout is computed, so no coordinates ever land in your vault). The engine can only propose changes: running shows the full dry-run diff before anything is applied, applying journals every file\'s pre-run bytes so Undo restores them exactly, and a run that fails midway rolls the whole thing back on its own. There are no code steps, no shell, and no network, which is why a workflow you did not write is safe to read and run. The feature is off by default; enable it under Settings → Workflows.'
   }
 ]
 
@@ -523,6 +533,26 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: '/', action: 'Filter the view', detail: 'Focus the local filter box for tasks, tag matches, or trashed notes.' },
       { keys: ':', action: 'Open local ex prompt', detail: 'Run the view-specific command line inside Tasks or Tags.' },
       { keys: 'Esc', action: 'Clear the filter', detail: 'Clears an active filter. These views are tabs, so Esc no longer closes them — close with :q or the ✕ in the tab header.' }
+    ]
+  },
+  {
+    id: 'workflows-view',
+    title: 'Workflows view',
+    description:
+      'Off by default; enable under Settings → Workflows. The single-letter keys below are Vim-mode only, like every list in the app; arrows, Enter, and Esc always work, and Shift+F10 (or the ContextMenu key) opens the row menu in either mode.',
+    items: [
+      { keys: 'j / k', action: 'Move between workflows', detail: 'Step through the list on the left. g g / G jump to the first and last.' },
+      { keys: 'Enter', action: 'Open for editing', detail: 'Open the selected workflow on the canvas.' },
+      { keys: 'R', action: 'Run', detail: 'Plan the selected workflow and show the dry-run confirmation: every change grouped and counted before anything is written. Applying journals each file, so the run can be undone byte for byte from the receipt.' },
+      { keys: 't', action: 'Toggle draft / active', detail: 'A draft is saved but inert: it cannot run, from here or from the palette. Activating a workflow that writes lists exactly what it changes first.' },
+      { keys: 'a', action: 'Add a step', detail: 'Insert a step after the focused node, picked from the registry with its arguments explained.' },
+      { keys: 'e', action: 'Edit as text', detail: 'Flip between the canvas and the raw file. Both edit the same workflow; neither is the "real" one.' },
+      { keys: 'n', action: 'New workflow', detail: 'Open the recipe gallery. Every recipe is a plain file that copies into your vault and opens in this same editor.' },
+      { keys: 'y / p', action: 'Copy / import via clipboard', detail: 'y puts the selected workflow file on the clipboard as text; p reviews whatever workflow text is on the clipboard before it can land, always as a manual-trigger draft.' },
+      { keys: 'd', action: 'Delete', detail: 'Delete the selected workflow file, after confirmation.' },
+      { keys: 'm', action: 'Row menu', detail: 'Open the context menu for the selected workflow: duplicate, export, reveal, and the rest.' },
+      { keys: '?', action: 'Syntax reference', detail: 'Every step the format knows, with a real example each.' },
+      { keys: 'r', action: 'Reload from disk', detail: 'Re-read the workflows directory, for files that arrived by sync or by hand.' }
     ]
   },
   {
@@ -860,6 +890,12 @@ export const HELP_SETTINGS: HelpSettingsSection[] = [
       { label: 'Paths with spaces', detail: 'Quote note paths like `zn read "hellointerview/system design.md"` or pass them with `--path "hellointerview/system design.md"` so your shell keeps the path as one argument.' },
       { label: 'Raycast on macOS', detail: 'The Raycast extension requires `zn` and can be installed locally from this settings page. ZenNotes copies the bundled extension into app data, installs dependencies, builds it, and imports it into Raycast. It searches with `zn list --json`, then opens notes in ZenNotes through `zennotes://open` or `zennotes://open-window` and exposes archive, unarchive, trash, reveal, copy path, and copy wikilink actions from Raycast.' },
       { label: 'Uninstall', detail: 'Removes only the ZenNotes-managed symlink — never an arbitrary unmanaged binary named `zn`. The CLI stays inside the app bundle for next time.' }
+    ]
+  },
+  {
+    title: 'Workflows',
+    items: [
+      { label: 'Workflows', detail: 'Off by default. Turn it on to add the Workflows view (sidebar row, palette commands, and the Space a leader binding in Vim mode): saved, repeatable pipelines over your notes, edited on a canvas and run behind a dry-run confirmation with whole-run undo. Turning it off hides all of that again and closes the view if it is open.' }
     ]
   },
   {
