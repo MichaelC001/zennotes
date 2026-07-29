@@ -23,6 +23,11 @@ import {
   customCodeLanguageRegistry,
   PREVIEW_TOKEN_CLASS
 } from './custom-code-languages'
+import {
+  markdownLooseMathDelimiters,
+  markdownMathRenderer,
+  markdownSettingsRevision
+} from './markdown-settings'
 
 /**
  * Remark plugin: `[[target]]` and `[[target|label]]` → link nodes
@@ -741,37 +746,14 @@ function createProcessor(mathRenderer: 'katex' | 'typst') {
 const katexProcessor = createProcessor('katex')
 let typstProcessor: ReturnType<typeof createProcessor> | null = null
 
-// Which typesetter `renderMarkdown` uses. Driven by the `mathRenderer` setting
-// (App.tsx pushes changes here). Default KaTeX keeps existing notes unchanged.
-let activeMathRenderer: 'katex' | 'typst' = 'katex'
-
-/**
- * Point the preview pipeline at KaTeX or Typst. Clears the render cache so the
- * current note re-renders under the new engine on the next `renderMarkdown`.
- */
-export function setMarkdownMathRenderer(mathRenderer: 'katex' | 'typst'): void {
-  if (mathRenderer === activeMathRenderer) return
-  activeMathRenderer = mathRenderer
-  markdownRenderCache.clear()
-}
-
-// When on, a `$$…$$` display block also renders when prose sits before the
-// opening fence (`Note: $$…$$`) or after the closing fence (`$$…$$ done`); the
-// prose is split onto its own paragraph so the fence owns its line. Off by
-// default (the `looseMathDelimiters` setting drives it); the editor keeps
-// showing source for those shapes, so this only relaxes the reading view.
-let looseMathDelimiters = false
-
-/** Toggle relaxed `$$` display-math delimiters (prose before/after the fence).
- *  Clears the render cache so the current note re-renders under the new rule. */
-export function setMarkdownLooseMathDelimiters(loose: boolean): void {
-  if (loose === looseMathDelimiters) return
-  looseMathDelimiters = loose
-  markdownRenderCache.clear()
-}
-
+// Which typesetter `renderMarkdown` uses, and whether `$$` delimiters are
+// relaxed, both live in `./markdown-settings` so that pushing a setting down
+// (App.tsx does, on every pref change) does not make this whole module — and
+// with it remark/rehype/highlight — a static dependency of the app entry.
+// A switch invalidates cached HTML through the revision in the cache key rather
+// than by clearing the cache from the setter.
 function activeProcessor() {
-  if (activeMathRenderer === 'typst') {
+  if (markdownMathRenderer() === 'typst') {
     return (typstProcessor ??= createProcessor('typst'))
   }
   return katexProcessor
@@ -977,7 +959,7 @@ function normalizeBlockMathFences(src: string, loose = false): string {
 }
 
 export function renderMarkdown(src: string): string {
-  const cacheKey = `${customCodeLanguageRegistry.revision}\0${src}`
+  const cacheKey = `${customCodeLanguageRegistry.revision}\0${markdownSettingsRevision()}\0${src}`
   const cached = getCachedMarkdown(cacheKey)
   if (cached != null) {
     recordRendererPerf('markdown.render.cache-hit', 0, { chars: src.length })
@@ -989,7 +971,7 @@ export function renderMarkdown(src: string): string {
     const html = sanitizeRenderedHtml(
       String(
         activeProcessor().processSync(
-          escapeTableMathPipes(normalizeBlockMathFences(src, looseMathDelimiters))
+          escapeTableMathPipes(normalizeBlockMathFences(src, markdownLooseMathDelimiters()))
         )
       )
     )

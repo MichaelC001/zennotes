@@ -2,11 +2,11 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import type { NoteMeta } from "@shared/ipc";
+import { renderMarkdown } from "../lib/markdown";
 import {
-  renderMarkdown,
   setMarkdownLooseMathDelimiters,
   setMarkdownMathRenderer,
-} from "../lib/markdown";
+} from "../lib/markdown-settings";
 import { expandEmbeds, hasNoteEmbeds } from "../lib/transclusion";
 import { todayIso } from "../lib/task-metadata-tokens";
 import { selectTypstPreambleFor } from "../lib/typst-preamble-select";

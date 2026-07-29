@@ -38,7 +38,10 @@ import { recordRendererPerf } from './lib/perf'
 import { focusEditorNormalMode } from './lib/editor-focus'
 import { isAppOverlayOpen } from './lib/overlay-open'
 import { installMarkdownFileDropHandler } from './lib/markdown-file-drop'
-import { setMarkdownLooseMathDelimiters, setMarkdownMathRenderer } from './lib/markdown'
+import {
+  setMarkdownLooseMathDelimiters,
+  setMarkdownMathRenderer
+} from './lib/markdown-settings'
 import {
   appUpdateNoticeLabel,
   appUpdatePrimaryActionLabel,
