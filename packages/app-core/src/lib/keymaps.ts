@@ -14,6 +14,7 @@ export type KeymapId =
   | "global.commandPalette"
   | "global.newQuickNote"
   | "global.openSettings"
+  | "global.openFile"
   | "global.toggleSidebar"
   | "global.toggleConnections"
   | "global.toggleOutlinePanel"
@@ -164,6 +165,16 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     title: "Open settings",
     description: "Open the Settings modal.",
     defaultBinding: "Mod+,",
+  },
+  {
+    id: "global.openFile",
+    kind: "shortcut",
+    scope: "app",
+    group: "global",
+    title: "Open file",
+    description:
+      "Open a single markdown file from outside the vault. On macOS the File menu also binds ⌘O. In Vim mode on Windows/Linux the editor keeps Ctrl+O for the jumplist and insert-mode i_CTRL-O, so this fires when focus is outside the editor or with Vim off — rebind either to change that.",
+    defaultBinding: "Mod+O",
   },
   {
     id: "global.toggleSidebar",

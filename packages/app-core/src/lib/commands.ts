@@ -1524,6 +1524,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       title: 'Open File…',
       category: 'Vault',
       keywords: 'open file markdown external outside vault one-off document proofread standalone',
+      shortcut: shortcut('global.openFile'),
       when: () =>
         window.zen.getAppInfo().runtime === 'desktop' &&
         window.zen.getCapabilities().supportsLocalFilesystemPickers,

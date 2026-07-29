@@ -861,6 +861,25 @@ function App(): JSX.Element {
         state.setSettingsOpen(!state.settingsOpen)
         return
       }
+      // Mod+O — open a single markdown file (#449's deferred Win/Linux half).
+      // On macOS the File-menu accelerator swallows ⌘O before the renderer
+      // sees it, so this effectively serves the menu-less platforms. Vim keeps
+      // every claim it already has on Ctrl+O: the capture-phase jumplist takes
+      // normal and visual mode (#488's rule), and insert mode's i_CTRL-O
+      // arrives here defaultPrevented by the editor, hence the check. So with
+      // Vim on this fires only outside the editor; with Vim off it is simply
+      // Ctrl+O. Either side is rebindable in Settings → Keymaps.
+      if (
+        matchesShortcut(e, overrides, 'global.openFile') &&
+        !e.defaultPrevented &&
+        window.zen.getAppInfo().runtime === 'desktop' &&
+        window.zen.getCapabilities().supportsLocalFilesystemPickers &&
+        typeof window.zen.openFileDialog === 'function'
+      ) {
+        e.preventDefault()
+        void window.zen.openFileDialog()
+        return
+      }
     }
     // Pane-focus shortcuts must win over the editor. CodeMirror binds keys such
     // as Ctrl-h (delete character) and Ctrl-k (delete to line end), so when a

@@ -31,6 +31,7 @@ export const KEYMAP_CATALOG: KeymapCatalogEntry[] = [
   { id: "global.commandPalette", group: "global", defaultBinding: "Shift+Mod+P", title: "Open command palette" },
   { id: "global.newQuickNote", group: "global", defaultBinding: "Shift+Mod+N", title: "New quick note" },
   { id: "global.openSettings", group: "global", defaultBinding: "Mod+,", title: "Open settings" },
+  { id: "global.openFile", group: "global", defaultBinding: "Mod+O", title: "Open file" },
   { id: "global.toggleSidebar", group: "global", defaultBinding: "Mod+1", title: "Toggle sidebar" },
   { id: "global.toggleConnections", group: "global", defaultBinding: "Mod+2", title: "Toggle connections panel" },
   { id: "global.toggleOutlinePanel", group: "global", defaultBinding: "Mod+3", title: "Toggle outline panel" },
