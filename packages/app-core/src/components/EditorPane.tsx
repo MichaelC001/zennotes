@@ -128,6 +128,8 @@ import { AssetsView } from './AssetsView'
 import { QuickNotesView } from './QuickNotesView'
 import type { MathRenderer } from '@shared/app-config'
 import { isTasksTabPath } from '@shared/tasks'
+import { isWorkflowsTabPath } from '@shared/workflows-view'
+import { WorkflowsView } from './WorkflowsView'
 import { isDatabaseTabPath, databaseTitleFromTab, databaseTabPath, isDatabaseCsvPath } from '@shared/databases'
 import { isTagsTabPath } from '@shared/tags'
 import { isHelpTabPath } from '@shared/help'
@@ -189,6 +191,7 @@ import {
   PinIcon,
   TagIcon,
   TrashIcon,
+  WorkflowIcon,
   ZapIcon
 } from './icons'
 import { focusEditorNormalMode } from '../lib/editor-focus'
@@ -2516,6 +2519,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           preview: path === previewTab,
           isQuick: false,
           isTasks: false,
+          isWorkflows: false,
           isTag: false,
           isHelp: false,
           isArchive: false,
@@ -2524,6 +2528,13 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           isAsset: false,
           isDiagram: false,
           isDatabase: false
+        }
+        if (isWorkflowsTabPath(path)) {
+          return {
+            ...base,
+            title: 'Workflows',
+            isWorkflows: true
+          }
         }
         if (isTasksTabPath(path)) {
           return {
@@ -2666,6 +2677,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     // close, close relatives, or split them into another pane.
     if (
       isQuickNotesTabPath(path) ||
+      isWorkflowsTabPath(path) ||
       isTagsTabPath(path) ||
       isHelpTabPath(path) ||
       isArchiveTabPath(path) ||
@@ -2772,6 +2784,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       preview: boolean
       isQuick: boolean
       isTasks: boolean
+      isWorkflows: boolean
       isTag: boolean
       isHelp: boolean
       isArchive: boolean
@@ -2784,6 +2797,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       const isVirtual =
         tab.isQuick ||
         tab.isTasks ||
+        tab.isWorkflows ||
         tab.isTag ||
         tab.isHelp ||
         tab.isArchive ||
@@ -2918,6 +2932,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             >
               {tab.isTasks && (
                 <CheckSquareIcon width={13} height={13} className="shrink-0 text-accent" />
+              )}
+              {tab.isWorkflows && (
+                <WorkflowIcon width={13} height={13} className="shrink-0 text-accent" />
               )}
               {tab.isQuick && (
                 <ZapIcon width={13} height={13} className="shrink-0 text-accent" />
@@ -3486,7 +3503,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           {assetDropActive && (
             <div className="pointer-events-none absolute inset-3 z-20 rounded-xl border-2 border-dashed border-accent/55 bg-accent/8" />
           )}
-          {isTasksTabPath(activeTab) ? (
+          {isWorkflowsTabPath(activeTab) ? (
+            <WorkflowsView />
+          ) : isTasksTabPath(activeTab) ? (
             <TasksView />
           ) : isQuickNotesTabPath(activeTab) ? (
             <QuickNotesView />

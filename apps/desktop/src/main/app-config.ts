@@ -245,6 +245,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     comment: 'code / monospace font; empty = system default'
   },
   // view
+  workflowsEnabled: {
+    section: 'view',
+    tomlKey: 'workflows_enabled',
+    comment: 'show the Workflows view, its sidebar row, command, and leader shortcut'
+  },
   assetSortOrder: {
     section: 'view',
     tomlKey: 'asset_sort_order',

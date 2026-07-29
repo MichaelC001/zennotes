@@ -459,6 +459,8 @@ export function SettingsModal(): JSX.Element {
   );
   const tabsEnabled = useStore((s) => s.tabsEnabled);
   const setTabsEnabled = useStore((s) => s.setTabsEnabled);
+  const workflowsEnabled = useStore((s) => s.workflowsEnabled);
+  const setWorkflowsEnabled = useStore((s) => s.setWorkflowsEnabled);
   const wrapTabs = useStore((s) => s.wrapTabs);
   const setWrapTabs = useStore((s) => s.setWrapTabs);
   const quickNoteDateTitle = useStore((s) => s.quickNoteDateTitle);
@@ -1707,6 +1709,8 @@ export function SettingsModal(): JSX.Element {
         "shortcut",
         "task",
         "tasks",
+        "workflow",
+        "workflows",
       ],
       searchItems: [
         {
@@ -1947,6 +1951,22 @@ export function SettingsModal(): JSX.Element {
           description:
             "System-wide shortcut to open the floating capture window.",
           keywords: ["quick capture", "hotkey", "shortcut"],
+        },
+        {
+          id: "workflows-enabled",
+          title: "Workflows",
+          description:
+            "The Workflows canvas for running repeatable, file-changing steps over the vault.",
+          keywords: [
+            "workflow",
+            "workflows",
+            "automation",
+            "canvas",
+            "pipeline",
+            "graph",
+            "nodes",
+            "run",
+          ],
         },
       ],
       subTabs: [
@@ -2315,6 +2335,29 @@ export function SettingsModal(): JSX.Element {
                 description="Floating capture window for thoughts you want in the vault without leaving whatever you're doing."
               >
                 <QuickCaptureHotkeyRow settingId="quick-capture-hotkey" />
+              </Section>
+            </div>
+          ),
+        },
+        {
+          id: "workflows",
+          title: "Workflows",
+          description:
+            "The Workflows canvas, and whether it appears in the app at all.",
+          searchIds: ["workflows-enabled"],
+          content: (
+            <div className="space-y-6">
+              <Section
+                title="Workflows"
+                description="Repeatable steps you write once and run over the vault, edited on a canvas in their own view."
+              >
+                <ToggleRow
+                  label="Workflows"
+                  description="Run saved, repeatable steps over your notes from a canvas view. Turning it off hides the Workflows view along with its sidebar row, command, and Leader shortcut, and closes it if it is open."
+                  value={workflowsEnabled}
+                  settingId="workflows-enabled"
+                  onChange={setWorkflowsEnabled}
+                />
               </Section>
             </div>
           ),

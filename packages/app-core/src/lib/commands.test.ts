@@ -125,6 +125,20 @@ describe('built-in template commands (#112)', () => {
   })
 })
 
+describe('Workflows feature switch', () => {
+  it('offers view.workflows only while the feature is enabled', async () => {
+    const { buildCommands, useStore } = await loadCommands()
+
+    // buildCommands drops anything whose `when` guard rejects, so an off
+    // switch removes the palette entry outright rather than greying it out.
+    useStore.setState({ workflowsEnabled: true })
+    expect(buildCommands().find((c) => c.id === 'view.workflows')?.title).toBe('Open Workflows')
+
+    useStore.setState({ workflowsEnabled: false })
+    expect(buildCommands().some((c) => c.id === 'view.workflows')).toBe(false)
+  })
+})
+
 describe('close-tab command shortcut', () => {
   // #242: in Vim mode Ctrl+W is the pane prefix, so the Mod+W label was wrong.
   it('shows :q in Vim mode and the Mod+W binding otherwise', async () => {

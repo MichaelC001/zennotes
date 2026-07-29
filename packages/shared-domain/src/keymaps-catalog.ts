@@ -55,6 +55,7 @@ export const KEYMAP_CATALOG: KeymapCatalogEntry[] = [
   { id: "global.historyForward", group: "global", defaultBinding: "Alt+ArrowRight", title: "Go forward in note history" },
   { id: "vim.leaderPrefix", group: "vim", defaultBinding: "Space", title: "Leader key" },
   { id: "vim.leaderOpenBuffers", group: "vim", defaultBinding: "o", title: "Leader: open buffers" },
+  { id: "vim.leaderWorkflows", group: "vim", defaultBinding: "a", title: "Leader: open workflows" },
   { id: "vim.leaderSearchNotes", group: "vim", defaultBinding: "f", title: "Leader: search notes" },
   { id: "vim.leaderSearchGroup", group: "vim", defaultBinding: "s", title: "Leader: search…" },
   { id: "vim.leaderSearchVaultText", group: "vim", defaultBinding: "t", title: "Leader search: vault text" },

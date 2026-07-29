@@ -29,6 +29,16 @@ export const SearchIcon = (p: IconProps): JSX.Element => (
   </I>
 )
 
+/** A source node fanning out to two downstream nodes: the shape of a pipeline. */
+export const WorkflowIcon = (p: IconProps): JSX.Element => (
+  <I {...p}>
+    <rect x="2.5" y="9.5" width="6" height="5" rx="1.5" />
+    <rect x="15.5" y="3.5" width="6" height="5" rx="1.5" />
+    <rect x="15.5" y="15.5" width="6" height="5" rx="1.5" />
+    <path d="M8.5 12h3.5V6h3.5M12 12v6h3.5" />
+  </I>
+)
+
 export const TableIcon = (p: IconProps): JSX.Element => (
   <I {...p}>
     <rect x="3" y="3" width="18" height="18" rx="2" />

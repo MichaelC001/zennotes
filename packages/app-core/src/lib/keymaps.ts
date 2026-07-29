@@ -38,6 +38,7 @@ export type KeymapId =
   | "global.historyForward"
   | "vim.leaderPrefix"
   | "vim.leaderOpenBuffers"
+  | "vim.leaderWorkflows"
   | "vim.leaderSearchNotes"
   | "vim.leaderSearchGroup"
   | "vim.leaderSearchVaultText"
@@ -381,6 +382,18 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     title: "Leader: open buffers",
     description: "Open the buffer switcher.",
     defaultBinding: "o",
+    vimOnly: true,
+    maxTokens: 1,
+  },
+  {
+    id: "vim.leaderWorkflows",
+    kind: "sequence",
+    scope: "leader",
+    group: "vim",
+    title: "Leader: open workflows",
+    // `w` already belongs to the weekly note, so this takes `a` for automation.
+    description: "Open the Workflows canvas.",
+    defaultBinding: "a",
     vimOnly: true,
     maxTokens: 1,
   },

@@ -26,6 +26,14 @@ import type {
   WriteTemplateInput
 } from '@zennotes/bridge-contract/templates'
 import type {
+  ApplyWorkflowInput,
+  WorkflowFile,
+  WorkflowRunReceipt,
+  WorkflowRunSummary,
+  WorkflowUndoResult,
+  WriteWorkflowInput
+} from '@zennotes/bridge-contract/workflows'
+import type {
   AppUpdateState,
   AssetMeta,
   CliInstallStatus,
@@ -942,6 +950,45 @@ function removeDemoTour(): Promise<VaultDemoTourResult> {
   return jsonRequest<VaultDemoTourResult>('/demo/remove', { method: 'POST' })
 }
 
+// Workflows are authored as files under `.zennotes/workflows`, which the web
+// app cannot reach, so it simply has none. The canvas still renders, it is
+// just empty, which is friendlier than an error the user cannot act on.
+function listWorkflows(): Promise<WorkflowFile[]> {
+  return Promise.resolve([])
+}
+
+// Authoring is a different matter from listing: rejecting is the only honest
+// answer, because resolving would leave the editor showing a saved workflow
+// that exists nowhere.
+function writeWorkflow(_input: WriteWorkflowInput): Promise<WorkflowFile> {
+  return Promise.reject(new Error('Editing workflows is unavailable on the web'))
+}
+
+function deleteWorkflow(_sourcePath: string): Promise<void> {
+  return Promise.reject(new Error('Editing workflows is unavailable on the web'))
+}
+
+// Applying, undoing and the run history all need the local filesystem: the
+// journal that makes a run undoable is a file in the vault, and without it
+// there is no honest way to promise an undo. Rejecting is the only answer that
+// does not overstate what the web app can do, and it means a run can never land
+// somewhere its undo could not reach.
+function applyWorkflow(_input: ApplyWorkflowInput): Promise<WorkflowRunReceipt> {
+  return Promise.reject(new Error('Running workflows is unavailable on the web'))
+}
+
+function undoWorkflowRun(_runId: string): Promise<WorkflowUndoResult> {
+  return Promise.reject(new Error('Running workflows is unavailable on the web'))
+}
+
+// A read, not a run: a vault the web app cannot run workflows in simply has no
+// recorded runs, the same answer `listWorkflows` gives for the files. A future
+// history panel then shows an empty list here instead of tripping on a
+// rejection where the workflow list quietly showed nothing.
+function listWorkflowRuns(): Promise<WorkflowRunSummary[]> {
+  return Promise.resolve([])
+}
+
 // Custom templates require local-filesystem CRUD, which the web app does not
 // have (supportsCustomTemplates is false). Built-in templates still work since
 // they are renderer constants. List is empty; mutations are rejected.
@@ -1497,6 +1544,12 @@ export const httpBridge: ZenBridge = {
   hasAssetsDir,
   generateDemoTour,
   removeDemoTour,
+  listWorkflows,
+  writeWorkflow,
+  deleteWorkflow,
+  applyWorkflow,
+  undoWorkflowRun,
+  listWorkflowRuns,
   listTemplates,
   readTemplate,
   writeTemplate,

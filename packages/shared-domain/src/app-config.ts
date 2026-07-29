@@ -109,6 +109,8 @@ export const PORTABLE_PREF_KEYS = [
   'interfaceFont',
   'textFont',
   'monoFont',
+  // features
+  'workflowsEnabled',
   // view
   'systemFolderLabels',
   'noteSortOrder',
@@ -210,6 +212,7 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   interfaceFont: null,
   textFont: null,
   monoFont: null,
+  workflowsEnabled: true,
   systemFolderLabels: {},
   noteSortOrder: 'none',
   assetSortOrder: 'name-asc',

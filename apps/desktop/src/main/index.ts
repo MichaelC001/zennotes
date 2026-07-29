@@ -135,6 +135,20 @@ import {
 } from './templates'
 import type { WriteTemplateInput } from '@zennotes/bridge-contract/templates'
 import {
+  deleteWorkflowFile,
+  listWorkflowFiles,
+  readWorkflowImportFile,
+  safeExportFilename,
+  writeWorkflowFile
+} from './workflows'
+import { applyWorkflowOps, listWorkflowRuns, undoWorkflowRun } from './workflow-apply'
+import type {
+  ApplyWorkflowInput,
+  ExportWorkflowInput,
+  ImportedWorkflowFile,
+  WriteWorkflowInput
+} from '@zennotes/bridge-contract/workflows'
+import {
   deleteRemoteWorkspaceSecret,
   getRemoteWorkspaceSecret,
   setRemoteWorkspaceSecret
@@ -2307,6 +2321,114 @@ function registerIpc(): void {
     }
     const v = requireVault()
     return await removeDemoTour(v.root)
+  })
+
+  // Workflows are authored as files in the vault, so remote workspaces (which
+  // have no local `.zennotes/workflows`) simply have none.
+  handle(IPC.VAULT_LIST_WORKFLOWS, async () => {
+    if (isRemoteWorkspaceActive()) return []
+    const v = requireVault()
+    return await listWorkflowFiles(v.root)
+  })
+
+  // Authoring needs the local filesystem, so remote workspaces reject rather
+  // than resolve: a silent success would leave the editor believing it saved.
+  handle(IPC.VAULT_WRITE_WORKFLOW, async (_e, input: WriteWorkflowInput) => {
+    if (isRemoteWorkspaceActive()) {
+      throw new Error('Workflows are unavailable on remote vaults')
+    }
+    const v = requireVault()
+    return await writeWorkflowFile(v.root, input)
+  })
+
+  handle(IPC.VAULT_DELETE_WORKFLOW, async (_e, sourcePath: string) => {
+    if (isRemoteWorkspaceActive()) {
+      throw new Error('Workflows are unavailable on remote vaults')
+    }
+    const v = requireVault()
+    return await deleteWorkflowFile(v.root, sourcePath)
+  })
+
+  // Export is a save dialog and a file copy, and deliberately nothing more: a
+  // workflow IS a `.md` file, so the shareable artifact is the file. The bytes
+  // come from the renderer, which read them from the vault, so this never
+  // reinterprets a format it does not own.
+  handle(IPC.VAULT_EXPORT_WORKFLOW, async (event, input: ExportWorkflowInput) => {
+    if (isRemoteWorkspaceActive()) {
+      throw new Error('Workflows are unavailable on remote vaults')
+    }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.SaveDialogOptions = {
+      title: 'Export Workflow',
+      defaultPath: path.join(app.getPath('documents'), safeExportFilename(input.suggestedName)),
+      buttonLabel: 'Export',
+      filters: [{ name: 'Markdown', extensions: ['md'] }]
+    }
+    const result = win
+      ? await dialog.showSaveDialog(win, options)
+      : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return null
+    // The dialog already asked about overwriting, and the user picked the path,
+    // so this writes exactly where they said and reports back where that was.
+    await fsp.writeFile(result.filePath, input.raw, 'utf8')
+    return result.filePath
+  })
+
+  // Import READS. It does not write into the vault, it does not parse, and it
+  // certainly does not run: the renderer reviews the text (parse, validate, and
+  // "here is every note this would change") and only then writes through
+  // `writeWorkflow` like any other create. Keeping the read separate is what
+  // makes "an import is never a silent install" a property of the plumbing
+  // rather than a promise in a comment.
+  handle(IPC.VAULT_IMPORT_WORKFLOW_FILE, async (event): Promise<ImportedWorkflowFile | null> => {
+    if (isRemoteWorkspaceActive()) {
+      throw new Error('Workflows are unavailable on remote vaults')
+    }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: 'Import Workflow',
+      properties: ['openFile'],
+      buttonLabel: 'Choose',
+      filters: [
+        { name: 'Workflow', extensions: ['md'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) return null
+    return await readWorkflowImportFile(result.filePaths[0])
+  })
+
+  // Applying is deliberately a separate call from planning: the engine returns
+  // ops and cannot write, so nothing reaches the vault until the user has seen
+  // the dry run and asked for it here.
+  handle(IPC.VAULT_APPLY_WORKFLOW, async (_e, input: ApplyWorkflowInput) => {
+    if (isRemoteWorkspaceActive()) {
+      throw new Error('Workflows are unavailable on remote vaults')
+    }
+    const v = requireVault()
+    return await applyWorkflowOps(v.root, input)
+  })
+
+  // Undo restores the bytes the run recorded, so it is safe to offer for any
+  // run still in the ledger, and an error (never a silent success) for one that
+  // is unknown or already undone.
+  handle(IPC.VAULT_UNDO_WORKFLOW_RUN, async (_e, runId: string) => {
+    if (isRemoteWorkspaceActive()) {
+      throw new Error('Workflows are unavailable on remote vaults')
+    }
+    const v = requireVault()
+    return await undoWorkflowRun(v.root, runId)
+  })
+
+  // Run history is read from files in the vault, so a remote workspace simply
+  // has none, matching how it reports workflows themselves.
+  handle(IPC.VAULT_LIST_WORKFLOW_RUNS, async () => {
+    if (isRemoteWorkspaceActive()) return []
+    const v = requireVault()
+    return await listWorkflowRuns(v.root)
   })
 
   // Custom templates live on the local filesystem only; remote vaults fall

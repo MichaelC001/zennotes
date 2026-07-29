@@ -68,6 +68,31 @@ function escapeForAttr(value: string): string {
 // #309: how quickly a Space press+release inside an Excalidraw canvas counts as
 // a "tap" (arm the leader) rather than a hold (let Excalidraw's Hand tool pan).
 // Tuned so a deliberate hold-to-pan clears it while a natural tap stays under it.
+/**
+ * Surfaces that run their own keyboard, which this listener must not touch.
+ *
+ * This handler is CAPTURE-PHASE on window and calls stopImmediatePropagation,
+ * so by default it wins every key in the app and routes it into sidebar and
+ * note-list navigation. Any panel with its own focus and its own keys has to be
+ * excluded here, and forgetting does not look like a routing bug: the panel
+ * simply appears to have no keyboard at all. Both Workflows surfaces shipped
+ * with exactly that symptom (arrows moved the SIDEBAR cursor, Backspace
+ * "focused the left sidebar", m opened the sidebar folder menu), and each was
+ * diagnosed from scratch because the previous fix was an anonymous copy of the
+ * same three lines.
+ *
+ * One list and one condition, so a new surface is one entry rather than a
+ * fourth near-identical block, and the Ctrl+W passthrough cannot be got wrong
+ * per surface. Ctrl+W and its pending direction key always survive, so a panel
+ * can still hand off to pane and tab navigation.
+ */
+const SELF_KEYED_SURFACES = [
+  // Runs its own vim-style motion grid.
+  '[data-zen-db-grid]',
+  '[data-workflow-list-pane]',
+  '[data-workflow-canvas]'
+].join(', ')
+
 const EXCALIDRAW_LEADER_TAP_MS = 250
 
 export function VimNav(): JSX.Element | null {
@@ -412,12 +437,10 @@ export function VimNav(): JSX.Element | null {
       ) {
         return
       }
-      // The database/table view runs its own vim-style motion grid; yield to it
-      // so sidebar/note-list navigation doesn't steal j/k/h/l etc. — EXCEPT the
-      // pane prefix (Ctrl+W) and its pending direction key, so the grid can hand
-      // off to pane/tab navigation (Ctrl+W k → tabs) like every other surface.
+      // Yield to any surface that runs its own keyboard. See
+      // SELF_KEYED_SURFACES for the list and why it is one list.
       if (
-        target?.closest('[data-zen-db-grid]') &&
+        target?.closest(SELF_KEYED_SURFACES) &&
         !ctrlWPending.current &&
         sequenceTokenFromEvent(e) !== panePrefixToken
       ) {
@@ -841,6 +864,15 @@ export function VimNav(): JSX.Element | null {
           e.stopImmediatePropagation()
           resetLeader()
           state.setBufferPaletteOpen(true)
+          return
+        }
+        // Skipped outright when Workflows is off, so the key falls through as
+        // an unbound leader press instead of arming a dead view.
+        if (state.workflowsEnabled && matchesSequenceToken(e, overrides, 'vim.leaderWorkflows')) {
+          e.preventDefault()
+          e.stopImmediatePropagation()
+          resetLeader()
+          void state.openWorkflowsView()
           return
         }
         if (matchesSequenceToken(e, overrides, 'vim.hintMode')) {

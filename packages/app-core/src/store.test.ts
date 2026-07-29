@@ -2,6 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TASKS_TAB_PATH, type VaultTask } from '@shared/tasks'
+import { WORKFLOWS_TAB_PATH } from '@shared/workflows-view'
 import { databaseTabPath, type DatabaseDoc } from '@shared/databases'
 import { assetTabPath } from './lib/asset-tabs'
 import { findLeaf, type PaneLayout, type PaneLeaf } from './lib/pane-layout'
@@ -1143,6 +1144,71 @@ describe('pdfExportUseTheme — theme in PDF export', () => {
     vi.resetModules()
     const missing = await import('./store')
     expect(missing.useStore.getState().pdfExportUseTheme).toBe(false)
+  })
+})
+
+describe('workflowsEnabled (Workflows feature switch)', () => {
+  it('defaults on and round-trips through persistence', async () => {
+    installZen()
+    const { useStore } = await loadStore()
+    // On by default: the switch exists to turn a built feature off, not to
+    // hide it behind a flag, so existing users see no change.
+    expect(useStore.getState().workflowsEnabled).toBe(true)
+
+    useStore.getState().setWorkflowsEnabled(false)
+    expect(useStore.getState().workflowsEnabled).toBe(false)
+    const saved = JSON.parse(localStorage.getItem('zen:prefs:v2') ?? '{}')
+    expect(saved.workflowsEnabled).toBe(false)
+
+    vi.resetModules()
+    const reloaded = await import('./store')
+    expect(reloaded.useStore.getState().workflowsEnabled).toBe(false)
+  })
+
+  it('normalizes missing and non-boolean stored values to true', async () => {
+    installZen()
+    await loadStore() // fresh module + cleared storage
+
+    localStorage.setItem('zen:prefs:v2', JSON.stringify({ workflowsEnabled: 'nope' }))
+    vi.resetModules()
+    const bad = await import('./store')
+    expect(bad.useStore.getState().workflowsEnabled).toBe(true)
+
+    localStorage.setItem('zen:prefs:v2', JSON.stringify({ themeId: 'dark-hard' }))
+    vi.resetModules()
+    const missing = await import('./store')
+    expect(missing.useStore.getState().workflowsEnabled).toBe(true)
+  })
+
+  it('closes an open Workflows tab when the feature is switched off', async () => {
+    installZen()
+    const { useStore } = await loadStore()
+    const paneId = useStore.getState().activePaneId
+    useStore.setState({ notes: [makeNote('A', 'inbox/A.md')] })
+
+    await useStore.getState().openNoteInPane(paneId, 'inbox/A.md')
+    await useStore.getState().openWorkflowsView()
+    expect(findLeaf(useStore.getState().paneLayout, paneId)?.tabs).toContain(WORKFLOWS_TAB_PATH)
+
+    useStore.getState().setWorkflowsEnabled(false)
+    await flushAsyncWork()
+    // No live canvas may survive behind a disabled feature.
+    expect(findLeaf(useStore.getState().paneLayout, paneId)?.tabs).not.toContain(
+      WORKFLOWS_TAB_PATH
+    )
+  })
+
+  it('refuses to open the view while the feature is off', async () => {
+    installZen()
+    const { useStore } = await loadStore()
+    useStore.getState().setWorkflowsEnabled(false)
+
+    await useStore.getState().openWorkflowsView()
+
+    const paneId = useStore.getState().activePaneId
+    expect(findLeaf(useStore.getState().paneLayout, paneId)?.tabs ?? []).not.toContain(
+      WORKFLOWS_TAB_PATH
+    )
   })
 })
 

@@ -35,6 +35,16 @@ import type {
   VaultTextSearchToolPaths
 } from './ipc'
 import type { CustomTemplateFile, WriteTemplateInput } from './templates'
+import type {
+  ApplyWorkflowInput,
+  ExportWorkflowInput,
+  ImportedWorkflowFile,
+  WorkflowFile,
+  WorkflowRunReceipt,
+  WorkflowRunSummary,
+  WorkflowUndoResult,
+  WriteWorkflowInput
+} from './workflows'
 import type { VaultTask } from '@zennotes/shared-domain/tasks'
 import type {
   DatabaseDoc,
@@ -130,6 +140,43 @@ export interface ZenBridge {
   hasAssetsDir(): Promise<boolean>
   generateDemoTour(): Promise<VaultDemoTourResult>
   removeDemoTour(): Promise<VaultDemoTourResult>
+  /**
+   * Raw contents of every `.zennotes/workflows/*.md` file, newest name order.
+   * Parsing lives in `@shared/workflows/parse` so the format has one home, the
+   * same split the templates API uses. Returns [] where the filesystem is not
+   * reachable (web, remote workspaces).
+   */
+  listWorkflows(): Promise<WorkflowFile[]>
+  /** Create or overwrite a workflow file; returns the saved file. */
+  writeWorkflow(input: WriteWorkflowInput): Promise<WorkflowFile>
+  deleteWorkflow(sourcePath: string): Promise<void>
+  /**
+   * Save a copy of a workflow file anywhere on disk, through a native save
+   * dialog. Resolves with the chosen path, or null when the dialog is
+   * cancelled.
+   *
+   * Optional because it needs a filesystem: web and remote workspaces have
+   * none, and the view hides the affordance rather than offering one that
+   * fails. Sharing there is the clipboard, which needs no bridge at all.
+   */
+  exportWorkflow?(input: ExportWorkflowInput): Promise<string | null>
+  /**
+   * Read a workflow file the user picks in a native open dialog. Resolves with
+   * null when the dialog is cancelled.
+   *
+   * Reading is ALL this does. The file is untrusted text until the renderer has
+   * parsed, validated and shown it (`@shared/workflows/share`), and nothing
+   * reaches `.zennotes/workflows` except through `writeWorkflow` afterwards.
+   */
+  importWorkflowFile?(): Promise<ImportedWorkflowFile | null>
+  /**
+   * Execute a plan's ops. The ONLY place in the product that writes on a
+   * workflow's behalf, so every guarantee (journal, atomicity, whole-run
+   * rollback) lives behind this one call.
+   */
+  applyWorkflow(input: ApplyWorkflowInput): Promise<WorkflowRunReceipt>
+  undoWorkflowRun(runId: string): Promise<WorkflowUndoResult>
+  listWorkflowRuns(): Promise<WorkflowRunSummary[]>
   listTemplates(): Promise<CustomTemplateFile[]>
   readTemplate(sourcePath: string): Promise<string>
   writeTemplate(input: WriteTemplateInput): Promise<CustomTemplateFile>

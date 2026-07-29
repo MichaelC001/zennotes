@@ -1,0 +1,899 @@
+// Tests for the workflow applier, journal and undo.
+//
+// Everything here runs against a real temp vault, because the whole point of
+// this module is what ends up on a filesystem: a fake would only prove the
+// mocks agree with each other. The recurring assertion is a hash snapshot of
+// every file in the vault, since "byte-identical afterwards" is the actual
+// promise a rollback makes and a content comparison is the only thing that
+// checks it.
+import { createHash } from 'node:crypto'
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import type { WorkflowRunReceipt } from '@zennotes/bridge-contract/workflows'
+import type { WorkflowOp } from '@shared/workflows/types'
+import {
+  applyWorkflowOps,
+  listWorkflowRuns,
+  MAX_RETAINED_RUNS,
+  parseWorkflowOp,
+  undoWorkflowRun,
+  type WorkflowRunLedger
+} from './workflow-apply'
+
+/**
+ * Paths whose atomic write should fail, so the "the rollback itself failed"
+ * branch can be exercised without a real broken disk. Hoisted because
+ * `vi.mock` factories run before the module body.
+ */
+const injected = vi.hoisted(() => ({
+  failingWrites: new Set<string>(),
+  // path -> how many writes to let through before failing. This is what makes a
+  // GENUINELY incomplete rollback expressible: the op's write has to succeed so
+  // the file really is holding this run's bytes, and only the restore afterwards
+  // may fail. Failing every write to a path instead produces a file that was
+  // never modified, which is a clean rollback, not an incomplete one.
+  failAfterWrites: new Map<string, number>(),
+  writeCounts: new Map<string, number>()
+}))
+
+vi.mock('./vault', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./vault')>()
+  return {
+    ...actual,
+    writeFileAtomic: async (abs: string, data: string): Promise<void> => {
+      if (injected.failingWrites.has(abs)) throw new Error('simulated disk failure')
+      const allowed = injected.failAfterWrites.get(abs)
+      if (allowed !== undefined) {
+        const seen = injected.writeCounts.get(abs) ?? 0
+        injected.writeCounts.set(abs, seen + 1)
+        if (seen >= allowed) throw new Error('simulated disk failure')
+      }
+      await actual.writeFileAtomic(abs, data)
+    }
+  }
+})
+
+const tempDirs: string[] = []
+
+async function makeVault(): Promise<string> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'zennotes-workflow-apply-'))
+  tempDirs.push(dir)
+  // Every vault has these; a few tests rely on them existing before the run.
+  await mkdir(path.join(dir, 'inbox'), { recursive: true })
+  return dir
+}
+
+async function seed(root: string, rel: string, content: string): Promise<void> {
+  const abs = path.join(root, rel)
+  await mkdir(path.dirname(abs), { recursive: true })
+  await writeFile(abs, content, 'utf8')
+}
+
+async function readOrNull(root: string, rel: string): Promise<string | null> {
+  try {
+    return await readFile(path.join(root, rel), 'utf8')
+  } catch {
+    return null
+  }
+}
+
+function sha256(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+/** Every note in the vault mapped to its content hash, ignoring `.zennotes`. */
+async function snapshot(
+  root: string,
+  dir = root,
+  out: Record<string, string> = {}
+): Promise<Record<string, string>> {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.name === '.zennotes') continue
+    const abs = path.join(dir, entry.name)
+    if (entry.isDirectory()) await snapshot(root, abs, out)
+    else out[path.relative(root, abs)] = sha256(await readFile(abs, 'utf8'))
+  }
+  return out
+}
+
+function runsDirOf(root: string): string {
+  return path.join(root, '.zennotes', 'workflows', '.runs')
+}
+
+async function ledgerFiles(root: string): Promise<string[]> {
+  try {
+    return (await readdir(runsDirOf(root))).sort()
+  } catch {
+    return []
+  }
+}
+
+async function readLedger(root: string, runId: string): Promise<WorkflowRunLedger> {
+  const raw = await readFile(path.join(runsDirOf(root), `${runId}.json`), 'utf8')
+  return JSON.parse(raw) as WorkflowRunLedger
+}
+
+function apply(
+  root: string,
+  ops: WorkflowOp[],
+  workflowId = 'test-flow'
+): Promise<WorkflowRunReceipt> {
+  return applyWorkflowOps(root, { workflowId, ops })
+}
+
+afterEach(async () => {
+  injected.failingWrites.clear()
+  injected.failAfterWrites.clear()
+  injected.writeCounts.clear()
+  vi.restoreAllMocks()
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Refusing to write outside the vault                                       */
+/* -------------------------------------------------------------------------- */
+
+describe('containment', () => {
+  it('aborts the whole run before any write when an op path escapes the vault', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'one\n')
+    const before = await snapshot(root)
+
+    await expect(
+      apply(root, [
+        { kind: 'append', path: 'inbox/A.md', text: 'appended' },
+        { kind: 'append', path: '../outside.md', text: 'nope' }
+      ])
+    ).rejects.toThrow(/escapes the vault/)
+
+    // The first op is valid and comes first, so this is the assertion that
+    // proves validation happens before execution rather than during it.
+    expect(await snapshot(root)).toEqual(before)
+    expect(await ledgerFiles(root)).toEqual([])
+  })
+
+  it('rejects an absolute path outside the vault', async () => {
+    const root = await makeVault()
+    await expect(
+      apply(root, [{ kind: 'write-note', path: '/tmp/evil.md', text: 'x' }])
+    ).rejects.toThrow(/escapes the vault/)
+  })
+
+  it('rejects a destination that escapes even when the source is fine', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'one\n')
+    await expect(
+      apply(root, [{ kind: 'move', path: 'inbox/A.md', to: '../..' }])
+    ).rejects.toThrow(/escapes the vault/)
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('one\n')
+  })
+
+  it('refuses to write inside .zennotes, where its own records live', async () => {
+    const root = await makeVault()
+    await expect(
+      apply(root, [{ kind: 'write-note', path: '.zennotes/workflows/evil.md', text: 'x' }])
+    ).rejects.toThrow(/inside \.zennotes/)
+  })
+
+  it('refuses a target that is not a note, so assets cannot be truncated', async () => {
+    const root = await makeVault()
+    await seed(root, 'assets/logo.png', 'binary-ish')
+    await expect(
+      apply(root, [{ kind: 'write-note', path: 'assets/logo.png', text: 'x' }])
+    ).rejects.toThrow(/not a note/)
+    expect(await readOrNull(root, 'assets/logo.png')).toBe('binary-ish')
+  })
+
+  it('rejects a malformed op before anything runs', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'one\n')
+    const before = await snapshot(root)
+    await expect(
+      applyWorkflowOps(root, {
+        workflowId: 'test-flow',
+        ops: [{ kind: 'append', path: 'inbox/A.md', text: 'ok' }, { kind: 'frobnicate' }]
+      })
+    ).rejects.toThrow(/op 1 is not a valid operation/)
+    expect(await snapshot(root)).toEqual(before)
+  })
+
+  it('rejects an op missing a required field', async () => {
+    const root = await makeVault()
+    await expect(
+      applyWorkflowOps(root, {
+        workflowId: 'test-flow',
+        ops: [{ kind: 'append', path: 'inbox/A.md' }]
+      })
+    ).rejects.toThrow(/op 0 is not a valid operation/)
+  })
+
+  it('drops fields that were not part of the op when narrowing', () => {
+    const op = parseWorkflowOp({ kind: 'add-tag', path: 'inbox/A.md', tag: 'x', extra: 'junk' })
+    expect(op).toEqual({ kind: 'add-tag', path: 'inbox/A.md', tag: 'x' })
+  })
+
+  it('rejects an empty path', async () => {
+    const root = await makeVault()
+    await expect(apply(root, [{ kind: 'append', path: '', text: 'x' }])).rejects.toThrow(
+      /empty path/
+    )
+  })
+
+  it('rejects a rename with nothing to rename to', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    const before = await snapshot(root)
+
+    await expect(apply(root, [{ kind: 'rename', path: 'inbox/A.md', to: '  ' }])).rejects.toThrow(
+      /empty target/
+    )
+    expect(await snapshot(root)).toEqual(before)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Applying                                                                  */
+/* -------------------------------------------------------------------------- */
+
+describe('applyWorkflowOps', () => {
+  it('applies a single op and reports it on the receipt', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'one\n')
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'appended' }
+    ])
+
+    expect(receipt.applied).toBe(1)
+    expect(receipt.paths).toEqual(['inbox/A.md'])
+    expect(receipt.irreversible).toBe(0)
+    expect(receipt.rolledBack).toBeUndefined()
+    expect(await readOrNull(root, 'inbox/A.md')).toContain('appended')
+  })
+
+  it('applies several ops across several files, in order', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await seed(root, 'inbox/B.md', 'b\n')
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'first' },
+      { kind: 'append', path: 'inbox/B.md', text: 'second' },
+      { kind: 'create-note', path: 'inbox/C.md', body: 'third' }
+    ])
+
+    expect(receipt.applied).toBe(3)
+    expect(receipt.paths).toEqual(['inbox/A.md', 'inbox/B.md', 'inbox/C.md'])
+    expect(await readOrNull(root, 'inbox/A.md')).toContain('first')
+    expect(await readOrNull(root, 'inbox/B.md')).toContain('second')
+    expect(await readOrNull(root, 'inbox/C.md')).toContain('third')
+  })
+
+  it('journals a file once, keeping the pre-run bytes when two ops hit it', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'original\n')
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'first' },
+      { kind: 'append', path: 'inbox/A.md', text: 'second' }
+    ])
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(receipt.applied).toBe(2)
+    expect(receipt.paths).toEqual(['inbox/A.md'])
+    expect(ledger.journal).toEqual([{ path: 'inbox/A.md', before: 'original\n' }])
+    // The second op must not have overwritten the entry with what the first op
+    // produced, or undo would restore a half-applied run.
+    expect(ledger.journal[0]?.before).not.toContain('first')
+  })
+
+  it('creates a note and undo removes it again', async () => {
+    const root = await makeVault()
+    const receipt = await apply(root, [
+      { kind: 'create-note', path: 'inbox/New.md', body: 'hello' }
+    ])
+    expect(await readOrNull(root, 'inbox/New.md')).toContain('hello')
+
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo).toEqual({ runId: receipt.runId, restored: 1 })
+    expect(await readOrNull(root, 'inbox/New.md')).toBeNull()
+  })
+
+  it('prunes a directory the undone note left empty, but keeps the folder', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Keep.md', 'keep\n')
+
+    const receipt = await apply(root, [
+      { kind: 'create-note', path: 'inbox/2026/report.md', body: 'x' }
+    ])
+    await undoWorkflowRun(root, receipt.runId)
+
+    expect(await readOrNull(root, 'inbox/2026/report.md')).toBeNull()
+    expect(await readdir(path.join(root, 'inbox'))).toEqual(['Keep.md'])
+  })
+
+  it('writes nothing when an op would not change the file', async () => {
+    const root = await makeVault()
+    const op: WorkflowOp = { kind: 'write-note', path: 'inbox/Report.md', text: 'same' }
+    await apply(root, [op])
+
+    const second = await apply(root, [op])
+    const ledger = await readLedger(root, second.runId)
+
+    // The op ran, it just had nothing to write: an mtime bump would be a sync
+    // round trip and a watcher event for a change that did not happen.
+    expect(second.applied).toBe(1)
+    expect(second.paths).toEqual([])
+    expect(ledger.journal).toEqual([])
+  })
+
+  it('counts notify and clipboard as irreversible without journalling them', async () => {
+    const root = await makeVault()
+    const receipt = await apply(root, [
+      { kind: 'notify', message: 'done' },
+      { kind: 'clipboard', text: 'copied' }
+    ])
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(receipt.applied).toBe(0)
+    expect(receipt.irreversible).toBe(2)
+    expect(receipt.paths).toEqual([])
+    expect(ledger.journal).toEqual([])
+    const [run] = await listWorkflowRuns(root)
+    expect(run?.undoable).toBe(false)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Path operations                                                           */
+/* -------------------------------------------------------------------------- */
+
+describe('path operations', () => {
+  it('moves a note into another folder and records both ends', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Note.md', 'body\n')
+
+    const receipt = await apply(root, [{ kind: 'move', path: 'inbox/Note.md', to: 'archive' }])
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(receipt.paths).toEqual(['inbox/Note.md', 'archive/Note.md'])
+    expect(await readOrNull(root, 'inbox/Note.md')).toBeNull()
+    expect(await readOrNull(root, 'archive/Note.md')).toBe('body\n')
+    expect(ledger.journal).toEqual([
+      { path: 'inbox/Note.md', before: 'body\n' },
+      { path: 'archive/Note.md', before: null }
+    ])
+  })
+
+  it('undoes a move by restoring both recorded paths', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Note.md', 'body\n')
+    const before = await snapshot(root)
+
+    const receipt = await apply(root, [{ kind: 'move', path: 'inbox/Note.md', to: 'archive' }])
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo.restored).toBe(2)
+    expect(await snapshot(root)).toEqual(before)
+  })
+
+  it('never clobbers a note already sitting at the destination', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Note.md', 'moving\n')
+    await seed(root, 'archive/Note.md', 'existing\n')
+
+    const receipt = await apply(root, [{ kind: 'move', path: 'inbox/Note.md', to: 'archive' }])
+
+    expect(receipt.paths).toEqual(['inbox/Note.md', 'archive/Note 2.md'])
+    expect(await readOrNull(root, 'archive/Note.md')).toBe('existing\n')
+    expect(await readOrNull(root, 'archive/Note 2.md')).toBe('moving\n')
+  })
+
+  it('renames within the same folder', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/demo/Old.md', 'body\n')
+
+    await apply(root, [{ kind: 'rename', path: 'inbox/demo/Old.md', to: 'New Name' }])
+
+    expect(await readOrNull(root, 'inbox/demo/Old.md')).toBeNull()
+    expect(await readOrNull(root, 'inbox/demo/New Name.md')).toBe('body\n')
+  })
+
+  it('keeps the file type when renaming a drawing', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Sketch.excalidraw', '{}\n')
+
+    await apply(root, [{ kind: 'rename', path: 'inbox/Sketch.excalidraw', to: 'Plan' }])
+
+    expect(await readOrNull(root, 'inbox/Plan.excalidraw')).toBe('{}\n')
+  })
+
+  it('mirrors the subfolder when archiving', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/demo/X.md', 'x\n')
+
+    await apply(root, [{ kind: 'archive', path: 'inbox/demo/X.md' }])
+
+    expect(await readOrNull(root, 'archive/demo/X.md')).toBe('x\n')
+  })
+
+  it('trashes a note from the top level', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/X.md', 'x\n')
+
+    await apply(root, [{ kind: 'trash', path: 'inbox/X.md' }])
+
+    expect(await readOrNull(root, 'trash/X.md')).toBe('x\n')
+    expect(await readOrNull(root, 'inbox/X.md')).toBeNull()
+  })
+
+  it('does nothing when the note is already where the op would put it', async () => {
+    const root = await makeVault()
+    await seed(root, 'trash/Old.md', 'old\n')
+
+    const receipt = await apply(root, [{ kind: 'trash', path: 'trash/Old.md' }])
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(receipt.paths).toEqual([])
+    expect(ledger.journal).toEqual([])
+    expect(await readOrNull(root, 'trash/Old.md')).toBe('old\n')
+  })
+
+  it('journals the pre-run bytes when an edit and a move hit the same note', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'original\n')
+    const before = await snapshot(root)
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'edited' },
+      { kind: 'archive', path: 'inbox/A.md' }
+    ])
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(ledger.journal[0]).toEqual({ path: 'inbox/A.md', before: 'original\n' })
+    expect(await readOrNull(root, 'archive/A.md')).toContain('edited')
+
+    await undoWorkflowRun(root, receipt.runId)
+    expect(await snapshot(root)).toEqual(before)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Rollback                                                                  */
+/* -------------------------------------------------------------------------- */
+
+describe('rollback', () => {
+  it('leaves every file byte-identical when an op fails mid-run', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await seed(root, 'inbox/B.md', 'b\n')
+    const before = await snapshot(root)
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'first' },
+      { kind: 'append', path: 'inbox/B.md', text: 'second' },
+      { kind: 'move', path: 'inbox/Gone.md', to: 'archive' }
+    ])
+
+    expect(receipt.rolledBack?.reason).toMatch(/missing/)
+    expect(receipt.rolledBack?.reason).toMatch(/vault is unchanged/)
+    expect(receipt.applied).toBe(0)
+    expect(receipt.paths).toEqual([])
+    expect(await snapshot(root)).toEqual(before)
+  })
+
+  it('removes files the failed run created', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    const before = await snapshot(root)
+
+    await apply(root, [
+      { kind: 'create-note', path: 'inbox/Created.md', body: 'new' },
+      { kind: 'append', path: 'inbox/A.md', text: 'edit' },
+      { kind: 'archive', path: 'inbox/Gone.md' }
+    ])
+
+    expect(await readOrNull(root, 'inbox/Created.md')).toBeNull()
+    expect(await snapshot(root)).toEqual(before)
+  })
+
+  it('puts a completed move back before failing later in the run', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Note.md', 'body\n')
+    const before = await snapshot(root)
+
+    await apply(root, [
+      { kind: 'archive', path: 'inbox/Note.md' },
+      { kind: 'trash', path: 'inbox/Missing.md' }
+    ])
+
+    expect(await snapshot(root)).toEqual(before)
+    expect(await readOrNull(root, 'archive/Note.md')).toBeNull()
+  })
+
+  it('keeps no run record when the rollback was clean', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'edit' },
+      { kind: 'trash', path: 'inbox/Missing.md' }
+    ])
+
+    // Nothing landed, so a run offering an undo would describe changes that are
+    // not there.
+    expect(await ledgerFiles(root)).toEqual([])
+    expect(await listWorkflowRuns(root)).toEqual([])
+  })
+
+  it('reports a clean rollback when the only failed write left the file untouched', async () => {
+    // A path is journalled BEFORE its write is attempted, so a write that fails
+    // leaves a journal entry for a file nobody changed. Restoring it is a no-op,
+    // and reporting ROLLBACK INCOMPLETE for it would contradict the headline the
+    // user reads while the vault is in fact pristine.
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    injected.failingWrites.add(path.join(root, 'inbox', 'A.md'))
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+
+    expect(receipt.rolledBack?.reason).toMatch(/rolled back/i)
+    expect(receipt.rolledBack?.reason).not.toMatch(/ROLLBACK INCOMPLETE/)
+    expect(receipt.applied).toBe(0)
+    expect(receipt.paths).toEqual([])
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('a\n')
+    // A clean rollback changed nothing, so there is no run to offer an undo for.
+    expect(await listWorkflowRuns(root)).toEqual([])
+  })
+
+  it('says so loudly when the rollback itself cannot finish', async () => {
+    // The genuine incomplete case: A's write SUCCEEDS so the file really holds
+    // this run's bytes, B fails to force the rollback, and A's restore is what
+    // cannot be written.
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await seed(root, 'inbox/B.md', 'b\n')
+    injected.failAfterWrites.set(path.join(root, 'inbox', 'A.md'), 1)
+    injected.failingWrites.add(path.join(root, 'inbox', 'B.md'))
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'edit' },
+      { kind: 'append', path: 'inbox/B.md', text: 'edit' }
+    ])
+
+    expect(receipt.rolledBack?.reason).toMatch(/ROLLBACK INCOMPLETE/)
+    expect(receipt.rolledBack?.reason).toMatch(/inbox\/A\.md/)
+    expect(receipt.applied).toBe(0)
+    expect(receipt.paths).toEqual(['inbox/A.md'])
+    // A really is still holding the run's bytes, which is why this is loud.
+    expect(await readOrNull(root, 'inbox/A.md')).not.toBe('a\n')
+  })
+
+  it('keeps the journal on disk when the rollback could not finish, so undo can retry', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await seed(root, 'inbox/B.md', 'b\n')
+    injected.failAfterWrites.set(path.join(root, 'inbox', 'A.md'), 1)
+    injected.failingWrites.add(path.join(root, 'inbox', 'B.md'))
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'edit' },
+      { kind: 'append', path: 'inbox/B.md', text: 'edit' }
+    ])
+    const [run] = await listWorkflowRuns(root)
+    expect(run?.runId).toBe(receipt.runId)
+    expect(run?.undoable).toBe(true)
+
+    injected.failingWrites.clear()
+    injected.failAfterWrites.clear()
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo.restored).toBeGreaterThanOrEqual(1)
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('a\n')
+    expect(await readOrNull(root, 'inbox/B.md')).toBe('b\n')
+  })
+
+  it('rolls the run back rather than leave changes it could not record', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    const before = await snapshot(root)
+    // The run's own ledger is what makes it undoable, so a run that cannot be
+    // recorded must not survive. A plain file where the runs directory belongs
+    // makes every ledger write fail, whatever the run ends up being called.
+    await mkdir(path.dirname(runsDirOf(root)), { recursive: true })
+    await writeFile(runsDirOf(root), 'not a directory', 'utf8')
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+
+    expect(receipt.rolledBack?.reason).toMatch(/could not be recorded/)
+    expect(receipt.applied).toBe(0)
+    expect(await snapshot(root)).toEqual(before)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  The ledger                                                                */
+/* -------------------------------------------------------------------------- */
+
+describe('run ledger', () => {
+  it('records the run, its ops, its journal and its hashes', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    const ops: WorkflowOp[] = [
+      { kind: 'append', path: 'inbox/A.md', text: 'edit' },
+      { kind: 'notify', message: 'done' }
+    ]
+
+    const receipt = await apply(root, ops, 'reading-log')
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(ledger.version).toBe(1)
+    expect(ledger.runId).toBe(receipt.runId)
+    expect(ledger.workflowId).toBe('reading-log')
+    expect(ledger.startedAt).toBe(receipt.startedAt)
+    expect(ledger.finishedAt).toBeGreaterThanOrEqual(ledger.startedAt)
+    expect(ledger.applied).toBe(1)
+    expect(ledger.irreversible).toBe(1)
+    expect(ledger.paths).toEqual(['inbox/A.md'])
+    expect(ledger.ops).toEqual(ops)
+    expect(ledger.journal).toEqual([{ path: 'inbox/A.md', before: 'a\n' }])
+    expect(ledger.undone).toBe(false)
+  })
+
+  it('hashes what the run left at each path', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+    const ledger = await readLedger(root, receipt.runId)
+    const written = await readOrNull(root, 'inbox/A.md')
+
+    expect(ledger.hashes['inbox/A.md']).toBe(sha256(written ?? ''))
+  })
+
+  it('records a null hash for a path the run emptied', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Note.md', 'body\n')
+
+    const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(ledger.hashes['inbox/Note.md']).toBeNull()
+    expect(ledger.hashes['archive/Note.md']).toBe(sha256('body\n'))
+  })
+
+  it('records why an incomplete rollback left files behind', async () => {
+    // Needs a genuinely stuck rollback: A's write lands, B forces the unwind,
+    // and A's restore is the one that cannot be written. A run whose only write
+    // failed rolls back cleanly and deliberately leaves no ledger at all.
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await seed(root, 'inbox/B.md', 'b\n')
+    injected.failAfterWrites.set(path.join(root, 'inbox', 'A.md'), 1)
+    injected.failingWrites.add(path.join(root, 'inbox', 'B.md'))
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'edit' },
+      { kind: 'append', path: 'inbox/B.md', text: 'edit' }
+    ])
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(ledger.rolledBack?.reason).toMatch(/ROLLBACK INCOMPLETE/)
+    expect(ledger.applied).toBe(0)
+    expect(ledger.journal).toContainEqual({ path: 'inbox/A.md', before: 'a\n' })
+  })
+
+  it('keeps the history bounded, since every ledger holds a copy of the old bytes', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await mkdir(runsDirOf(root), { recursive: true })
+    for (let n = 0; n < MAX_RETAINED_RUNS; n += 1) {
+      const runId = `17000000000${String(n).padStart(2, '0')}-001-aaaaaaaa`
+      await writeFile(
+        path.join(runsDirOf(root), `${runId}.json`),
+        JSON.stringify({ version: 1, runId, journal: [] }),
+        'utf8'
+      )
+    }
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+    const files = await ledgerFiles(root)
+
+    expect(files.length).toBe(MAX_RETAINED_RUNS)
+    expect(files).toContain(`${receipt.runId}.json`)
+    // The oldest went, not the newest.
+    expect(files).not.toContain('1700000000000-001-aaaaaaaa.json')
+  })
+
+  it('names runs so they sort chronologically without randomness', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    const first = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: '1' }])
+    const second = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: '2' }])
+
+    expect(first.runId).toMatch(/^\d{13}-\d{3}-[0-9a-f]{8}$/)
+    expect(second.runId > first.runId).toBe(true)
+    expect(await ledgerFiles(root)).toEqual([`${first.runId}.json`, `${second.runId}.json`])
+  })
+
+  it('gives two runs of the same ops in the same millisecond different ids', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    const now = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(now)
+
+    const first = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'x' }])
+    const second = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'x' }])
+
+    expect(second.runId).not.toBe(first.runId)
+    expect((await ledgerFiles(root)).length).toBe(2)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Undo                                                                      */
+/* -------------------------------------------------------------------------- */
+
+describe('undoWorkflowRun', () => {
+  it('restores the recorded bytes of every touched file', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await seed(root, 'inbox/B.md', 'b\n')
+    const before = await snapshot(root)
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: '1' },
+      { kind: 'write-note', path: 'inbox/B.md', text: 'replaced' },
+      { kind: 'create-note', path: 'inbox/C.md', body: 'new' }
+    ])
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo.restored).toBe(3)
+    expect(await snapshot(root)).toEqual(before)
+  })
+
+  it('restores bytes rather than replaying an inverse, even after edits outside the run', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+    // Someone types in the note after the run. Undo is a restore of the recorded
+    // pre-run bytes, so this is what it takes the file back to.
+    await seed(root, 'inbox/A.md', 'typed by hand\n')
+    await undoWorkflowRun(root, receipt.runId)
+
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('a\n')
+  })
+
+  it('errors on an unknown run instead of quietly succeeding', async () => {
+    const root = await makeVault()
+    await expect(undoWorkflowRun(root, '1700000000000-001-deadbeef')).rejects.toThrow(
+      /Unknown workflow run/
+    )
+  })
+
+  it('errors on a second undo of the same run', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+    await undoWorkflowRun(root, receipt.runId)
+
+    await expect(undoWorkflowRun(root, receipt.runId)).rejects.toThrow(/already undone/)
+  })
+
+  it('refuses a run id that is really a path', async () => {
+    const root = await makeVault()
+    await expect(undoWorkflowRun(root, '../../etc/passwd')).rejects.toThrow(
+      /Invalid workflow run id/
+    )
+  })
+
+  it('refuses to restore a journal entry pointing outside the vault', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+
+    // A ledger is a file in the vault, so it can be edited (or arrive over
+    // sync). It must never become a way to write anywhere on the filesystem.
+    const ledgerPath = path.join(runsDirOf(root), `${receipt.runId}.json`)
+    const ledger = JSON.parse(await readFile(ledgerPath, 'utf8')) as WorkflowRunLedger
+    ledger.journal = [{ path: '../escaped.md', before: 'owned' }]
+    await writeFile(ledgerPath, JSON.stringify(ledger), 'utf8')
+
+    await expect(undoWorkflowRun(root, receipt.runId)).rejects.toThrow(/incomplete/)
+    expect(await readOrNull(root, '../escaped.md')).toBeNull()
+  })
+
+  it('leaves the run undoable when the restore could not finish', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+
+    injected.failingWrites.add(path.join(root, 'inbox', 'A.md'))
+    await expect(undoWorkflowRun(root, receipt.runId)).rejects.toThrow(/try again/)
+
+    // Restoring recorded bytes is idempotent, so the honest recovery (retry) is
+    // also the correct one.
+    injected.failingWrites.clear()
+    expect((await undoWorkflowRun(root, receipt.runId)).restored).toBe(1)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  History                                                                   */
+/* -------------------------------------------------------------------------- */
+
+describe('listWorkflowRuns', () => {
+  it('is empty for a vault that has never run a workflow', async () => {
+    const root = await makeVault()
+    expect(await listWorkflowRuns(root)).toEqual([])
+  })
+
+  it('lists runs newest first', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    const first = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: '1' }], 'one')
+    const second = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: '2' }], 'two')
+    const runs = await listWorkflowRuns(root)
+
+    expect(runs.map((run) => run.runId)).toEqual([second.runId, first.runId])
+    expect(runs[0]?.workflowId).toBe('two')
+  })
+
+  it('reports what a run touched', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Note.md', 'body\n')
+
+    const receipt = await apply(root, [{ kind: 'move', path: 'inbox/Note.md', to: 'archive' }])
+    const [run] = await listWorkflowRuns(root)
+
+    expect(run).toEqual({
+      runId: receipt.runId,
+      workflowId: 'test-flow',
+      startedAt: receipt.startedAt,
+      applied: 1,
+      paths: ['inbox/Note.md', 'archive/Note.md'],
+      undoable: true
+    })
+  })
+
+  it('stops offering undo once a run has been undone', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+    await undoWorkflowRun(root, receipt.runId)
+    const [run] = await listWorkflowRuns(root)
+
+    expect(run?.runId).toBe(receipt.runId)
+    expect(run?.undoable).toBe(false)
+  })
+
+  it('skips an unreadable ledger instead of hiding the rest of the history', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await writeFile(path.join(runsDirOf(root), '1700000000000-002-cafebabe.json'), '{ broken', 'utf8')
+
+    const runs = await listWorkflowRuns(root)
+
+    expect(runs.map((run) => run.runId)).toEqual([receipt.runId])
+  })
+
+  it('ignores files in the runs directory that are not ledgers', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+    await writeFile(path.join(runsDirOf(root), 'README.txt'), 'notes', 'utf8')
+
+    expect((await listWorkflowRuns(root)).length).toBe(1)
+  })
+})

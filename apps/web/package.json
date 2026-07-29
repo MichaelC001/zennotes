@@ -26,6 +26,7 @@
     "@myriaddreamin/typst-ts-web-compiler": "^0.7.0",
     "@myriaddreamin/typst.ts": "^0.7.0",
     "@replit/codemirror-vim": "^6.3.0",
+    "@xyflow/react": "^12.11.2",
     "@zennotes/app-core": "*",
     "@zennotes/bridge-contract": "*",
     "@zennotes/shared-domain": "*",

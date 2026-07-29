@@ -51,6 +51,7 @@ import { parseFrontmatter } from '@shared/template-files'
 import { recordTitle, composePageBody } from './lib/database-cells'
 import { applyManualMove, manualOrderCompare, parentDirOf } from './lib/manual-order'
 import { TAGS_TAB_PATH, isTagsTabPath } from '@shared/tags'
+import { WORKFLOWS_TAB_PATH, isWorkflowsTabPath } from '@shared/workflows-view'
 import { HELP_TAB_PATH, isHelpTabPath } from '@shared/help'
 import { ARCHIVE_TAB_PATH, isArchiveTabPath } from '@shared/archive'
 import { TRASH_TAB_PATH, isTrashTabPath } from '@shared/trash'
@@ -548,6 +549,10 @@ interface Prefs {
   /** Show `/`-separated tags as a collapsible tree (sidebar + Tags view)
    *  instead of a flat list. Degrades to a flat list when no tag nests. (#439) */
   nestedTags: boolean
+  /** Master switch for the Workflows feature. Off hides the `zen://workflows`
+   *  view together with every way in (sidebar row, command, leader binding) and
+   *  closes any tab already showing it. On by default. */
+  workflowsEnabled: boolean
   /** Full paths of collapsed nodes in the nested-tag tree. */
   collapsedTagNodes: string[]
   /** Auto-show the calendar panel when the active note is a daily or
@@ -842,6 +847,7 @@ export const DEFAULT_PREFS: Prefs = {
   contentAlign: 'center',
   tagsCollapsed: false,
   nestedTags: true,
+  workflowsEnabled: true,
   collapsedTagNodes: [],
   autoCalendarPanel: true,
   calendarWeekStart: 'monday',
@@ -1106,6 +1112,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
     tagsCollapsed:
       typeof p.tagsCollapsed === 'boolean' ? p.tagsCollapsed : DEFAULT_PREFS.tagsCollapsed,
     nestedTags: typeof p.nestedTags === 'boolean' ? p.nestedTags : DEFAULT_PREFS.nestedTags,
+    workflowsEnabled:
+      typeof p.workflowsEnabled === 'boolean'
+        ? p.workflowsEnabled
+        : DEFAULT_PREFS.workflowsEnabled,
     collapsedTagNodes: Array.isArray(p.collapsedTagNodes)
       ? p.collapsedTagNodes.filter((k): k is string => typeof k === 'string')
       : DEFAULT_PREFS.collapsedTagNodes,
@@ -1835,6 +1845,7 @@ function collectPrefs(s: {
   contentAlign: 'center' | 'left'
   tagsCollapsed: boolean
   nestedTags: boolean
+  workflowsEnabled: boolean
   collapsedTagNodes: string[]
   autoCalendarPanel: boolean
   calendarWeekStart: CalendarWeekStart
@@ -1915,6 +1926,7 @@ function collectPrefs(s: {
     contentAlign: s.contentAlign,
     tagsCollapsed: s.tagsCollapsed,
     nestedTags: s.nestedTags,
+    workflowsEnabled: s.workflowsEnabled,
     collapsedTagNodes: s.collapsedTagNodes,
     autoCalendarPanel: s.autoCalendarPanel,
     calendarWeekStart: s.calendarWeekStart,
@@ -2177,6 +2189,16 @@ export function isTasksViewActive(state: {
   return leaf?.activeTab === TASKS_TAB_PATH
 }
 
+/** True when the active pane is showing the Workflows canvas. Mirrors
+ *  `isTasksViewActive`; the sidebar row uses it for its selected state. */
+export function isWorkflowsViewActive(state: {
+  paneLayout: PaneLayout
+  activePaneId: string
+}): boolean {
+  const leaf = findLeaf(state.paneLayout, state.activePaneId)
+  return leaf?.activeTab === WORKFLOWS_TAB_PATH
+}
+
 function hasTasksViewOpen(state: { paneLayout: PaneLayout }): boolean {
   return allLeaves(state.paneLayout).some((leaf) => leaf.tabs.includes(TASKS_TAB_PATH))
 }
@@ -2425,6 +2447,10 @@ interface Store {
   /** Render `/`-separated tags as a collapsible tree (sidebar + Tags view).
    *  Persisted. (#439) */
   nestedTags: boolean
+  /** Master switch for the Workflows feature. Persisted. Off hides the sidebar
+   *  row, the `view.workflows` command, and the leader binding, so the canvas
+   *  has no way in at all. */
+  workflowsEnabled: boolean
   /** Full paths of collapsed nodes in the nested-tag tree. Persisted. */
   collapsedTagNodes: string[]
   /** Auto-show the calendar panel when the active note is a daily or
@@ -2549,6 +2575,8 @@ interface Store {
    *  open + focused. If `tag` is omitted, just opens the tab with the
    *  current selection. First open with a tag starts a fresh selection. */
   openTagView: (tag?: string) => Promise<void>
+  /** Open the Workflows canvas as a tab in the active pane. */
+  openWorkflowsView: () => Promise<void>
   /** Close the Tags tab in every pane and clear the selection. */
   closeTagView: () => void
   /** Open the built-in Help tab in the active pane. */
@@ -2739,6 +2767,9 @@ interface Store {
   setAutoPairs: (on: boolean) => void
   setAutoPairQuotesInProse: (on: boolean) => void
   setHideBuiltinTemplates: (hidden: boolean) => void
+  /** Turn the whole Workflows feature on or off. Switching it off also closes
+   *  any pane still showing the canvas. */
+  setWorkflowsEnabled: (on: boolean) => void
   setTabsEnabled: (on: boolean) => void
   setWrapTabs: (on: boolean) => void
   setSettingsOpen: (open: boolean) => void
@@ -3746,6 +3777,12 @@ export const useStore = create<Store>((set, get) => {
     const snapshot = rawSnapshot as Partial<WorkspaceSnapshot>
     const existingPaths = new Set(get().notes.map((note) => note.path))
     let layout = sanitizeWorkspaceLayout(snapshot.paneLayout, existingPaths)
+    // A workspace saved while Workflows was on (or synced from a machine where
+    // it still is) must not resurrect the canvas for someone who turned the
+    // feature off.
+    if (!get().workflowsEnabled) {
+      layout = rewritePathsInTree(layout, (path) => (isWorkflowsTabPath(path) ? null : path))
+    }
     const unreadable = new Set<string>()
     const contents: Record<string, NoteContent> = {}
     const dirty: Record<string, boolean> = {}
@@ -3933,6 +3970,7 @@ export const useStore = create<Store>((set, get) => {
   contentAlign: loadPrefs().contentAlign,
   tagsCollapsed: loadPrefs().tagsCollapsed,
   nestedTags: loadPrefs().nestedTags,
+  workflowsEnabled: loadPrefs().workflowsEnabled,
   collapsedTagNodes: loadPrefs().collapsedTagNodes,
   autoCalendarPanel: loadPrefs().autoCalendarPanel,
   calendarWeekStart: loadPrefs().calendarWeekStart,
@@ -4088,6 +4126,21 @@ export const useStore = create<Store>((set, get) => {
     // The Tasks panel held keyboard focus; hand it back to the editor so the
     // reopened note takes typing immediately, without a pane jump or click. (#353)
     requestEditorFocus()
+  },
+
+  openWorkflowsView: async () => {
+    const state = get()
+    // Single funnel for every entry point (sidebar row, command, leader key),
+    // so the feature switch holds even if a caller forgets to check it.
+    if (!state.workflowsEnabled) return
+    await get().openNoteInPane(state.activePaneId, WORKFLOWS_TAB_PATH)
+    // Deliberately NO blur here. This used to mirror the Tasks view and drop
+    // focus from whatever opened it, but the ordering defeats the view: the tab
+    // opens, React mounts WorkflowsView, its mount effect focuses the workflow
+    // list, and only THEN does this line run and strip it again. Focus landed on
+    // <body>, so j/k reached the document instead of the list and the whole view
+    // read as broken in a keyboard-first app. The view claims the keyboard
+    // itself, which also moves focus off the sidebar row this was blurring.
   },
 
   openTagView: async (tag) => {
@@ -6081,6 +6134,11 @@ export const useStore = create<Store>((set, get) => {
     set({ hideBuiltinTemplates: hidden })
     savePrefs(collectPrefs(get()))
   },
+  setWorkflowsEnabled: (on) => {
+    set({ workflowsEnabled: on })
+    savePrefs(collectPrefs(get()))
+    if (!on) closeWorkflowsTabsEverywhere()
+  },
   setTabsEnabled: (on) => {
     set((s) => {
       if (on) return { tabsEnabled: true }
@@ -6962,6 +7020,23 @@ export const useStore = create<Store>((set, get) => {
     // active pane; inactive panes continue to autosave via their own cycle.
     if (s.activePaneId === paneId && s.selectedPath && s.selectedPath !== path) {
       if (s.noteDirty[s.selectedPath]) await get().persistNote(s.selectedPath)
+    }
+
+    // Virtual Workflows tab. Same deal as Tasks below: `zen://workflows` is not
+    // a file, so it must short-circuit before the disk read or readNote tries to
+    // open `<vault>/zen:/workflows` and the tab never opens.
+    if (isWorkflowsTabPath(path)) {
+      set((cur) => {
+        const nextLayout =
+          updateLeaf(cur.paneLayout, paneId, (l) => leafWithAddedTab(l, path)) ??
+          cur.paneLayout
+        return {
+          paneLayout: nextLayout,
+          activePaneId: paneId,
+          ...activeFieldsFrom(nextLayout, paneId, cur.noteContents, cur.noteDirty)
+        }
+      })
+      return
     }
 
     // Virtual Tasks tab — no disk read, no content cache entry. Just update
@@ -8441,6 +8516,19 @@ export const useStore = create<Store>((set, get) => {
   }
 })
 
+/** Drop the virtual Workflows tab from every pane that has it, mirroring
+ *  `closeTasksView`. Called whenever the feature is switched off, from either
+ *  Settings or an external config edit, so a disabled feature can never leave a
+ *  live canvas (which can write to the vault) on screen. */
+function closeWorkflowsTabsEverywhere(): void {
+  const state = useStore.getState()
+  for (const leaf of allLeaves(state.paneLayout)) {
+    if (leaf.tabs.includes(WORKFLOWS_TAB_PATH)) {
+      void state.closeTabInPane(leaf.id, WORKFLOWS_TAB_PATH)
+    }
+  }
+}
+
 // --- Portable config file sync (desktop) ------------------------------------
 
 /** Apply an externally-changed portable config (synced dotfile / hand-edit)
@@ -8462,6 +8550,9 @@ function applyPortableConfig(next: AppConfigPortable): void {
     patch[key] = mergedRecord[key]
   }
   useStore.setState(patch as Partial<Store>)
+  // setState bypasses the setters on purpose (no write-back to the file), so
+  // the tab cleanup that setWorkflowsEnabled does has to be repeated here.
+  if (!merged.workflowsEnabled) closeWorkflowsTabsEverywhere()
 }
 
 let configSyncInitialized = false

@@ -1016,6 +1016,17 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       run: () => getState().openTasksView()
     },
     {
+      id: 'view.workflows',
+      title: 'Open Workflows',
+      category: 'View',
+      shortcut: ':workflows',
+      keywords: 'workflow automation pipeline graph canvas nodes run dry',
+      // Hidden entirely when the feature is switched off in Settings, so the
+      // palette never offers a command that would open nothing.
+      when: () => getState().workflowsEnabled,
+      run: () => getState().openWorkflowsView()
+    },
+    {
       id: 'view.tags',
       title: 'Open Tags',
       category: 'View',

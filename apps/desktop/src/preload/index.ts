@@ -10,6 +10,16 @@ import type {
   CustomTemplateFile,
   WriteTemplateInput
 } from '@zennotes/bridge-contract/templates'
+import type {
+  ApplyWorkflowInput,
+  ExportWorkflowInput,
+  ImportedWorkflowFile,
+  WorkflowFile,
+  WorkflowRunReceipt,
+  WorkflowRunSummary,
+  WorkflowUndoResult,
+  WriteWorkflowInput
+} from '@zennotes/bridge-contract/workflows'
 import { IPC } from '@shared/ipc'
 import type { AppConfigPortable } from '@shared/app-config'
 import type { CustomTheme } from '@shared/custom-themes'
@@ -283,6 +293,27 @@ const api: ZenBridge = {
     ipcRenderer.invoke(IPC.VAULT_GENERATE_DEMO_TOUR),
   removeDemoTour: (): Promise<VaultDemoTourResult> =>
     ipcRenderer.invoke(IPC.VAULT_REMOVE_DEMO_TOUR),
+  listWorkflows: (): Promise<WorkflowFile[]> => ipcRenderer.invoke(IPC.VAULT_LIST_WORKFLOWS),
+  writeWorkflow: (input: WriteWorkflowInput): Promise<WorkflowFile> =>
+    ipcRenderer.invoke(IPC.VAULT_WRITE_WORKFLOW, input),
+  deleteWorkflow: (sourcePath: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.VAULT_DELETE_WORKFLOW, sourcePath),
+  // Sharing, both directions. A workflow is a plain `.md` file, so export is a
+  // save dialog over the bytes already on disk and import is an open dialog
+  // that READS one. Nothing here parses, and nothing here writes into the
+  // vault: an imported file goes through the review and then `writeWorkflow`.
+  exportWorkflow: (input: ExportWorkflowInput): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.VAULT_EXPORT_WORKFLOW, input),
+  importWorkflowFile: (): Promise<ImportedWorkflowFile | null> =>
+    ipcRenderer.invoke(IPC.VAULT_IMPORT_WORKFLOW_FILE),
+  // Planning happens in the renderer and writes nothing; this is the separate,
+  // explicit call that applies what the dry run showed.
+  applyWorkflow: (input: ApplyWorkflowInput): Promise<WorkflowRunReceipt> =>
+    ipcRenderer.invoke(IPC.VAULT_APPLY_WORKFLOW, input),
+  undoWorkflowRun: (runId: string): Promise<WorkflowUndoResult> =>
+    ipcRenderer.invoke(IPC.VAULT_UNDO_WORKFLOW_RUN, runId),
+  listWorkflowRuns: (): Promise<WorkflowRunSummary[]> =>
+    ipcRenderer.invoke(IPC.VAULT_LIST_WORKFLOW_RUNS),
   listTemplates: (): Promise<CustomTemplateFile[]> =>
     ipcRenderer.invoke(IPC.VAULT_LIST_TEMPLATES),
   readTemplate: (sourcePath: string): Promise<string> =>
