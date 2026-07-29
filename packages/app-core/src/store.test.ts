@@ -71,6 +71,15 @@ function installZen(overrides: Record<string, unknown> = {}): void {
       getVaultSettings: vi.fn().mockResolvedValue({}),
       closeVault: vi.fn().mockResolvedValue(null),
       readNote: vi.fn().mockResolvedValue(makeNote('- [ ] old task')),
+      // The database save is debounced at the module level, so a write
+      // scheduled by one test can fire while a later test is running, against
+      // whichever `window.zen` is installed by then. These two are called
+      // straight inside the timer callback, so a missing method throws
+      // synchronously and escapes the promise `.catch` as an unhandled error
+      // that fails the whole run. Defaulting them keeps a stray timer inert
+      // regardless of test order; tests that assert on them still override.
+      writeDatabaseRows: vi.fn().mockResolvedValue(undefined),
+      writeDatabaseSchema: vi.fn().mockResolvedValue(undefined),
       ...overrides
     }
   })
