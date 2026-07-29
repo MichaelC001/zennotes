@@ -226,6 +226,12 @@ import { resolveCommentAnchor, selectionToCommentAnchor } from '../lib/comments'
 import { ZEN_OPEN_EDITOR_CONTEXT_MENU_EVENT } from '../lib/keyboard-context-menu'
 import { armMiddleClickPasteGuard } from '../lib/middle-click-paste-guard'
 import {
+  CALENDAR_PANEL_CLOSED,
+  calendarPanelOnNote,
+  calendarPanelOnToggle,
+  type CalendarPanelState
+} from '../lib/calendar-panel-auto'
+import {
   assetPathFromTab,
   assetTitleFromPath,
   isAssetTabPath
@@ -800,7 +806,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const [outlineOpen, setOutlineOpen] = useState(false)
   const [activeOutlineLine, setActiveOutlineLine] = useState<number | null>(null)
   const [commentsOpen, setCommentsOpen] = useState(false)
-  const [calendarOpen, setCalendarOpen] = useState(false)
+  const [calendarPanel, setCalendarPanel] = useState<CalendarPanelState>(CALENDAR_PANEL_CLOSED)
+  const calendarOpen = calendarPanel.open
   // The calendar panel is a date navigator. It auto-opens while the pane shows
   // a daily/weekly note, but stays available (Obsidian-style) on any note as
   // long as the daily or weekly feature is enabled.
@@ -986,7 +993,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   }, [])
 
   const toggleCalendarPanel = useCallback(() => {
-    setCalendarOpen((open) => !open)
+    setCalendarPanel(calendarPanelOnToggle)
   }, [])
 
 
@@ -1042,7 +1049,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       setConnectionsOpen(false)
       setOutlineOpen(false)
       setCommentsOpen(false)
-      setCalendarOpen(false)
+      setCalendarPanel(CALENDAR_PANEL_CLOSED)
       setConnectionPreview(null)
       const panel = useStore.getState().focusedPanel
       if (panel === 'connections' || panel === 'comments' || panel === 'hoverpreview') {
@@ -1053,17 +1060,21 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     return () => window.removeEventListener('zen:close-right-panel', handler)
   }, [isActive, setConnectionPreview, setFocusedPanel])
 
-  // Auto-show the calendar when this pane lands on a daily/weekly note. On other
-  // notes we leave it as-is (Obsidian-style persistence) so it stays open while
-  // you browse, and only force it closed when the feature is turned off entirely.
-  // Keyed on the note identity (not every render) so a manual `leader c` / icon
-  // close sticks until the note changes.
+  // Auto-show the calendar when this pane lands on a daily/weekly note. A
+  // panel the USER opened keeps Obsidian-style persistence and stays open
+  // while they browse; a panel THIS effect opened is scoped to the periodic
+  // notes and closes on the way out, so a visit to a daily note can no longer
+  // overwrite a close the user made elsewhere (#502). The transitions live in
+  // `calendar-panel-auto`; keyed on the note identity (not every render) so a
+  // manual `leader c` / icon close sticks until the note changes.
   useEffect(() => {
-    if (!calendarAvailable) {
-      setCalendarOpen(false)
-      return
-    }
-    if (isDateNote && autoCalendarPanel) setCalendarOpen(true)
+    setCalendarPanel((state) =>
+      calendarPanelOnNote(state, {
+        isDateNote,
+        autoEnabled: autoCalendarPanel,
+        available: calendarAvailable
+      })
+    )
   }, [content?.path, isDateNote, autoCalendarPanel, calendarAvailable])
 
   useEffect(() => {
