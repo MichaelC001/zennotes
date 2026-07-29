@@ -108,6 +108,7 @@ import { promptApp } from "../lib/prompt-requests";
 import { isImeComposing } from "../lib/ime";
 import { RemoteWorkspaceProfileModal } from "./RemoteWorkspaceProfileModal";
 import { Button } from "./ui/Button";
+import { CustomCodeLanguagesSettings } from "./CustomCodeLanguagesSettings";
 
 type SettingsCategoryId =
   | "appearance"
@@ -534,6 +535,8 @@ export function SettingsModal(): JSX.Element {
   const supportsCustomTemplates =
     zenBridge.getCapabilities().supportsCustomTemplates &&
     workspaceMode !== "remote";
+  const supportsCustomCodeLanguages =
+    !!zenBridge.getCapabilities().supportsCustomCodeLanguages;
   const [templateEditor, setTemplateEditor] = useState<{
     initialRaw?: string;
     sourcePath?: string;
@@ -1977,6 +1980,20 @@ export function SettingsModal(): JSX.Element {
           keywords: ["quick capture", "hotkey", "shortcut"],
         },
         {
+          id: "custom-code-languages",
+          title: "Custom code languages",
+          description:
+            "Import TextMate grammars for custom fenced code-block highlighting.",
+          keywords: [
+            "syntax",
+            "highlight",
+            "textmate",
+            "grammar",
+            "code fence",
+            "language",
+          ],
+        },
+        {
           id: "workflows-enabled",
           title: "Workflows",
           description:
@@ -2350,6 +2367,20 @@ export function SettingsModal(): JSX.Element {
                 />
               </Section>
             </div>
+          ),
+        },
+        {
+          id: "languages",
+          title: "Languages",
+          searchIds: ["custom-code-languages"],
+          content: supportsCustomCodeLanguages ? (
+            <div {...settingsSearchTargetProps("custom-code-languages")}>
+              <CustomCodeLanguagesSettings />
+            </div>
+          ) : (
+            <InlineNote>
+              Custom code languages are available in the desktop app.
+            </InlineNote>
           ),
         },
         {

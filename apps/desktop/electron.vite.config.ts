@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const INTERNAL_WORKSPACE_PACKAGES = [
@@ -15,6 +18,27 @@ const MAIN_EXTERNALIZE_EXCLUSIONS = [
   ...INTERNAL_WORKSPACE_PACKAGES,
   ...PACKAGED_CLI_RUNTIME_PACKAGES
 ]
+
+function onigurumaDataUrl(): Plugin {
+  const virtualId = '\0zennotes:oniguruma-wasm-data-url'
+  const wasmPath = createRequire(resolve(__dirname, 'package.json')).resolve(
+    'vscode-oniguruma/release/onig.wasm'
+  )
+  return {
+    name: 'zennotes-oniguruma-data-url',
+    enforce: 'pre',
+    resolveId(id) {
+      if (id === 'vscode-oniguruma/release/onig.wasm?url') return virtualId
+      return null
+    },
+    load(id) {
+      if (id !== virtualId) return null
+      const bytes = readFileSync(wasmPath)
+      const url = `data:application/wasm;base64,${bytes.toString('base64')}`
+      return `export default ${JSON.stringify(url)}`
+    }
+  }
+}
 
 function rendererManualChunk(id: string): string | undefined {
   const normalizedId = id.split('\\').join('/')
@@ -62,6 +86,10 @@ function rendererManualChunk(id: string): string | undefined {
     return 'vendor-highlight'
   }
 
+  if (id.includes('/vscode-textmate/') || id.includes('/vscode-oniguruma/')) {
+    return 'vendor-textmate'
+  }
+
   if (id.includes('/mermaid/') || id.includes('/cytoscape/') || id.includes('/dagre/')) {
     return 'vendor-mermaid'
   }
@@ -105,6 +133,7 @@ function isDeferredRendererPreload(dep: string): boolean {
     dep.includes('wardley-') ||
     dep.includes('vendor-markdown') ||
     dep.includes('vendor-highlight') ||
+    dep.includes('vendor-textmate') ||
     dep.includes('vendor-d3') ||
     dep.includes('vendor-mermaid') ||
     dep.includes('vendor-jsxgraph') ||
@@ -189,6 +218,6 @@ export default defineConfig({
         '@bridge-contract': resolve(__dirname, '../../packages/bridge-contract/src')
       }
     },
-    plugins: [react()]
+    plugins: [onigurumaDataUrl(), react()]
   }
 })

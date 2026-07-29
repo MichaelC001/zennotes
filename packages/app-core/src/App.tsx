@@ -1,5 +1,11 @@
 import { lazy, Suspense, useEffect, useMemo, useRef } from 'react'
-import { useStore, initConfigSync, initCustomThemes, initOverrides } from './store'
+import {
+  useStore,
+  initConfigSync,
+  initCustomThemes,
+  initCustomCodeLanguages,
+  initOverrides
+} from './store'
 import { resolveAuto, findTheme } from './lib/themes'
 import {
   injectActiveTheme,
@@ -432,6 +438,7 @@ function App(): JSX.Element {
   useEffect(() => {
     initConfigSync()
     initCustomThemes()
+    initCustomCodeLanguages()
     initOverrides()
   }, [])
 

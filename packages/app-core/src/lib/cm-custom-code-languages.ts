@@ -1,0 +1,85 @@
+/** CodeMirror decorations for TextMate-backed custom fenced languages. */
+import { syntaxTree } from "@codemirror/language";
+import { StateEffect, type Extension } from "@codemirror/state";
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  type ViewUpdate,
+} from "@codemirror/view";
+import {
+  customCodeLanguageRegistry,
+  EDITOR_TOKEN_CLASS,
+} from "./custom-code-languages";
+import { resolveCodeLanguage } from "./cm-code-languages";
+
+const refreshCustomLanguages = StateEffect.define<void>();
+
+function buildDecorations(view: EditorView): DecorationSet {
+  const ranges: Array<{ from: number; to: number; className: string }> = [];
+  syntaxTree(view.state).iterate({
+    enter(node) {
+      if (node.name !== "FencedCode") return;
+      const info = node.node.getChild("CodeInfo");
+      const body = node.node.getChild("CodeText");
+      if (!info || !body) return false;
+      const tag = view.state.doc.sliceString(info.from, info.to);
+      // Built-in CodeMirror languages always win, even if a pack was added by
+      // hand with a conflicting alias outside the Settings validation path.
+      if (resolveCodeLanguage(tag)) return false;
+      if (!customCodeLanguageRegistry.resolve(tag)) return false;
+      const source = view.state.doc.sliceString(body.from, body.to);
+      for (const token of customCodeLanguageRegistry.tokenize(tag, source)) {
+        if (token.to <= token.from) continue;
+        ranges.push({
+          from: body.from + token.from,
+          to: body.from + token.to,
+          className: EDITOR_TOKEN_CLASS[token.kind],
+        });
+      }
+      return false;
+    },
+  });
+  ranges.sort((a, b) => a.from - b.from || a.to - b.to);
+  return Decoration.set(
+    ranges.map((range) =>
+      Decoration.mark({ class: range.className }).range(range.from, range.to),
+    ),
+    true,
+  );
+}
+
+export const customCodeFenceHighlightExtension: Extension =
+  ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      private unsubscribe: () => void;
+
+      constructor(view: EditorView) {
+        this.decorations = buildDecorations(view);
+        this.unsubscribe = customCodeLanguageRegistry.subscribe(() => {
+          view.dispatch({ effects: refreshCustomLanguages.of(undefined) });
+        });
+      }
+
+      update(update: ViewUpdate): void {
+        if (
+          update.docChanged ||
+          update.viewportChanged ||
+          update.transactions.some((transaction) =>
+            transaction.effects.some((effect) =>
+              effect.is(refreshCustomLanguages),
+            ),
+          )
+        ) {
+          this.decorations = buildDecorations(update.view);
+        }
+      }
+
+      destroy(): void {
+        this.unsubscribe();
+      }
+    },
+    { decorations: (value) => value.decorations },
+  );
