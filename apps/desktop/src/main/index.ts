@@ -179,6 +179,7 @@ import {
 import {
   getCliInstallStatus,
   installCli,
+  migrateLegacyCliLink,
   uninstallCli
 } from './cli-install'
 import {
@@ -423,6 +424,18 @@ function focusWindow(win: BrowserWindow): void {
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
+  // Wayland compositors (Hyprland in particular) ignore a client's own
+  // show()/focus() unless it holds an xdg-activation token, which Electron
+  // does not plumb for a second instance's argv hand-off. The always-on-top
+  // pulse is the portable nudge that survives that: momentarily claiming the
+  // top layer forces the compositor to raise the window, and dropping it
+  // immediately leaves stacking normal. A no-op visually where focus()
+  // already worked, so it runs on Linux unconditionally.
+  if (process.platform === 'linux' && !win.isFocused()) {
+    win.setAlwaysOnTop(true)
+    win.focus()
+    win.setAlwaysOnTop(false)
+  }
 }
 
 // Dispatch a note-open to a specific window, deferring until that
@@ -588,7 +601,14 @@ async function openTemporaryFolder(dir: string, reuseMainWindow: boolean): Promi
     focusWindow(existing)
     return true
   }
-  if (!(await folderHasMarkdown(resolved))) return false
+  // No markdown-content gate here anymore. It used to bail when a bounded scan
+  // found no markdown, which read as protection against opening junk folders,
+  // but every caller is an explicit ask (`zn open <dir>`, a folder handed to
+  // the app by the OS), and the scan's bounds made it lie: notes behind 4000
+  // other files, or inside a dot-directory, read as "no markdown" and the
+  // folder was dropped without a word while the CLI had already printed
+  // success (#498-adjacent, reported on Discord). An empty session that shows
+  // exactly what the folder holds is the honest answer either way.
   const win = await createWindow({
     initialVaultRoot: resolved,
     persistInitialVault: false,
@@ -596,35 +616,6 @@ async function openTemporaryFolder(dir: string, reuseMainWindow: boolean): Promi
   })
   if (!reuseMainWindow) focusWindow(win)
   return true
-}
-
-// Cheap bounded scan for at least one markdown file, so dropping a folder with
-// no docs in it doesn't spin up an empty session. Skips dotfiles/node_modules.
-async function folderHasMarkdown(dir: string): Promise<boolean> {
-  const queue: string[] = [dir]
-  let scanned = 0
-  while (queue.length > 0 && scanned < 4000) {
-    const current = queue.shift()
-    if (!current) break
-    let entries
-    try {
-      entries = await fsp.readdir(current, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      scanned++
-      const name = entry.name
-      if (name.startsWith('.')) continue
-      if (entry.isDirectory()) {
-        if (name === 'node_modules') continue
-        queue.push(path.join(current, name))
-      } else if (isMarkdownFilePath(name)) {
-        return true
-      }
-    }
-  }
-  return false
 }
 
 // Pick a local vault to move an external file into: any open local
@@ -3734,6 +3725,15 @@ app.whenReady().then(async () => {
 
   await migrateLegacyRemoteWorkspaceSecrets()
 
+  // Fire-and-forget: heals the pre-2.10 `zen` symlink into `zn` for users who
+  // never re-ran the CLI installer. Must not delay or fail startup — a broken
+  // PATH probe is a log line, not a launch problem. (#126)
+  void migrateLegacyCliLink()
+    .then((linkPath) => {
+      if (linkPath) console.log(`[cli] migrated legacy zen symlink to ${linkPath}`)
+    })
+    .catch((err) => console.warn('[cli] legacy symlink migration failed:', err))
+
   protocol.handle(LOCAL_ASSET_SCHEME, async (request) => {
     const remote = decodeRemoteAssetRequest(request.url)
     if (remote) {
@@ -3971,6 +3971,11 @@ app.whenReady().then(async () => {
   })
 
   appStartupComplete = true
+  // A second instance that arrived while startup was still running queued its
+  // paths (the eager flush stands down until here, #178) and nothing else
+  // drains that queue: without this, `zn open` during app launch is silently
+  // swallowed.
+  if (pendingFileOpens.length > 0) void flushPendingFileOpens()
 })
 
 app.on('open-url', (event, url) => {
