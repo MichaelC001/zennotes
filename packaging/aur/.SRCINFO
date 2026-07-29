@@ -9,6 +9,7 @@ pkgbase = zennotes-bin
 	depends = nss
 	depends = alsa-lib
 	depends = libxss
+	depends = desktop-file-utils
 	provides = zennotes
 	conflicts = zennotes
 	options = !strip
