@@ -2353,7 +2353,7 @@ export function SettingsModal(): JSX.Element {
               >
                 <ToggleRow
                   label="Workflows"
-                  description="Run saved, repeatable steps over your notes from a canvas view. Turning it off hides the Workflows view along with its sidebar row, command, and Leader shortcut, and closes it if it is open."
+                  description="Run saved, repeatable steps over your notes from a canvas view. Off by default; turning it on adds the Workflows view with its sidebar row, command, and Leader shortcut. Turning it off hides all of that again and closes the view if it is open."
                   value={workflowsEnabled}
                   settingId="workflows-enabled"
                   onChange={setWorkflowsEnabled}

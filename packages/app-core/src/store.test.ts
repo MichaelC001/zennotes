@@ -1148,36 +1148,37 @@ describe('pdfExportUseTheme — theme in PDF export', () => {
 })
 
 describe('workflowsEnabled (Workflows feature switch)', () => {
-  it('defaults on and round-trips through persistence', async () => {
+  it('defaults off and round-trips the opt-in through persistence', async () => {
     installZen()
     const { useStore } = await loadStore()
-    // On by default: the switch exists to turn a built feature off, not to
-    // hide it behind a flag, so existing users see no change.
-    expect(useStore.getState().workflowsEnabled).toBe(true)
-
-    useStore.getState().setWorkflowsEnabled(false)
+    // Off by default: workflows can rewrite notes in bulk, so the feature is
+    // something a user turns on once in Settings, not something they stumble
+    // into. The toggle is the front door.
     expect(useStore.getState().workflowsEnabled).toBe(false)
+
+    useStore.getState().setWorkflowsEnabled(true)
+    expect(useStore.getState().workflowsEnabled).toBe(true)
     const saved = JSON.parse(localStorage.getItem('zen:prefs:v2') ?? '{}')
-    expect(saved.workflowsEnabled).toBe(false)
+    expect(saved.workflowsEnabled).toBe(true)
 
     vi.resetModules()
     const reloaded = await import('./store')
-    expect(reloaded.useStore.getState().workflowsEnabled).toBe(false)
+    expect(reloaded.useStore.getState().workflowsEnabled).toBe(true)
   })
 
-  it('normalizes missing and non-boolean stored values to true', async () => {
+  it('normalizes missing and non-boolean stored values to off', async () => {
     installZen()
     await loadStore() // fresh module + cleared storage
 
     localStorage.setItem('zen:prefs:v2', JSON.stringify({ workflowsEnabled: 'nope' }))
     vi.resetModules()
     const bad = await import('./store')
-    expect(bad.useStore.getState().workflowsEnabled).toBe(true)
+    expect(bad.useStore.getState().workflowsEnabled).toBe(false)
 
     localStorage.setItem('zen:prefs:v2', JSON.stringify({ themeId: 'dark-hard' }))
     vi.resetModules()
     const missing = await import('./store')
-    expect(missing.useStore.getState().workflowsEnabled).toBe(true)
+    expect(missing.useStore.getState().workflowsEnabled).toBe(false)
   })
 
   it('closes an open Workflows tab when the feature is switched off', async () => {
@@ -1185,6 +1186,8 @@ describe('workflowsEnabled (Workflows feature switch)', () => {
     const { useStore } = await loadStore()
     const paneId = useStore.getState().activePaneId
     useStore.setState({ notes: [makeNote('A', 'inbox/A.md')] })
+    // Opted in first: the default is off and openWorkflowsView refuses then.
+    useStore.getState().setWorkflowsEnabled(true)
 
     await useStore.getState().openNoteInPane(paneId, 'inbox/A.md')
     await useStore.getState().openWorkflowsView()

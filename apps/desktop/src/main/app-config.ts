@@ -248,7 +248,8 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
   workflowsEnabled: {
     section: 'view',
     tomlKey: 'workflows_enabled',
-    comment: 'show the Workflows view, its sidebar row, command, and leader shortcut'
+    comment:
+      'opt in to the Workflows view, its sidebar row, command, and leader shortcut (off by default)'
   },
   assetSortOrder: {
     section: 'view',

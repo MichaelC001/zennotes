@@ -850,7 +850,10 @@ export const DEFAULT_PREFS: Prefs = {
   contentAlign: 'center',
   tagsCollapsed: false,
   nestedTags: true,
-  workflowsEnabled: true,
+  // Off by default, deliberately: workflows can rewrite notes in bulk, and the
+  // graph editor asks more of a new user than any other view. The feature is
+  // opted into once in Settings -> Workflows, not stumbled into.
+  workflowsEnabled: false,
   collapsedTagNodes: [],
   autoCalendarPanel: true,
   calendarWeekStart: 'monday',

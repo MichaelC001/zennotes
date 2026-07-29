@@ -212,7 +212,7 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   interfaceFont: null,
   textFont: null,
   monoFont: null,
-  workflowsEnabled: true,
+  workflowsEnabled: false,
   systemFolderLabels: {},
   noteSortOrder: 'none',
   assetSortOrder: 'name-asc',
