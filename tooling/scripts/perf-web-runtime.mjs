@@ -58,7 +58,8 @@ const deferredNormalFlowChunkPatterns = [
   /^vendor-markdown-/,
   /^vendor-highlight-/,
   /^vendor-d3-/,
-  /^vendor-mermaid-/,
+  // mermaid.core is the entry of the mermaid stack: if any of it loads, this does.
+  /^mermaid\.core-/,
   /^vendor-jsxgraph-/,
   /^vendor-function-plot-/
 ]

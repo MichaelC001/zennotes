@@ -136,10 +136,18 @@ function rendererManualChunk(id: string): string | undefined {
     return 'vendor-textmate'
   }
 
-  if (id.includes('/mermaid/') || id.includes('/cytoscape/') || id.includes('/dagre/')) {
-    return 'vendor-mermaid'
-  }
-
+  // No manualChunks rule for mermaid / cytoscape / dagre on purpose. Mermaid is
+  // only ever reached through a dynamic import (Preview.tsx does
+  // `import("mermaid")`, behind LazyPreview), but forcing its modules into a
+  // named chunk made Rollup hoist that chunk into the entry's STATIC graph:
+  // `index-*.js` ended up with `import{m as gt}from"./vendor-mermaid-*.js"`,
+  // where gt is mermaid itself, so every launch fetched and evaluated 2.5MB of
+  // diagram code (and vendor-markdown with it, which vendor-mermaid imports)
+  // before the user opened a note. Narrowing the rule to just '/mermaid/' does
+  // not help; the grouping itself is what breaks the async boundary. Left to
+  // Rollup, mermaid lands in its own async chunks (mermaid.core-*.js and
+  // friends) and is fetched the first time a diagram actually renders. Total
+  // bundle size is unchanged; only the boot path is.
   if (id.includes('/jsxgraph/')) {
     return 'vendor-jsxgraph'
   }
@@ -181,7 +189,11 @@ function isDeferredRendererPreload(dep: string): boolean {
     dep.includes('vendor-highlight') ||
     dep.includes('vendor-textmate') ||
     dep.includes('vendor-d3') ||
-    dep.includes('vendor-mermaid') ||
+    // Mermaid is no longer one named chunk; it splits into mermaid.core plus a
+    // chunk per diagram type, with cytoscape/dagre alongside.
+    dep.includes('mermaid') ||
+    dep.includes('cytoscape') ||
+    dep.includes('dagre') ||
     dep.includes('vendor-jsxgraph') ||
     dep.includes('vendor-function-plot') ||
     dep.includes('vendor-typst')
