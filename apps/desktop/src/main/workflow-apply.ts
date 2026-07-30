@@ -708,6 +708,39 @@ async function pruneOldRuns(root: string): Promise<void> {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/*  One run at a time per vault                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Apply and undo are serialized per vault root. Two windows on one vault, or
+ * the Undo toast racing a second run, would otherwise interleave their
+ * read-journal-write sequences: one run journals bytes another run is about to
+ * replace, and a rollback then restores pre-run bytes over committed writes
+ * while both receipts report success. A promise chain per key (the shape
+ * `configWriteQueue` uses in vault.ts) closes the whole class.
+ */
+const vaultRunQueues = new Map<string, Promise<unknown>>()
+
+async function withVaultRunLock<T>(root: string, task: () => Promise<T>): Promise<T> {
+  const key = path.resolve(root)
+  const prev = vaultRunQueues.get(key) ?? Promise.resolve()
+  // The stored link is settled-only, so one failed run cannot wedge the chain
+  // or resurface its error in the next caller; `next` still carries the real
+  // rejection to its own caller.
+  const next = prev.then(task)
+  const tracked: Promise<unknown> = next
+    .then(
+      () => undefined,
+      () => undefined
+    )
+    .finally(() => {
+      if (vaultRunQueues.get(key) === tracked) vaultRunQueues.delete(key)
+    })
+  vaultRunQueues.set(key, tracked)
+  return next
+}
+
 /**
  * Apply a planned run, journalling as it goes.
  *
@@ -717,6 +750,13 @@ async function pruneOldRuns(root: string): Promise<void> {
  * the state the vault is in.
  */
 export async function applyWorkflowOps(
+  root: string,
+  input: ApplyWorkflowInput
+): Promise<WorkflowRunReceipt> {
+  return withVaultRunLock(root, () => applyWorkflowOpsNow(root, input))
+}
+
+async function applyWorkflowOpsNow(
   root: string,
   input: ApplyWorkflowInput
 ): Promise<WorkflowRunReceipt> {
@@ -952,6 +992,10 @@ async function readLedger(abs: string): Promise<WorkflowRunLedger> {
  * (try again) is also the correct one.
  */
 export async function undoWorkflowRun(root: string, runId: string): Promise<WorkflowUndoResult> {
+  return withVaultRunLock(root, () => undoWorkflowRunNow(root, runId))
+}
+
+async function undoWorkflowRunNow(root: string, runId: string): Promise<WorkflowUndoResult> {
   const abs = resolveLedgerPath(root, runId)
   let ledger: WorkflowRunLedger
   try {

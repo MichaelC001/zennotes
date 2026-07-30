@@ -995,3 +995,47 @@ describe('ops after a path op follow the note', () => {
     expect(await readOrNull(root, 'archive/A.md')).toBe('blocker\n')
   })
 })
+
+describe('one run at a time per vault', () => {
+  it('concurrent applies serialize instead of interleaving read-modify-write', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Log.md', 'start\n')
+
+    // Each append is a read + an awaited write; fired together WITHOUT the
+    // per-vault queue, later reads race earlier writes and lines vanish.
+    const lines = Array.from({ length: 12 }, (_, n) => `line ${n}`)
+    const receipts = await Promise.all(
+      lines.map((text) =>
+        apply(root, [{ kind: 'append', path: 'inbox/Log.md', text }], `flow-${text}`)
+      )
+    )
+
+    for (const receipt of receipts) expect(receipt.rolledBack).toBeUndefined()
+    const body = (await readOrNull(root, 'inbox/Log.md')) ?? ''
+    for (const text of lines) expect(body).toContain(text)
+  })
+
+  it('an undo queued behind a run sees the run completed, not half of it', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    const first = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'one' }])
+    // Fire the second run and the undo of the first together: the undo must
+    // not run inside the second run's read-write window.
+    const [second, undone] = await Promise.all([
+      apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'two' }]),
+      undoWorkflowRun(root, first.runId)
+    ])
+
+    expect(second.rolledBack).toBeUndefined()
+    expect(undone.restored).toBeGreaterThan(0)
+    // Enqueue order is the call order: the second run appends, THEN the undo
+    // restores the first run's recorded pre-run bytes, which by the journal's
+    // documented byte-restore contract also takes the second append with it.
+    // Coherent, in queue order, and every receipt above told the truth. The
+    // interleaved failure this test exists to rule out looks different: the
+    // undo's read-compare-write lands inside the second run's read-write
+    // window and 'two' vanishes while `second` still reports it applied.
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('a\n')
+  })
+})
