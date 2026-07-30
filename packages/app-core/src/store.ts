@@ -4410,7 +4410,15 @@ export const useStore = create<Store>((set, get) => {
       }
       set((s) => ({ databases: { ...s.databases, [csvPath]: doc } }))
     } catch (err) {
+      // Failing silently here is how "clicking a database does nothing" bug
+      // reports happen (#499): the sidebar row looks live, the click dies in
+      // the console. Whatever the cause (server unreachable, bad schema),
+      // say so where the user is looking.
       console.error('loadDatabase failed', err)
+      const { useToastStore } = await import('./lib/toast')
+      useToastStore
+        .getState()
+        .addToast(err instanceof Error ? err.message : 'Could not open database', 'error')
     } finally {
       set((s) =>
         csvPath in s.databasesLoading
@@ -4437,6 +4445,10 @@ export const useStore = create<Store>((set, get) => {
       set({ focusedPanel: 'editor' })
     } catch (err) {
       console.error('createDatabase failed', err)
+      const { useToastStore } = await import('./lib/toast')
+      useToastStore
+        .getState()
+        .addToast(err instanceof Error ? err.message : 'Could not create database', 'error')
     }
   },
   newDatabase: async () => {

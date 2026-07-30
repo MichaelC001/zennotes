@@ -184,6 +184,10 @@ import {
   createRecordPage,
   listDatabases
 } from './databases'
+import {
+  createDatabaseOps as createSharedDatabaseOps,
+  type DatabaseOps as SharedDatabaseOps
+} from '@shared/database-ops'
 import type { DatabaseSidecar, DbRow } from '@shared/databases'
 import { VaultWatcher } from './watcher'
 import { WindowVaultRegistry } from './window-vaults'
@@ -2650,16 +2654,48 @@ function registerIpc(): void {
     return await scanTasksForPath(v.root, relPath)
   })
 
-  // Databases are local-vault only for now (no remote-server endpoints yet).
-  const ensureLocalForDatabases = (): void => {
-    if (isRemoteWorkspaceActive()) {
-      throw new Error('Databases are not yet supported on remote vaults')
-    }
+  // Databases on a remote workspace compose from the same generic file
+  // primitives the web app uses (@shared/database-ops): reads and writes go
+  // through the server's note endpoints (which accept any vault path,
+  // including `.base/` internals) and the `.base` folder rides the folder
+  // endpoints, so ANY server version works — no database endpoints exist or
+  // are needed (#499). Local vaults keep the direct-fs implementation in
+  // ./databases untouched. The ops are memoized per client so reconnecting
+  // (a new client instance) rebuilds them.
+  let remoteDbOps: { client: RemoteServerClient; ops: SharedDatabaseOps } | null = null
+  const databaseOpsForRemote = (): SharedDatabaseOps => {
+    const client = requireRemoteWorkspaceClient()
+    if (remoteDbOps?.client === client) return remoteDbOps.ops
+    const ops = createSharedDatabaseOps({
+      readFileTextOrNull: async (relPath) => {
+        try {
+          return (await client.readNote(relPath)).body
+        } catch {
+          return null
+        }
+      },
+      writeFile: async (relPath, text) => {
+        await client.writeNote(relPath, text)
+      },
+      createFolder: (folder, subpath) => client.createFolder(folder, subpath),
+      renameFolder: (folder, oldSubpath, newSubpath) =>
+        client.renameFolder(folder, oldSubpath, newSubpath),
+      listFolders: () => client.listFolders(),
+      primaryNotesAtRoot: async () => {
+        try {
+          return (await client.getVaultSettings()).primaryNotesLocation === 'root'
+        } catch {
+          return false
+        }
+      }
+    })
+    remoteDbOps = { client, ops }
+    return ops
   }
 
   handle(IPC.VAULT_OPEN_DATABASE, async (_e, relPath: string) => {
-    ensureLocalForDatabases()
     try {
+      if (isRemoteWorkspaceActive()) return await databaseOpsForRemote().openDatabase(relPath)
       return await readDatabase(requireVault().root, relPath)
     } catch (err) {
       // A missing database isn't exceptional — its tab can simply outlive the
@@ -2673,14 +2709,18 @@ function registerIpc(): void {
   })
 
   handle(IPC.VAULT_WRITE_DATABASE_ROWS, async (_e, relPath: string, rows: DbRow[]) => {
-    ensureLocalForDatabases()
+    if (isRemoteWorkspaceActive()) {
+      return await databaseOpsForRemote().writeDatabaseRows(relPath, rows)
+    }
     return await writeDatabaseRows(requireVault().root, relPath, rows)
   })
 
   handle(
     IPC.VAULT_WRITE_DATABASE_SCHEMA,
     async (_e, relPath: string, sidecar: DatabaseSidecar, rows: DbRow[]) => {
-      ensureLocalForDatabases()
+      if (isRemoteWorkspaceActive()) {
+        return await databaseOpsForRemote().writeDatabaseSchema(relPath, sidecar, rows)
+      }
       return await writeDatabaseSchema(requireVault().root, relPath, sidecar, rows)
     }
   )
@@ -2688,26 +2728,32 @@ function registerIpc(): void {
   handle(
     IPC.VAULT_CREATE_DATABASE,
     async (_e, folder: NoteFolder, subpath: string, title?: string) => {
-      ensureLocalForDatabases()
+      if (isRemoteWorkspaceActive()) {
+        return await databaseOpsForRemote().createDatabase(folder, subpath, title)
+      }
       return await createDatabase(requireVault().root, folder, subpath, title)
     }
   )
 
   handle(IPC.VAULT_RENAME_DATABASE, async (_e, csvPath: string, newTitle: string) => {
-    ensureLocalForDatabases()
+    if (isRemoteWorkspaceActive()) {
+      return await databaseOpsForRemote().renameDatabase(csvPath, newTitle)
+    }
     return await renameDatabase(requireVault().root, csvPath, newTitle)
   })
 
   handle(
     IPC.VAULT_CREATE_RECORD_PAGE,
     async (_e, csvPath: string, title: string, body: string) => {
-      ensureLocalForDatabases()
+      if (isRemoteWorkspaceActive()) {
+        return await databaseOpsForRemote().createRecordPage(csvPath, title, body)
+      }
       return await createRecordPage(requireVault().root, csvPath, title, body)
     }
   )
 
   handle(IPC.VAULT_LIST_DATABASES, async () => {
-    ensureLocalForDatabases()
+    if (isRemoteWorkspaceActive()) return await databaseOpsForRemote().listDatabases()
     return await listDatabases(requireVault().root)
   })
 
