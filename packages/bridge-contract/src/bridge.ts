@@ -114,6 +114,10 @@ export interface ZenBridge {
     authToken?: string | null
   ): Promise<{ vault: VaultInfo | null; capabilities: ServerCapabilities }>
   disconnectRemoteWorkspace(): Promise<VaultInfo | null>
+  /** Re-attempt the workspace configured on disk (used by the reconnect
+   *  screen when the server was unreachable at boot). Resolves with the
+   *  vault on success, null when the workspace still cannot be loaded. */
+  retryWorkspaceBoot(): Promise<VaultInfo | null>
   listRemoteWorkspaceProfiles(): Promise<RemoteWorkspaceProfile[]>
   saveRemoteWorkspaceProfile(input: RemoteWorkspaceProfileInput): Promise<RemoteWorkspaceProfile>
   deleteRemoteWorkspaceProfile(id: string): Promise<void>

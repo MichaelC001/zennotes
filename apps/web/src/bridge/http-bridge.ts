@@ -271,6 +271,12 @@ function disconnectRemoteWorkspace(): Promise<VaultInfo | null> {
   return Promise.reject(new Error('Remote workspace switching is only available in the desktop build'))
 }
 
+// The web app talks to exactly one server (its own); "retry the configured
+// workspace" is simply asking it again for the current vault.
+function retryWorkspaceBoot(): Promise<VaultInfo | null> {
+  return getCurrentVault()
+}
+
 function listRemoteWorkspaceProfiles(): Promise<RemoteWorkspaceProfile[]> {
   return Promise.resolve([])
 }
@@ -636,13 +642,19 @@ function scanTasksForPath(relPath: string): Promise<VaultTask[]> {
 // so the on-disk format is identical everywhere by construction.
 // --------------------------------------------------------------------
 
-/** Read a vault file's text, or null when missing/unreadable (matches the
- *  desktop's optional-file reads, which treat ENOENT/parse errors as absent). */
+/** Read a vault file's text, or null when the SERVER says it is absent.
+ *  404 is the 2.20+ server's not-found; 500 is what older servers return
+ *  for a missing file. A network failure or auth rejection propagates
+ *  instead — the file may exist, and mapping "can't reach the server" to
+ *  "absent" is how a dropped connection used to silently forget databases. */
 async function readFileTextOrNull(relPath: string): Promise<string | null> {
   try {
     return (await readNote(relPath)).body
-  } catch {
-    return null
+  } catch (err) {
+    if (err instanceof HttpRequestError && (err.status === 404 || err.status === 500)) {
+      return null
+    }
+    throw err
   }
 }
 
@@ -1263,6 +1275,7 @@ export const httpBridge: ZenBridge = {
   getRemoteWorkspaceInfo,
   connectRemoteWorkspace,
   disconnectRemoteWorkspace,
+  retryWorkspaceBoot,
   listRemoteWorkspaceProfiles,
   saveRemoteWorkspaceProfile: (_input: RemoteWorkspaceProfileInput) => saveRemoteWorkspaceProfile(),
   deleteRemoteWorkspaceProfile: (_id: string) => deleteRemoteWorkspaceProfile(),

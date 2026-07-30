@@ -194,7 +194,7 @@ import { WindowVaultRegistry } from './window-vaults'
 import { registerEphemeralRoot, isEphemeralRoot } from './ephemeral-vaults'
 import { renderTikz } from './tikz'
 import { fetchLinkMetadata } from './link-metadata'
-import { RemoteServerClient } from './remote/server-client'
+import { RemoteRequestError, RemoteServerClient } from './remote/server-client'
 import {
   getMcpClientStatuses,
   getMcpServerRuntime,
@@ -278,6 +278,10 @@ let currentVault: VaultInfo | null = null
 let currentWorkspaceMode: 'local' | 'remote' = 'local'
 let remoteWorkspaceConfig: PersistedRemoteWorkspaceConfig | null = null
 let currentRemoteWorkspaceProfileId: string | null = null
+// Set when the configured remote workspace could not be reached at boot (or
+// on an explicit retry); cleared by any successful connect. Rides on
+// RemoteWorkspaceInfo so the renderer can offer reconnect instead of Welcome.
+let remoteWorkspaceBootError: string | null = null
 let remoteWorkspaceClient: RemoteServerClient | null = null
 let remoteServerCapabilities: ServerCapabilities | null = null
 let stopRemoteVaultWatch: (() => void) | null = null
@@ -1266,7 +1270,8 @@ async function currentRemoteWorkspaceInfo(): Promise<RemoteWorkspaceInfo | null>
     baseUrl: remoteWorkspaceConfig.baseUrl,
     authConfigured: Boolean(remoteWorkspaceClient?.authToken),
     capabilities: remoteServerCapabilities,
-    profileId: currentRemoteWorkspaceProfileId
+    profileId: currentRemoteWorkspaceProfileId,
+    bootError: remoteWorkspaceBootError
   }
 }
 
@@ -1544,6 +1549,7 @@ async function setRemoteWorkspace(
 ): Promise<{ vault: VaultInfo | null; capabilities: ServerCapabilities }> {
   const client = new RemoteServerClient({ baseUrl, authToken })
   const capabilities = await client.getCapabilities()
+  remoteWorkspaceBootError = null
   let vault = await client.getCurrentVault()
   const preferredVaultPath = options.vaultPath?.trim() || null
   if (
@@ -2010,9 +2016,18 @@ async function loadCurrentVaultFromConfig(): Promise<VaultInfo | null> {
         win && !win.isDestroyed()
           ? await ipcWindowContext.run(win, loadRemote)
           : await loadRemote()
+      remoteWorkspaceBootError = null
       return result.vault
-    } catch {
-      currentRemoteWorkspaceProfileId = null
+    } catch (err) {
+      // The workspace stays CONFIGURED: an unreachable server is a state to
+      // recover from, not a reason to pretend nothing was set up. The
+      // renderer reads bootError off getRemoteWorkspaceInfo and shows a
+      // reconnect screen instead of the first-boot Welcome; the profile id
+      // is kept so a retry reuses the saved credential.
+      remoteWorkspaceBootError =
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : `Could not connect to the ZenNotes server at ${cfg.remoteWorkspace.baseUrl}.`
       return null
     }
   }
@@ -2261,6 +2276,11 @@ function registerIpc(): void {
   })
   handle(IPC.WORKSPACE_DISCONNECT_REMOTE, async () => {
     return await disconnectRemoteWorkspace()
+  })
+  handle(IPC.WORKSPACE_RETRY_BOOT, async () => {
+    // Same path as boot: re-read config and secrets, attempt the connect.
+    // On failure loadCurrentVaultFromConfig refreshes bootError itself.
+    return await loadCurrentVaultFromConfig()
   })
   handle(IPC.WORKSPACE_LIST_REMOTE_PROFILES, async () => {
     return await listRemoteWorkspaceProfiles()
@@ -2670,8 +2690,20 @@ function registerIpc(): void {
       readFileTextOrNull: async (relPath) => {
         try {
           return (await client.readNote(relPath)).body
-        } catch {
-          return null
+        } catch (err) {
+          // "Absent" may only come from a server that ANSWERED. 404 is the
+          // 2.20+ server saying not-found; 500 is what older servers return
+          // for a missing file (they map ENOENT to a bare internal error).
+          // A connection failure or an auth rejection must propagate: the
+          // file may exist perfectly well, and swallowing the error here is
+          // how a dead server used to silently forget databases.
+          if (
+            err instanceof RemoteRequestError &&
+            (err.status === 404 || err.status === 500)
+          ) {
+            return null
+          }
+          throw err
         }
       },
       writeFile: async (relPath, text) => {

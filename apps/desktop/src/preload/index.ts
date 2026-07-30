@@ -227,6 +227,11 @@ const api: ZenBridge = {
     await refreshRemoteWorkspaceInfo()
     return result
   },
+  retryWorkspaceBoot: async (): Promise<VaultInfo | null> => {
+    const result = await ipcRenderer.invoke(IPC.WORKSPACE_RETRY_BOOT)
+    await refreshRemoteWorkspaceInfo()
+    return result
+  },
   listRemoteWorkspaceProfiles: async (): Promise<RemoteWorkspaceProfile[]> =>
     ipcRenderer.invoke(IPC.WORKSPACE_LIST_REMOTE_PROFILES),
   saveRemoteWorkspaceProfile: async (

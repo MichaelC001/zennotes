@@ -5,6 +5,7 @@ export const IPC = {
   WORKSPACE_GET_INFO: 'workspace:get-info',
   WORKSPACE_CONNECT_REMOTE: 'workspace:connect-remote',
   WORKSPACE_DISCONNECT_REMOTE: 'workspace:disconnect-remote',
+  WORKSPACE_RETRY_BOOT: 'workspace:retry-boot',
   WORKSPACE_LIST_REMOTE_PROFILES: 'workspace:list-remote-profiles',
   WORKSPACE_SAVE_REMOTE_PROFILE: 'workspace:save-remote-profile',
   WORKSPACE_DELETE_REMOTE_PROFILE: 'workspace:delete-remote-profile',
@@ -692,6 +693,11 @@ export interface RemoteWorkspaceInfo {
   authConfigured: boolean
   capabilities: ServerCapabilities | null
   profileId: string | null
+  /** Why the configured remote workspace failed to connect at boot, or null
+   *  when it connected (or was never tried). Lets the renderer show a
+   *  reconnect screen instead of the first-boot Welcome (a configured
+   *  workspace that is unreachable is not the same as no workspace). */
+  bootError: string | null
 }
 
 export interface RemoteWorkspaceProfile {

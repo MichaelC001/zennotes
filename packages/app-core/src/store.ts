@@ -3136,6 +3136,9 @@ interface Store {
   connectRemoteWorkspaceProfile: (id: string) => Promise<void>
   changeRemoteWorkspaceVaultPath: () => Promise<void>
   disconnectRemoteWorkspace: () => Promise<void>
+  /** Re-attempt the workspace configured on disk after the server was
+   *  unreachable at boot; full init on success, refreshed error on failure. */
+  retryWorkspaceBoot: () => Promise<void>
   saveRemoteWorkspaceProfile: (input: RemoteWorkspaceProfileInput) => Promise<RemoteWorkspaceProfile>
   deleteRemoteWorkspaceProfile: (id: string) => Promise<void>
   refreshRemoteWorkspaceProfiles: () => Promise<RemoteWorkspaceProfile[]>
@@ -3159,6 +3162,15 @@ const PATH_SAVE_DEBOUNCE_MS = 350
 const lastWrittenByPath = new Map<string, string>()
 
 // --- CSV database debounced persistence + echo suppression ---
+/** A user-showable message from a rejected bridge call. Electron wraps main
+ *  process rejections as "Error invoking remote method 'x': Error: <real>";
+ *  a toast should carry only the real sentence. */
+function humanIpcError(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : ''
+  const message = raw.replace(/^Error invoking remote method '[^']*':\s*(Error:\s*)?/, '').trim()
+  return message || fallback
+}
+
 const DATABASE_SAVE_DEBOUNCE_MS = 400
 const databaseSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 /** A pending write that touched the schema must persist the sidecar too. */
@@ -4418,7 +4430,7 @@ export const useStore = create<Store>((set, get) => {
       const { useToastStore } = await import('./lib/toast')
       useToastStore
         .getState()
-        .addToast(err instanceof Error ? err.message : 'Could not open database', 'error')
+        .addToast(humanIpcError(err, 'Could not open database'), 'error')
     } finally {
       set((s) =>
         csvPath in s.databasesLoading
@@ -4448,7 +4460,7 @@ export const useStore = create<Store>((set, get) => {
       const { useToastStore } = await import('./lib/toast')
       useToastStore
         .getState()
-        .addToast(err instanceof Error ? err.message : 'Could not create database', 'error')
+        .addToast(humanIpcError(err, 'Could not create database'), 'error')
     }
   },
   newDatabase: async () => {
@@ -8196,6 +8208,26 @@ export const useStore = create<Store>((set, get) => {
     window.zen.onVaultChange((ev) => {
       void get().applyChange(ev)
     })
+  },
+
+  retryWorkspaceBoot: async () => {
+    set({ workspaceSetupError: null })
+    try {
+      const vault = await window.zen.retryWorkspaceBoot()
+      if (vault) {
+        // The workspace is reachable again: run the exact boot path so the
+        // vault, settings, indexes and session restore land the normal way.
+        // init() is once-guarded for real boots; this re-entry is the point.
+        set({ initialized: false })
+        await get().init()
+        return
+      }
+      // Still down. Refresh the info so the screen shows the latest reason.
+      await get().refreshWorkspaceContext()
+    } catch (err) {
+      console.error('retryWorkspaceBoot failed', err)
+      set({ workspaceSetupError: humanIpcError(err, 'Could not reach the server.') })
+    }
   },
 
   openVaultPicker: async () => {
