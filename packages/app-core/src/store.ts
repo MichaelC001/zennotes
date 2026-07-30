@@ -565,7 +565,8 @@ interface Prefs {
   nestedTags: boolean
   /** Master switch for the Workflows feature. Off hides the `zen://workflows`
    *  view together with every way in (sidebar row, command, leader binding) and
-   *  closes any tab already showing it. On by default. */
+   *  closes any tab already showing it. OFF by default, deliberately: it can
+   *  rewrite notes in bulk, so it is a one-time opt-in under Settings. */
   workflowsEnabled: boolean
   /** Full paths of collapsed nodes in the nested-tag tree. */
   collapsedTagNodes: string[]

@@ -12,8 +12,6 @@ describe('create-note guard', () => {
     const precious = '# Important\n\nYears of notes live here.\n'
     await writeFile(path.join(root, 'inbox', 'Existing.md'), precious)
     const r = await applyWorkflowOps(root, { workflowId: 'p', ops: [{ kind: 'create-note', path: 'inbox/Existing.md', body: '' }] })
-    console.log('  rolledBack:', r.rolledBack ? 'yes' : 'NO')
-    console.log('  survived  :', (await readFile(path.join(root, 'inbox', 'Existing.md'), 'utf8')) === precious)
     expect(r.rolledBack).toBeTruthy()
     expect(await readFile(path.join(root, 'inbox', 'Existing.md'), 'utf8')).toBe(precious)
   })
