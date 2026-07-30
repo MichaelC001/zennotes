@@ -208,15 +208,30 @@ export function safeExportFilename(name: string): string {
 export async function readWorkflowImportFile(
   abs: string
 ): Promise<{ name: string; raw: string }> {
-  const stat = await fs.stat(abs)
-  if (!stat.isFile()) {
-    throw new Error('That is not a file.')
+  // One handle for the stat AND the read, so the size that was checked is the
+  // size of the very file being read: a path-stat followed by a path-read
+  // leaves a window where the file can be swapped or grown. The byte cap is
+  // re-checked on what actually arrived, which closes the tail of that window
+  // (a file appended to after the fstat) for the cost of one comparison.
+  const handle = await fs.open(abs, 'r')
+  try {
+    const stat = await handle.stat()
+    if (!stat.isFile()) {
+      throw new Error('That is not a file.')
+    }
+    if (stat.size > MAX_IMPORT_BYTES) {
+      throw new Error(
+        `That file is ${Math.round(stat.size / 1024)} KB, which is far larger than any workflow.`
+      )
+    }
+    const bytes = await handle.readFile()
+    if (bytes.byteLength > MAX_IMPORT_BYTES) {
+      throw new Error(
+        `That file is ${Math.round(bytes.byteLength / 1024)} KB, which is far larger than any workflow.`
+      )
+    }
+    return { name: path.basename(abs).replace(/\.md$/i, ''), raw: bytes.toString('utf8') }
+  } finally {
+    await handle.close()
   }
-  if (stat.size > MAX_IMPORT_BYTES) {
-    throw new Error(
-      `That file is ${Math.round(stat.size / 1024)} KB, which is far larger than any workflow.`
-    )
-  }
-  const raw = await fs.readFile(abs, 'utf8')
-  return { name: path.basename(abs).replace(/\.md$/i, ''), raw }
 }

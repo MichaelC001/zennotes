@@ -41,8 +41,10 @@ export async function ensureCustomCodeLanguagesDir(): Promise<string> {
   const dir = getCustomCodeLanguagesDir();
   await fs.mkdir(dir, { recursive: true });
   const readme = path.join(dir, "README.md");
-  if (!fsSync.existsSync(readme))
-    await fs.writeFile(readme, README).catch(() => {});
+  // Exclusive create instead of exists-then-write: `wx` makes the filesystem
+  // answer "already there" atomically, so nothing lands in the gap between a
+  // check and the write, and an existing README is never overwritten.
+  await fs.writeFile(readme, README, { flag: "wx" }).catch(() => {});
   return dir;
 }
 

@@ -135,12 +135,7 @@ import {
 import type { UnsavedResolution } from '../lib/workflow-run'
 import { BUILTIN_TEMPLATES } from '@shared/builtin-templates'
 import { mergeTemplates } from '@shared/template-files'
-import {
-  IRREVERSIBLE_KINDS,
-  pathsTooltip,
-  summarizeOps,
-  truncate
-} from '../lib/workflow-op-summary'
+import { IRREVERSIBLE_KINDS, pathsTooltip, summarizeOps } from '../lib/workflow-op-summary'
 import type { OpSummary } from '../lib/workflow-op-summary'
 import { Button, IconButton } from './ui/Button'
 import { Modal } from './ui/Modal'
