@@ -12,6 +12,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { normalizeBaseUrl } from '../main/remote/connection'
+import { buildOpenNoteDeepLink } from '../main/deep-links'
 
 export type NoteFolder = 'inbox' | 'quick' | 'archive' | 'trash'
 const FOLDERS: NoteFolder[] = ['inbox', 'quick', 'archive', 'trash']
@@ -155,6 +156,10 @@ const TASK_LINE_RE = /^\s*[-*+]\s+\[([ xX>-])\](.*)$/
 
 export interface NoteMeta {
   path: string
+  /** `zennotes://open?path=…` URL that focuses the app and opens this note.
+   *  Meant for rendering `[title](link)` markdown when presenting notes to
+   *  the user (#509). Clients pass `path` back to tools, never this. */
+  link: string
   title: string
   folder: NoteFolder
   createdAt: number
@@ -172,6 +177,8 @@ export interface NoteContent extends NoteMeta {
 export interface VaultTask {
   id: string
   sourcePath: string
+  /** Deep link to the source note; same contract as NoteMeta.link. */
+  link: string
   noteTitle: string
   noteFolder: NoteFolder
   lineNumber: number
@@ -518,8 +525,10 @@ async function readMeta(root: string, abs: string, folder: NoteFolder): Promise<
   } catch {
     /* treat as empty */
   }
+  const rel = toPosix(path.relative(root, abs))
   return {
-    path: toPosix(path.relative(root, abs)),
+    path: rel,
+    link: buildOpenNoteDeepLink(rel),
     title: path.basename(abs, path.extname(abs)),
     folder,
     createdAt: stat.birthtimeMs || stat.ctimeMs,
@@ -880,6 +889,8 @@ export async function deleteFolder(
 
 export interface VaultTextSearchMatch {
   path: string
+  /** Deep link to the matched note; same contract as NoteMeta.link. */
+  link: string
   title: string
   folder: NoteFolder
   lineNumber: number
@@ -933,6 +944,7 @@ export async function searchText(
         if (lines[i].toLowerCase().includes(needle)) {
           out.push({
             path: rel,
+            link: buildOpenNoteDeepLink(rel),
             title,
             folder,
             lineNumber: i + 1,
@@ -1085,6 +1097,7 @@ function parseTasksFromBody(
     tasks.push({
       id: `${ctx.path}#${taskIndex}`,
       sourcePath: ctx.path,
+      link: buildOpenNoteDeepLink(ctx.path),
       noteTitle: ctx.title,
       noteFolder: ctx.folder,
       lineNumber: i,
@@ -1192,6 +1205,7 @@ function parseTaskFile(
   return {
     id: `${ctx.path}#task`,
     sourcePath: ctx.path,
+    link: buildOpenNoteDeepLink(ctx.path),
     noteTitle: ctx.title,
     noteFolder: ctx.folder,
     lineNumber: 0,
