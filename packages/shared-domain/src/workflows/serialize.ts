@@ -138,7 +138,25 @@ function serializeStep(step: WorkflowStep): string {
   })
   while (slots.length > 0 && slots[slots.length - 1] === null) slots.pop()
 
-  const parts = slots.filter((slot): slot is string => slot !== null)
+  // An INTERIOR gap must not close up: dropping a middle slot would slide the
+  // next value into the wrong position on the next parse, which destroys the
+  // file as a fixpoint. A default fills the gap explicitly instead.
+  const parts: string[] = []
+  slots.forEach((slot, i) => {
+    if (slot !== null) {
+      parts.push(slot)
+      return
+    }
+    const spec = def.params[i]
+    if (spec && spec.default !== undefined) {
+      const filled = serializeArg(spec, spec.default)
+      if (filled) parts.push(filled)
+    }
+  })
+  // Tokens `bindParams` could not bind are replayed verbatim, exactly like an
+  // unknown step's arguments: red on the canvas, intact in the file.
+  const parked: ArgValue | undefined = step.args[RAW_ARG]
+  if (parked !== undefined && parked !== '') parts.push(String(parked))
   return [step.kind, ...parts].join(' ')
 }
 

@@ -897,3 +897,101 @@ describe('listWorkflowRuns', () => {
     expect((await listWorkflowRuns(root)).length).toBe(1)
   })
 })
+
+describe('ops after a path op follow the note', () => {
+  it('applies a text op to the destination the move promised', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'body\n')
+
+    const receipt = await apply(root, [
+      { kind: 'move', path: 'inbox/A.md', to: 'archive' },
+      { kind: 'add-tag', path: 'archive/A.md', tag: 'filed' }
+    ])
+
+    expect(receipt.rolledBack).toBeUndefined()
+    expect(await readOrNull(root, 'inbox/A.md')).toBeNull()
+    expect(await readOrNull(root, 'archive/A.md')).toContain('#filed')
+  })
+
+  it('refuses a per-note text op whose target is gone, and rolls the run back', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'body\n')
+    const before = await snapshot(root)
+
+    // A plan from a stale wire: the second op names the pre-move path. Writing
+    // '' + tag there would materialize a phantom note; the honest outcome is a
+    // failed, fully rolled-back run.
+    const receipt = await apply(root, [
+      { kind: 'move', path: 'inbox/A.md', to: 'archive' },
+      { kind: 'append', path: 'inbox/A.md', text: 'ghost' }
+    ])
+
+    expect(receipt.rolledBack?.reason).toContain('the note is missing')
+    expect(receipt.applied).toBe(0)
+    expect(await snapshot(root)).toEqual(before)
+  })
+
+  it('sinks may still create their target file', async () => {
+    const root = await makeVault()
+    const receipt = await apply(root, [
+      { kind: 'write-note', path: 'inbox/Report.md', text: 'fresh\n' }
+    ])
+    expect(receipt.rolledBack).toBeUndefined()
+    expect(await readOrNull(root, 'inbox/Report.md')).toBe('fresh\n')
+  })
+
+  it('follows the forwarding address when a collision diverted the move', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'moved one\n')
+    await seed(root, 'archive/A.md', 'already here\n')
+
+    // Op 1 promises archive/A.md but must land at `archive/A 2.md`; op 2 sends
+    // the pre-existing note away; op 3 names the promised path, which is now a
+    // gap only this run knows the forwarding address for.
+    const receipt = await apply(root, [
+      { kind: 'move', path: 'inbox/A.md', to: 'archive' },
+      { kind: 'trash', path: 'archive/A.md' },
+      { kind: 'append', path: 'archive/A.md', text: 'found you' }
+    ])
+
+    expect(receipt.rolledBack).toBeUndefined()
+    expect(await readOrNull(root, 'archive/A 2.md')).toBe('moved one\nfound you\n')
+    expect(await readOrNull(root, 'trash/A.md')).toBe('already here\n')
+    expect(await readOrNull(root, 'archive/A.md')).toBeNull()
+  })
+
+  it('the stated path wins over a forwarding address while the file exists', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'moved one\n')
+    await seed(root, 'archive/A.md', 'already here\n')
+
+    // The redirect for archive/A.md exists after op 1, but the op names a note
+    // that is really there: the redirect must not hijack it.
+    const receipt = await apply(root, [
+      { kind: 'move', path: 'inbox/A.md', to: 'archive' },
+      { kind: 'append', path: 'archive/A.md', text: ' tagged' }
+    ])
+
+    expect(receipt.rolledBack).toBeUndefined()
+    expect(await readOrNull(root, 'archive/A.md')).toBe('already here\n tagged\n')
+    expect(await readOrNull(root, 'archive/A 2.md')).toBe('moved one\n')
+  })
+
+  it('a chained move keeps the collision suffix rather than reclaiming the promised name', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'moved one\n')
+    await seed(root, 'quick/A.md', 'blocker\n')
+
+    // Move 1 diverts to `quick/A 2.md`; move 2 names the promised quick/A.md,
+    // which still exists (the blocker), so the blocker moves and the diverted
+    // file stays put under its real name.
+    const receipt = await apply(root, [
+      { kind: 'move', path: 'inbox/A.md', to: 'quick' },
+      { kind: 'move', path: 'quick/A.md', to: 'archive' }
+    ])
+
+    expect(receipt.rolledBack).toBeUndefined()
+    expect(await readOrNull(root, 'quick/A 2.md')).toBe('moved one\n')
+    expect(await readOrNull(root, 'archive/A.md')).toBe('blocker\n')
+  })
+})

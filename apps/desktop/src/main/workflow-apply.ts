@@ -49,6 +49,22 @@ import type { WorkflowOp } from '@shared/workflows/types'
 // write that silently stops happening.
 import { applyTextOp } from '@shared/workflows/apply-ops'
 import type { TextOp } from '@shared/workflows/apply-ops'
+// The path-target arithmetic is shared with the engine for the same reason the
+// content transforms are: the engine PROMISES downstream steps a destination,
+// and the applier must land the file exactly there. Two copies would let those
+// promises drift apart, which is how phantom notes happen.
+import {
+  NOTE_EXTENSIONS,
+  folderTarget,
+  joinRel,
+  moveTarget,
+  normalizeRel,
+  noteExtensionOf,
+  relBasename,
+  relDirname,
+  renameTarget,
+  stripNoteExtension
+} from '@shared/workflows/paths'
 import { WORKFLOWS_REL_DIR } from '@shared/workflows-view'
 import { writeFileAtomic } from './vault'
 
@@ -73,12 +89,6 @@ const LEDGER_VERSION = 1
  * only ever forgets an undo option, it never changes a note.
  */
 export const MAX_RETAINED_RUNS = 100
-
-/** What a workflow is allowed to write. See `resolveVaultPath`. */
-const NOTE_EXTENSIONS = ['.md', '.excalidraw']
-
-/** Top-level folders that are containers rather than part of a note's subpath. */
-const FOLDER_ROOTS = new Set(['inbox', 'quick', 'archive', 'trash'])
 
 /** The internal directory a workflow must never write into. */
 const INTERNAL_DIR = '.zennotes'
@@ -125,36 +135,6 @@ function runsDir(root: string): string {
   return path.join(root, ...RUNS_REL_DIR.split('/'))
 }
 
-/** Vault-relative paths are posix in the plan, so they are compared as posix. */
-function normalizeRel(rel: string): string {
-  return rel.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
-}
-
-function relDirname(rel: string): string {
-  const cut = rel.lastIndexOf('/')
-  return cut === -1 ? '' : rel.slice(0, cut)
-}
-
-function relBasename(rel: string): string {
-  const cut = rel.lastIndexOf('/')
-  return cut === -1 ? rel : rel.slice(cut + 1)
-}
-
-function joinRel(dir: string, name: string): string {
-  return dir ? `${dir}/${name}` : name
-}
-
-/** `.md` or `.excalidraw`, lowercased, or '' when the name carries neither. */
-function noteExtensionOf(rel: string): string {
-  const lower = relBasename(rel).toLowerCase()
-  return NOTE_EXTENSIONS.find((ext) => lower.endsWith(ext)) ?? ''
-}
-
-function stripNoteExtension(name: string): string {
-  const ext = noteExtensionOf(name)
-  return ext ? name.slice(0, name.length - ext.length) : name
-}
-
 /**
  * Resolve a vault-relative path a workflow wants to write, refusing anything
  * outside the vault, inside `.zennotes`, or that is not a note.
@@ -199,40 +179,6 @@ export function resolveVaultPath(root: string, rel: string): string {
     throw new Error(`Workflow op path is not a note (${NOTE_EXTENSIONS.join(' or ')}): ${rel}`)
   }
   return abs
-}
-
-/**
- * Where a `move` puts a note: same filename, new folder. `to` is a folder
- * because `rename` is the op that changes a name, which is the only reason
- * these are two ops and not one.
- */
-function moveTarget(rel: string, folder: string): string {
-  return joinRel(normalizeRel(folder), relBasename(rel))
-}
-
-/**
- * Where a `rename` puts a note: same folder, new name, same file type, so a
- * renamed `.excalidraw` drawing is still a drawing. The pattern may already
- * carry an extension (`{{title}}.md`), which is dropped rather than doubled.
- */
-function renameTarget(rel: string, pattern: string): string {
-  const name = stripNoteExtension(normalizeRel(pattern).trim())
-  if (!name) throw new Error(`Workflow rename has an empty target for ${rel}`)
-  const ext = noteExtensionOf(rel) || NOTE_EXTENSIONS[0]
-  return joinRel(relDirname(rel), `${name}${ext}`)
-}
-
-/**
- * Where `archive` and `trash` put a note: the destination folder, with the
- * source's subfolder mirrored, so `inbox/demo/X.md` lands at `archive/demo/X.md`
- * and moving it back returns it to `demo/`. This mirrors `moveBetweenFolders`
- * in `vault.ts` without depending on the vault's caches or settings.
- */
-function folderTarget(folder: 'archive' | 'trash', rel: string): string {
-  const segments = normalizeRel(rel).split('/')
-  const file = segments.pop() ?? ''
-  if (segments.length > 0 && FOLDER_ROOTS.has((segments[0] ?? '').toLowerCase())) segments.shift()
-  return [folder, ...segments, file].join('/')
 }
 
 /** Every vault path an op could touch, for the pre-flight containment check. */
@@ -476,19 +422,55 @@ interface RunState {
   journal: Map<string, string | null>
   /** Path to the hash of what the run left there; null where it removed it. */
   written: Map<string, string | null>
+  /**
+   * Destination the plan promised to where the file actually landed, for the
+   * one case where they differ: `uniqueRel` had to suffix around a collision.
+   * Later ops in the same run name the promised path; this is the forwarding
+   * address that keeps them on the note. See `resolveLiveRel` for why an op
+   * whose stated path still exists never follows a redirect.
+   */
+  redirects: Map<string, string>
 }
 
 function journalTouch(state: RunState, rel: string, before: string | null): void {
   if (!state.journal.has(rel)) state.journal.set(rel, before)
 }
 
+/**
+ * Where an op's stated path actually lives right now.
+ *
+ * The stated path wins whenever the file is still there, so a redirect can
+ * never hijack an op aimed at a real note (a pre-existing note at the promised
+ * destination keeps receiving the ops that name it). The redirect is followed
+ * only into the gap this run itself created: the promised destination is gone
+ * or was never free, and the run knows where the file actually went.
+ */
+async function resolveLiveRel(state: RunState, rel: string): Promise<string> {
+  const stated = normalizeRel(rel)
+  const via = state.redirects.get(stated)
+  if (via === undefined) return stated
+  if (await exists(resolveVaultPath(state.root, stated))) return stated
+  return via
+}
+
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+/** Text ops that act on a note the plan saw on a wire, rather than on a path
+ *  the author typed. Only these demand that their target still exists. */
+const PER_NOTE_TEXT_OPS = new Set([
+  'set-frontmatter',
+  'add-tag',
+  'remove-tag',
+  'append',
+  'prepend',
+  'apply-template'
+])
+
 /** One content transform: read, journal, write. Identical output writes nothing. */
 async function applyTextOpToVault(state: RunState, op: TextOp): Promise<void> {
-  const rel = normalizeRel(op.path)
+  const rel = await resolveLiveRel(state, op.path)
   const abs = resolveVaultPath(state.root, rel)
   const live = await readIfExists(abs)
   // `create-note` MEANS create. Its transform is a whole-file write that ignores
@@ -500,6 +482,17 @@ async function applyTextOpToVault(state: RunState, op: TextOp): Promise<void> {
   if (op.kind === 'create-note' && live !== null) {
     throw new Error(
       `create-note would replace the existing note ${rel}. Use write to replace a note on purpose.`
+    )
+  }
+  // The mirror image, for the ops that act on a wire note: a target that has
+  // vanished means the plan is describing a vault that no longer exists (the
+  // note was moved or removed, by an earlier step reading a stale wire or by
+  // someone else mid-run). Applying the transform to '' would materialize a
+  // phantom note at the abandoned path, which is strictly worse than failing:
+  // the run rolls back and the receipt names the step that lied.
+  if (live === null && PER_NOTE_TEXT_OPS.has(op.kind)) {
+    throw new Error(
+      `Cannot ${op.kind} ${rel}: the note is missing (moved or removed earlier in this run?)`
     )
   }
   // `applyTextOp` takes '' for a file that does not exist yet, and answers null
@@ -524,7 +517,8 @@ async function movePathInVault(
   state: RunState,
   kind: WorkflowOp['kind'],
   fromRel: string,
-  nominalRel: string
+  nominalRel: string,
+  promisedRel: string
 ): Promise<void> {
   const from = normalizeRel(fromRel)
   const fromAbs = resolveVaultPath(state.root, from)
@@ -549,6 +543,10 @@ async function movePathInVault(
   await fs.rename(fromAbs, toAbs)
   state.written.set(from, null)
   state.written.set(to, hashText(live))
+  // Later ops in this plan name the destination the engine promised; when the
+  // vault forced a different one, leave a forwarding address.
+  const promised = normalizeRel(promisedRel)
+  if (to !== promised) state.redirects.set(promised, to)
 }
 
 async function applyOp(state: RunState, op: WorkflowOp): Promise<void> {
@@ -559,14 +557,51 @@ async function applyOp(state: RunState, op: WorkflowOp): Promise<void> {
     case 'notify':
     case 'clipboard':
       return
-    case 'move':
-      return await movePathInVault(state, op.kind, op.path, moveTarget(op.path, op.to))
-    case 'rename':
-      return await movePathInVault(state, op.kind, op.path, renameTarget(op.path, op.to))
-    case 'archive':
-      return await movePathInVault(state, op.kind, op.path, folderTarget('archive', op.path))
-    case 'trash':
-      return await movePathInVault(state, op.kind, op.path, folderTarget('trash', op.path))
+    // Path ops resolve their source through the run's forwarding addresses,
+    // then aim where the ACTUAL file's name says (an earlier collision suffix
+    // must survive a later move), while the redirect they record is keyed by
+    // the destination the ENGINE promised, because that is the name later ops
+    // will use.
+    case 'move': {
+      const from = await resolveLiveRel(state, op.path)
+      return await movePathInVault(
+        state,
+        op.kind,
+        from,
+        moveTarget(from, op.to),
+        moveTarget(normalizeRel(op.path), op.to)
+      )
+    }
+    case 'rename': {
+      const from = await resolveLiveRel(state, op.path)
+      return await movePathInVault(
+        state,
+        op.kind,
+        from,
+        renameTarget(from, op.to),
+        renameTarget(normalizeRel(op.path), op.to)
+      )
+    }
+    case 'archive': {
+      const from = await resolveLiveRel(state, op.path)
+      return await movePathInVault(
+        state,
+        op.kind,
+        from,
+        folderTarget('archive', from),
+        folderTarget('archive', normalizeRel(op.path))
+      )
+    }
+    case 'trash': {
+      const from = await resolveLiveRel(state, op.path)
+      return await movePathInVault(
+        state,
+        op.kind,
+        from,
+        folderTarget('trash', from),
+        folderTarget('trash', normalizeRel(op.path))
+      )
+    }
     default:
       return await applyTextOpToVault(state, op)
   }
@@ -699,7 +734,7 @@ export async function applyWorkflowOps(
 
   const runId = await allocateRunId(root, startedAt, workflowId, ops)
   const run: RunIdentity = { runId, workflowId, startedAt, irreversible, ops }
-  const state: RunState = { root, journal: new Map(), written: new Map() }
+  const state: RunState = { root, journal: new Map(), written: new Map(), redirects: new Map() }
   let applied = 0
 
   try {

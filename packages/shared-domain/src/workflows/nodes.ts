@@ -11,6 +11,7 @@
 // completions. One source of truth for all four.
 
 import type { ArgValue, Diagnostic } from './types'
+import { RAW_ARG } from './types'
 
 /* -------------------------------------------------------------------------- */
 /*  Param and node shapes                                                     */
@@ -140,7 +141,7 @@ export const NODE_DEFS: readonly NodeDef[] = [
     category: 'source',
     title: 'All notes',
     description:
-      'Starts a pipeline with every note in the vault.',
+      'Starts a pipeline with every note in the vault, except the Trash and the Archive. Reach those explicitly with `folder trash` or `folder archive`.',
     example: 'notes = all',
     params: [],
     source: true,
@@ -164,7 +165,7 @@ export const NODE_DEFS: readonly NodeDef[] = [
     category: 'source',
     title: 'Notes with tag',
     description:
-      'Starts a pipeline with the notes carrying a tag.',
+      'Starts a pipeline with the notes carrying a tag. Trashed and archived notes stay out, like `all`.',
     example: 'books = tag #book',
     params: [p('tag', 'tag')],
     source: true,
@@ -614,7 +615,11 @@ export interface BindResult {
 }
 
 const DURATION_RE = /^\d+[dhwm]$/
-const TAG_RE = /^#?[\w/-]+$/
+// The same shape every vault extractor recognises (#205): a letter first, in
+// any script. An ASCII-only `\w` here would refuse the `#café` the vault
+// itself indexes, and accept the digit-leading `#2024` that `INLINE_TAG_RE`
+// in apply-ops would then silently decline to write.
+const TAG_RE = /^#?\p{L}[\p{L}\d_/-]*$/u
 
 /**
  * Bind raw tokens to a node's declared params, coercing and validating each.
@@ -666,7 +671,17 @@ export function bindParams(def: NodeDef, tokens: string[], line: number): BindRe
 
     const bound = coerce(spec, token, def.kind, line)
     if (bound.diagnostic) diagnostics.push(bound.diagnostic)
-    if (bound.value !== undefined) args[spec.name] = bound.value
+    if (bound.value !== undefined) {
+      args[spec.name] = bound.value
+    } else {
+      // Park the failed token and everything after it, the same way an unknown
+      // verb parks its arguments: the author's text must survive a save even
+      // while the step is red. Binding also STOPS here, because a later token
+      // sliding into this param's position is how `where rating == 4` used to
+      // degrade into `where rating 4` over two saves.
+      args[RAW_ARG] = tokens.slice(index - 1).join(' ')
+      return { args, diagnostics }
+    }
   }
 
   if (index < tokens.length) {

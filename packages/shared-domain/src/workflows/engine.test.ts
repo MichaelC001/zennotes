@@ -66,7 +66,10 @@ const NOTES: WorkflowNote[] = [
   note('archive/Old Note.md', 'Old Note', 'archive', [], {}, 100 * DAY),
   note('inbox/Meeting.md', 'Meeting', 'inbox', ['meeting'], { attendees: 'ada, alan' }, 5 * HOUR),
   note('inbox/Recipe.md', 'Recipe', 'inbox', ['recipe'], {}, 6 * DAY),
-  note('inbox/Pipes.md', 'Pipes | Tubes', 'inbox', ['note'], { rating: '3' }, 8 * DAY)
+  note('inbox/Pipes.md', 'Pipes | Tubes', 'inbox', ['note'], { rating: '3' }, 8 * DAY),
+  // Deliberately last so the existing NOTES[n] references above keep pointing
+  // where they always did.
+  note('trash/Deleted.md', 'Deleted', 'trash', ['book'], {}, 50 * DAY)
 ]
 
 const BODIES: Record<string, string> = {
@@ -77,6 +80,7 @@ const BODIES: Record<string, string> = {
   'inbox/projects/Compiler.md': 'parser, codegen, and a linker',
   'inbox/projects/Engine.md': 'the workflow ENGINE plans, it never writes',
   'archive/Old Note.md': 'archived long ago',
+  'trash/Deleted.md': 'deleted, not gone',
   'inbox/Meeting.md': 'ada and alan met about arrakis',
   'inbox/Recipe.md': 'flour, water, salt',
   'inbox/Pipes.md': 'pipes and tubes'
@@ -172,8 +176,26 @@ async function outTitles(steps: WorkflowStep[], options: ReaderOptions = {}): Pr
 /* -------------------------------------------------------------------------- */
 
 describe('sources', () => {
-  it('`all` puts every note on the wire', async () => {
-    expect(await outTitles([step('all')])).toHaveLength(10)
+  it('`all` puts every working note on the wire', async () => {
+    expect(await outTitles([step('all')])).toHaveLength(9)
+  })
+
+  it('`all`, `tag` and `search` leave the Trash and the Archive out', async () => {
+    const all = await outTitles([step('all')])
+    expect(all).not.toContain('Old Note')
+    expect(all).not.toContain('Deleted')
+    // The trashed note carries #book; a bulk `tag #book | add-tag …` must not
+    // write into files that vanish on the next empty-trash.
+    expect(await outTitles([step('tag', ['#book'])])).toEqual([
+      'Dune',
+      'Neuromancer',
+      'Ulysses',
+      'Draft'
+    ])
+    expect(await outTitles([step('search', ['deleted'])])).toEqual([])
+    // Both stay reachable, spelled out loud.
+    expect(await outTitles([step('folder', ['trash'])])).toEqual(['Deleted'])
+    expect(await outTitles([step('folder', ['archive'])])).toEqual(['Old Note'])
   })
 
   it('`folder` matches the folder and everything under it', async () => {
@@ -246,13 +268,42 @@ describe('where', () => {
     ])
   })
 
+  it('compares `created`/`updated` against a typed date as dates', async () => {
+    // 2026-07-24 sits more than a day from every note's timestamp, so the
+    // assertion holds in any timezone even though the boundary is local.
+    expect(await outTitles([step('all'), step('where', ['updated', '<', '2026-07-24'])])).toEqual([
+      'Ulysses',
+      'Engine',
+      'Recipe',
+      'Pipes | Tubes'
+    ])
+    expect(
+      await outTitles([step('all'), step('where', ['updated', '>', '2026-07-24'])])
+    ).toEqual(['Dune', 'Neuromancer', 'Draft', 'Compiler', 'Meeting'])
+    expect(await outTitles([step('all'), step('where', ['created', '>', '2020-01-01'])])).toHaveLength(
+      9
+    )
+    // A time component narrows further and still parses.
+    expect(
+      await outTitles([step('all'), step('where', ['updated', '>', '2020-01-01 00:00'])])
+    ).toHaveLength(9)
+  })
+
+  it('a numeric field never widens against an uncomparable value', async () => {
+    // Text fallback would compare '17…' < 'banana' and match everything; the
+    // rule is that an unevaluable step narrows to nothing.
+    expect(await outTitles([step('all'), step('where', ['updated', '<', 'banana'])])).toEqual([])
+    expect(await outTitles([step('all'), step('where', ['updated', '>', 'banana'])])).toEqual([])
+    expect(await outTitles([step('all'), step('where', ['updated', '!=', 'banana'])])).toEqual([])
+  })
+
   it('compares text case-insensitively when a side is not a number', async () => {
     expect(await outTitles([step('all'), step('where', ['status', '=', 'FINISHED'])])).toEqual([
       'Dune',
       'Neuromancer'
     ])
     expect(await outTitles([step('all'), step('where', ['status', '!=', 'finished'])])).toHaveLength(
-      8
+      7
     )
   })
 
@@ -295,7 +346,7 @@ describe('filters', () => {
       'Compiler',
       'Engine'
     ])
-    expect(await outTitles([step('all'), step('not-tagged', ['#book'])])).toHaveLength(6)
+    expect(await outTitles([step('all'), step('not-tagged', ['#book'])])).toHaveLength(5)
   })
 
   it('`in` narrows to a folder subtree', async () => {
@@ -308,7 +359,9 @@ describe('filters', () => {
   it('`matching` globs over the path, with * stopping at a separator', async () => {
     expect(await outTitles([step('all'), step('matching', ['inbox/*.md'])])).toHaveLength(7)
     expect(await outTitles([step('all'), step('matching', ['inbox/**/*.md'])])).toHaveLength(9)
-    expect(await outTitles([step('all'), step('matching', ['**/Old*.md'])])).toEqual(['Old Note'])
+    expect(await outTitles([step('folder', ['archive']), step('matching', ['**/Old*.md'])])).toEqual(
+      ['Old Note']
+    )
   })
 
   it('`contains` reads bodies and ignores case', async () => {
@@ -456,12 +509,49 @@ describe('mutations', () => {
       step('apply-template', ['review']),
       step('trash')
     ])
+    // Everything after the `move` names the note's NEW address: the wire
+    // follows the note, so a later op can never resurrect the abandoned path.
     expect(plan.ops).toEqual([
       { kind: 'set-frontmatter', path: 'inbox/Recipe.md', field: 'status', value: 'cooked' },
       { kind: 'remove-tag', path: 'inbox/Recipe.md', tag: 'recipe' },
       { kind: 'move', path: 'inbox/Recipe.md', to: 'archive/kitchen' },
-      { kind: 'apply-template', path: 'inbox/Recipe.md', template: 'review' },
-      { kind: 'trash', path: 'inbox/Recipe.md' }
+      { kind: 'apply-template', path: 'archive/kitchen/Recipe.md', template: 'review' },
+      { kind: 'trash', path: 'archive/kitchen/Recipe.md' }
+    ])
+  })
+
+  it('text ops after a path op follow the note to its destination', async () => {
+    const moved = await planPipeline([
+      step('tag', ['#recipe']),
+      step('move', ['archive/kitchen/']),
+      step('add-tag', ['#filed'])
+    ])
+    expect(moved.ops).toEqual([
+      { kind: 'move', path: 'inbox/Recipe.md', to: 'archive/kitchen' },
+      { kind: 'add-tag', path: 'archive/kitchen/Recipe.md', tag: 'filed' }
+    ])
+    // The wire's metadata follows too, so a later filter sees the new address.
+    expect(moved.wires.out.map((note) => note.folder)).toEqual(['archive/kitchen'])
+
+    const renamed = await planPipeline([
+      step('tag', ['#recipe']),
+      step('rename', ['Cookbook']),
+      step('append', ['reviewed'])
+    ])
+    expect(renamed.ops).toEqual([
+      { kind: 'rename', path: 'inbox/Recipe.md', to: 'Cookbook' },
+      { kind: 'append', path: 'inbox/Cookbook.md', text: 'reviewed' }
+    ])
+    expect(renamed.wires.out.map((note) => note.title)).toEqual(['Cookbook'])
+
+    const archived = await planPipeline([
+      step('tag', ['#recipe']),
+      step('archive'),
+      step('set', ['status', 'done'])
+    ])
+    expect(archived.ops).toEqual([
+      { kind: 'archive', path: 'inbox/Recipe.md' },
+      { kind: 'set-frontmatter', path: 'archive/Recipe.md', field: 'status', value: 'done' }
     ])
   })
 

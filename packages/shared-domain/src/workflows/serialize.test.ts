@@ -121,6 +121,42 @@ describe('serializeWorkflow: files round-trip', () => {
   }
 })
 
+describe('serializeWorkflow: unbindable arguments survive the save', () => {
+  /**
+   * A token that fails coercion is parked under RAW_ARG and written back
+   * verbatim. Before that, the failed slot was dropped and every later value
+   * slid one position left, so `where rating == 4` degraded to `where rating 4`
+   * and then to `where rating` across two saves, destroying the author's text
+   * while they were looking elsewhere in the file.
+   */
+  const PARKED: Array<[string, string]> = [
+    ['a mistyped comparison', 'x = all | where rating == 4'],
+    ['a bad duration', 'x = all | since 7x'],
+    ['a digit-leading tag', 'x = tag #2024'],
+    ['a bad sort direction with the field bound', 'x = all | sort title sideways'],
+    ['a quoted token that failed to bind', 'x = all | since "7 x"']
+  ]
+
+  for (const [label, line] of PARKED) {
+    it(`keeps ${label} verbatim`, () => {
+      const raw = `---\nname: W\nstatus: active\ntrigger: manual\n---\n\n${line}\n`
+      const parsed = parseWorkflow(raw, 'wf')
+      expect(parsed.diagnostics.some((d) => d.severity === 'error')).toBe(true)
+      expect(serializeWorkflow(parsed.workflow)).toBe(raw)
+      roundTrip(raw)
+    })
+  }
+
+  it('binds a unicode tag instead of parking it', () => {
+    const raw = `---\nname: W\nstatus: active\ntrigger: manual\n---\n\nx = tag #café\n`
+    const parsed = parseWorkflow(raw, 'wf')
+    expect(parsed.diagnostics).toEqual([])
+    expect(parsed.workflow.statements[0]?.steps[0]?.args.tag).toBe('café')
+    expect(serializeWorkflow(parsed.workflow)).toBe(raw)
+    roundTrip(raw)
+  })
+})
+
 describe('serializeWorkflow: quoting', () => {
   /**
    * A pipe inside an argument is the dangerous case: written bare it does not

@@ -29,6 +29,7 @@
 
 import type { ArgValue, Diagnostic, Workflow, WorkflowEvent, WorkflowStatus } from './types'
 import type { WorkflowStatement, WorkflowStep, WorkflowTrigger } from './types'
+import { RAW_ARG } from './types'
 import type { NodeDef } from './nodes'
 import { bindParams, nodeDef } from './nodes'
 import { parseFrontmatter } from '../template-files'
@@ -79,8 +80,12 @@ const FIRST_STEP_ERROR = 'pipeline must start with a source or a wire name'
  * name (they are all plain identifiers), and the serializer writes this value
  * back verbatim, which is the same "round-trip what we do not understand"
  * promise `Workflow.meta` makes for frontmatter.
+ *
+ * Lives in `./types` (it is part of the `args` contract, and `bindParams`
+ * parks unbindable tokens under it too); re-exported here for the callers
+ * that always imported it from the parser.
  */
-export const RAW_ARG = '$raw'
+export { RAW_ARG } from './types'
 
 /** Runtime view of the `WorkflowEvent` union, which is types-only. */
 export const WORKFLOW_EVENTS: readonly WorkflowEvent[] = [

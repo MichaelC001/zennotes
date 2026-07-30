@@ -81,7 +81,7 @@ export interface NewStatement {
 const WIRE_NAME_RE = /^[A-Za-z_][\w-]*$/
 
 /** The tag body, i.e. `./nodes`' TAG_RE with the optional `#` already stripped. */
-const TAG_VALUE_RE = /^[\w/-]+$/
+const TAG_VALUE_RE = /^\p{L}[\p{L}\d_/-]*$/u
 
 /** `7d`, `12h`, `2w`. Mirrors DURATION_RE in `./nodes`. */
 const DURATION_RE = /^\d+[dhwm]$/

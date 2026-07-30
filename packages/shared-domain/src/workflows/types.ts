@@ -71,6 +71,15 @@ export interface WorkflowStep {
 export type ArgValue = string | number | boolean
 
 /**
+ * The `args` key holding raw text that could not be bound to typed params:
+ * the arguments of an unknown step, or the remainder of a step whose token
+ * failed coercion. The serializer writes it back verbatim, so a file survives
+ * being opened and saved by a version (or an author) that does not understand
+ * part of it. The `$` prefix cannot collide with a real param name.
+ */
+export const RAW_ARG = '$raw'
+
+/**
  * One statement: a pipeline, optionally naming the wire it produces.
  *
  *   books   = tag #book                       name='books'  input=null

@@ -27,6 +27,7 @@
 
 import { isCompareOp, nodeDef, RENDER_STYLES } from './nodes'
 import type { CompareOp, NodeDef, RenderStyle } from './nodes'
+import { folderTarget, moveTarget, relBasename, relDirname, renameTarget, stripNoteExtension } from './paths'
 import { parseFrontmatter } from '../template-files'
 import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_OPS, IRREVERSIBLE_OP_KINDS, isRunnable } from './types'
 import type {
@@ -337,6 +338,21 @@ async function allNotes(state: RunState, line: number): Promise<WorkflowNote[]> 
 }
 
 /**
+ * The working vault: everything except the Trash and the Archive.
+ *
+ * `all`, `tag` and `search` describe the notes someone is working with, and a
+ * bulk write into the Trash (whose files vanish on the next empty) or the
+ * Archive is never what those words meant. Both stay reachable on purpose,
+ * spelled out loud: `folder trash` and `folder archive`.
+ */
+function workingNotes(notes: WorkflowNote[]): WorkflowNote[] {
+  return notes.filter((note) => {
+    const top = normalizeFolder(note.folder).split('/')[0]?.toLowerCase() ?? ''
+    return top !== 'trash' && top !== 'archive'
+  })
+}
+
+/**
  * Fill in `body` for every note on the wire, reading each path at most once per
  * run. Returns copies rather than mutating: the same note object can sit on
  * several wires, and the caller's cache owns those objects.
@@ -473,6 +489,27 @@ function compareText(left: string, right: string): number {
   return 0
 }
 
+/**
+ * `2026-07-01`, optionally with a time, as LOCAL epoch milliseconds, or null.
+ * Local because that is what a person means when they type a date about their
+ * own notes; `created`/`updated` are local-clock epochs from the filesystem.
+ */
+const DATE_VALUE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/
+
+function parseDateValue(raw: string): number | null {
+  const m = DATE_VALUE_RE.exec(raw.trim())
+  if (!m) return null
+  const time = new Date(
+    Number(m[1]),
+    Number(m[2]) - 1,
+    Number(m[3]),
+    Number(m[4] ?? 0),
+    Number(m[5] ?? 0),
+    Number(m[6] ?? 0)
+  ).getTime()
+  return Number.isFinite(time) ? time : null
+}
+
 /** Numeric when BOTH sides are numbers, case-insensitive text otherwise. */
 function compareValues(
   left: string | number | undefined,
@@ -529,7 +566,21 @@ function buildPredicate(
     const needle = raw.toLowerCase()
     return (value) => asText(value).toLowerCase().includes(needle)
   }
-  return (value) => matchesOrder(compareValues(value, raw), op)
+  // `created` and `updated` are epoch numbers. A hand-typed date must compare
+  // as a date; without this bridge it would fall through to text comparison,
+  // where every 13-digit epoch sorts before '2026-…' and `updated < <date>`
+  // silently matches the entire vault. And when the value is neither a number
+  // nor a date, a numeric field never matches at all: an unevaluable step must
+  // narrow to nothing, never widen (rule 2 in the module header).
+  const rawAsNumber = toNumber(raw)
+  const rawAsDate = parseDateValue(raw)
+  return (value) => {
+    if (typeof value === 'number' && rawAsNumber === null) {
+      if (rawAsDate === null) return false
+      return matchesOrder(value - rawAsDate, op)
+    }
+    return matchesOrder(compareValues(value, raw), op)
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -538,6 +589,33 @@ function buildPredicate(
 
 function normalizeFolder(folder: string): string {
   return folder.replace(/^\/+|\/+$/g, '')
+}
+
+/**
+ * The note as it will exist after a path op, so later steps in the same
+ * pipeline follow the note rather than its abandoned address. Without this,
+ * `move "archive" | add-tag #x` planned the tag against the pre-move path, and
+ * the applier would resurrect a phantom note there while the moved one never
+ * got its tag. The applier keeps a forwarding address for the rare case where
+ * a collision forces it to land the file somewhere other than promised.
+ */
+function relocated(note: WorkflowNote, dest: string): WorkflowNote {
+  return {
+    ...note,
+    path: dest,
+    folder: relDirname(dest),
+    title: stripNoteExtension(relBasename(dest))
+  }
+}
+
+/** `renameTarget`, except an unusable pattern keeps the note where it is: the
+ *  applier is the one that fails the run over it, with the whole-run rollback. */
+function safeRenameTarget(rel: string, pattern: string): string {
+  try {
+    return renameTarget(rel, pattern)
+  } catch {
+    return rel
+  }
 }
 
 /** Prefix match, so `folder inbox` also sees `inbox/projects`. */
@@ -707,7 +785,7 @@ async function runStep(
   switch (def.kind) {
     /* ----- Sources ----- */
     case 'all':
-      return keep([...(await allNotes(state, step.line))])
+      return keep(workingNotes(await allNotes(state, step.line)))
 
     case 'folder': {
       const folder = argString(step, 'folder')
@@ -718,7 +796,7 @@ async function runStep(
     case 'tag': {
       const tag = argString(step, 'tag')
       if (tag === null) return missingArg(state, step, 'tag')
-      return keep((await allNotes(state, step.line)).filter((note) => hasTag(note, tag)))
+      return keep(workingNotes(await allNotes(state, step.line)).filter((note) => hasTag(note, tag)))
     }
 
     case 'search': {
@@ -726,7 +804,7 @@ async function runStep(
       if (query === null) return missingArg(state, step, 'query')
       const needle = query.toLowerCase()
       const matched: NoteSet = []
-      for (const note of await allNotes(state, step.line)) {
+      for (const note of workingNotes(await allNotes(state, step.line))) {
         // Title first: a title hit spares a body read, and this is the one
         // source that would otherwise read the entire vault.
         if (note.title.toLowerCase().includes(needle)) {
@@ -898,23 +976,29 @@ async function runStep(
     case 'move': {
       const folder = argString(step, 'folder')
       if (folder === null) return missingArg(state, step, 'folder')
+      const moved: NoteSet = []
       for (const note of current) {
         // `to` is the destination folder. `rename` is the op that changes a
         // name, which is the only reason these are two ops and not one.
         const to = normalizeFolder(expandForNote(folder, note, now))
-        if (!pushOp(state, { kind: 'move', path: note.path, to }, step.line)) break
+        if (!pushOp(state, { kind: 'move', path: note.path, to }, step.line)) return keep(current)
+        moved.push(relocated(note, moveTarget(note.path, to)))
       }
-      return keep(current)
+      return keep(moved)
     }
 
     case 'rename': {
       const pattern = argString(step, 'pattern')
       if (pattern === null) return missingArg(state, step, 'pattern')
+      const renamed: NoteSet = []
       for (const note of current) {
         const to = expandForNote(pattern, note, now)
-        if (!pushOp(state, { kind: 'rename', path: note.path, to }, step.line)) break
+        if (!pushOp(state, { kind: 'rename', path: note.path, to }, step.line)) {
+          return keep(current)
+        }
+        renamed.push(relocated(note, safeRenameTarget(note.path, to)))
       }
-      return keep(current)
+      return keep(renamed)
     }
 
     case 'append':
@@ -945,10 +1029,12 @@ async function runStep(
     case 'archive':
     case 'trash': {
       const kind: 'archive' | 'trash' = def.kind === 'archive' ? 'archive' : 'trash'
+      const filed: NoteSet = []
       for (const note of current) {
-        if (!pushOp(state, { kind, path: note.path }, step.line)) break
+        if (!pushOp(state, { kind, path: note.path }, step.line)) return keep(current)
+        filed.push(relocated(note, folderTarget(kind, note.path)))
       }
-      return keep(current)
+      return keep(filed)
     }
 
     /* ----- Render: text for the sink, notes untouched ----- */

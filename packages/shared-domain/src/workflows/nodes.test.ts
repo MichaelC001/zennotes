@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { NODE_DEFS } from './nodes'
+import { NODE_DEFS, bindParams, nodeDef } from './nodes'
 import type { NodeDef } from './nodes'
 import { parseWorkflow } from './parse'
+import { RAW_ARG } from './types'
 
 /* -------------------------------------------------------------------------- */
 /*  The documentation contract                                                */
@@ -89,5 +90,36 @@ describe('every example is a line that actually parses', () => {
         expect(step && Object.prototype.hasOwnProperty.call(step.args, spec.name)).toBe(true)
       }
     }
+  })
+})
+
+describe('bindParams parks what it cannot bind', () => {
+  const def = (kind: string): NodeDef => {
+    const found = nodeDef(kind)
+    if (!found) throw new Error(`no node def for ${kind}`)
+    return found
+  }
+
+  it('stops at the failed token instead of letting later tokens slide left', () => {
+    const bound = bindParams(def('where'), ['rating', '==', '4'], 1)
+    expect(bound.args.field).toBe('rating')
+    expect(bound.args.op).toBeUndefined()
+    expect(bound.args.value).toBeUndefined()
+    expect(bound.args[RAW_ARG]).toBe('== 4')
+    expect(bound.diagnostics.some((d) => d.severity === 'error')).toBe(true)
+  })
+
+  it('keeps a failed quoted token with its quotes', () => {
+    const bound = bindParams(def('since'), ['"7 x"'], 1)
+    expect(bound.args[RAW_ARG]).toBe('"7 x"')
+  })
+
+  it('accepts the unicode tags the vault indexes and refuses digit-leading ones', () => {
+    expect(bindParams(def('tag'), ['#café'], 1).args.tag).toBe('café')
+    expect(bindParams(def('tag'), ['#日記'], 1).args.tag).toBe('日記')
+    const digits = bindParams(def('tag'), ['#2024'], 1)
+    expect(digits.args.tag).toBeUndefined()
+    expect(digits.args[RAW_ARG]).toBe('#2024')
+    expect(digits.diagnostics.some((d) => d.severity === 'error')).toBe(true)
   })
 })
