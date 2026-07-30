@@ -88,11 +88,15 @@ function installZen(overrides: Record<string, unknown> = {}): void {
 // The most recent store module a test loaded. `vi.resetModules` gives every
 // test a fresh module, but timers the OLD module already scheduled keep
 // running: `updateNoteBody` debounces a `persistNote` at 350ms
-// (pathSaveTimers), and a test that dirties a buffer without awaiting a save
-// leaves a straggler that fires `window.zen.writeNote` one or two tests later
-// against whichever spy is installed by then. Same disease the database
-// debounce had; the cure here is the afterEach below, which un-dirties the
-// old store so a stray persistNote early-returns instead of writing.
+// (pathSaveTimers), and database edits debounce a write at 400ms
+// (databaseSaveTimers). A test that schedules either without awaiting it
+// leaves a straggler that fires against whichever `window.zen` spy is
+// installed one or two tests later; a partial mock there turns the write
+// into `undefined.catch`, which is an unhandled error that fails the whole
+// run (seen on the macOS runner). The cure is the afterEach below: it
+// starves both timers' bail-out checks on the old store, so a stray
+// persistNote finds nothing dirty and a stray database write finds no doc,
+// and each returns before touching `window.zen`.
 let lastLoadedStore: { useStore: { setState: (partial: object) => void } } | null = null
 
 async function loadStore() {
@@ -104,7 +108,7 @@ async function loadStore() {
 }
 
 afterEach(() => {
-  lastLoadedStore?.useStore.setState({ noteDirty: {} })
+  lastLoadedStore?.useStore.setState({ noteDirty: {}, databases: {} })
   lastLoadedStore = null
 })
 
