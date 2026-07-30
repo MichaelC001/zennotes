@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TASKS_TAB_PATH, type VaultTask } from '@shared/tasks'
 import { WORKFLOWS_TAB_PATH } from '@shared/workflows-view'
 import { databaseTabPath, type DatabaseDoc } from '@shared/databases'
@@ -85,11 +85,28 @@ function installZen(overrides: Record<string, unknown> = {}): void {
   })
 }
 
+// The most recent store module a test loaded. `vi.resetModules` gives every
+// test a fresh module, but timers the OLD module already scheduled keep
+// running: `updateNoteBody` debounces a `persistNote` at 350ms
+// (pathSaveTimers), and a test that dirties a buffer without awaiting a save
+// leaves a straggler that fires `window.zen.writeNote` one or two tests later
+// against whichever spy is installed by then. Same disease the database
+// debounce had; the cure here is the afterEach below, which un-dirties the
+// old store so a stray persistNote early-returns instead of writing.
+let lastLoadedStore: { useStore: { setState: (partial: object) => void } } | null = null
+
 async function loadStore() {
   vi.resetModules()
   localStorage.clear()
-  return import('./store')
+  const mod = await import('./store')
+  lastLoadedStore = mod as unknown as typeof lastLoadedStore
+  return mod
 }
+
+afterEach(() => {
+  lastLoadedStore?.useStore.setState({ noteDirty: {} })
+  lastLoadedStore = null
+})
 
 async function flushAsyncWork(): Promise<void> {
   await new Promise((resolve) => window.setTimeout(resolve, 0))
@@ -1467,5 +1484,34 @@ describe('renameNote heading sync (#455)', () => {
 
     expect(writeNote).not.toHaveBeenCalled()
     expect(useStore.getState().notes.map((n) => n.path)).toContain('inbox/Groceries.md')
+  })
+})
+
+describe('applyTaskMutation write queue (#503)', () => {
+  it('rapid mutations on one note serialize, so neither write is lost on disk', async () => {
+    // The second mutation must read the body the FIRST write produced. Without
+    // the per-path queue both read the original inside the first write's
+    // in-flight window, and the second write puts the first task back.
+    let disk = '- [ ] alpha\n- [ ] beta'
+    const readNote = vi.fn(async () => makeNote(disk))
+    const writeNote = vi.fn(async (_path: string, body: string) => {
+      await new Promise((resolve) => window.setTimeout(resolve, 10))
+      disk = body
+    })
+    installZen({ readNote, writeNote })
+    const { useStore } = await loadStore()
+
+    const first = useStore.getState().applyTaskMutation(makeTask('alpha', 0), {
+      kind: 'set-checked',
+      checked: true
+    })
+    const second = useStore.getState().applyTaskMutation(makeTask('beta', 1), {
+      kind: 'set-checked',
+      checked: true
+    })
+    await Promise.all([first, second])
+
+    expect(disk).toBe('- [x] alpha\n- [x] beta')
+    expect(writeNote).toHaveBeenCalledTimes(2)
   })
 })

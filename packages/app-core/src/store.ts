@@ -1656,6 +1656,33 @@ function yieldForOptimisticPaint(): Promise<void> {
   })
 }
 
+/**
+ * One write chain per note path for task mutations (#503, the disk half). A
+ * mutation reads the body, computes its edit, and AWAITS the disk write; two
+ * rapid moves on the same note (Shift+H at key-repeat speed is ~30ms apart)
+ * both read the pre-first body inside that window, and the second write then
+ * puts the first move's line back the way it was. Chained per path, a
+ * mutation reads only after the previous write settled. Links are stored
+ * settled so one failed write cannot wedge a note's chain, and the tail
+ * cleans itself up so closed notes do not accumulate entries.
+ */
+const taskMutationQueues = new Map<string, Promise<void>>()
+
+function queueTaskMutation(path: string, run: () => Promise<void>): Promise<void> {
+  const prev = taskMutationQueues.get(path) ?? Promise.resolve()
+  const next = prev.then(run)
+  const tracked: Promise<void> = next
+    .then(
+      () => undefined,
+      () => undefined
+    )
+    .finally(() => {
+      if (taskMutationQueues.get(path) === tracked) taskMutationQueues.delete(path)
+    })
+  taskMutationQueues.set(path, tracked)
+  return next
+}
+
 function sameNoteJumpLocation(a: NoteJumpLocation | null, b: NoteJumpLocation | null): boolean {
   if (!a || !b) return false
   return (
@@ -4797,83 +4824,88 @@ export const useStore = create<Store>((set, get) => {
       await yieldForOptimisticPaint()
     }
 
-    const latestState = get()
-    const latestOpenBuffer = latestState.noteContents[path]
-    let body: string
-    try {
-      body = latestOpenBuffer?.body ?? (await window.zen.readNote(path)).body
-    } catch (err) {
-      console.error('readNote (mutate) failed', err)
-      if (hasOptimisticChange) void get().rescanTasksForPath(path)
-      return
-    }
-
-    let nextBody = body
-    if (task.kind === 'file') {
-      // Whole-note task: every field lives in frontmatter, so apply the whole
-      // batch as one frontmatter rewrite rather than per-line edits.
-      nextBody = updateFrontmatterFields(
-        body,
-        fileTaskMutationUpdates(mutations, toIsoDateLocal(new Date()))
-      )
-    } else {
-      for (const m of mutations) {
-        switch (m.kind) {
-          case 'set-checked':
-            nextBody = setTaskCheckedAtIndex(nextBody, task.taskIndex, m.checked)
-            break
-          case 'set-waiting':
-            nextBody = setTaskWaitingAtIndex(nextBody, task.taskIndex, m.waiting)
-            break
-          case 'set-priority':
-            nextBody = setTaskPriorityAtIndex(nextBody, task.taskIndex, m.priority)
-            break
-          case 'set-due':
-            nextBody = setTaskDueAtIndex(nextBody, task.taskIndex, m.due)
-            break
-          case 'set-field':
-            nextBody = setTaskFieldAtIndex(nextBody, task.taskIndex, m.key, m.value)
-            break
-          case 'set-text':
-            nextBody = setTaskTextAtIndex(nextBody, task.taskIndex, m.text)
-            break
-        }
-      }
-    }
-    if (nextBody === body) {
-      if (hasOptimisticChange) void get().rescanTasksForPath(path)
-      return
-    }
-
-    // The buffer route exists to MERGE with unsaved edits, so it is taken only
-    // when the note is genuinely dirty. `noteContents` also caches notes nobody
-    // has open (previews, workspace prefetch), and routing those through
-    // `updateNoteBody` hands the change to an editor autosave that has no
-    // editor: mark-dirty, wait, and hope. In a rapid Kanban chain the watcher
-    // reload from the PREVIOUS write then reloads the cache over the pending
-    // edit, and the move silently reverts on disk (#503). A clean note takes
-    // the disk write like any external edit; the cache is updated in the same
-    // breath so a third move in the chain never reads a stale base.
-    if (latestOpenBuffer && latestState.noteDirty[path]) {
-      get().updateNoteBody(path, nextBody)
-    } else {
+    // The optimistic paint above is immediate; everything from the body read
+    // down is queued per path, so a second mutation cannot read a base an
+    // in-flight write is about to invalidate.
+    await queueTaskMutation(path, async () => {
+      const latestState = get()
+      const latestOpenBuffer = latestState.noteContents[path]
+      let body: string
       try {
-        await window.zen.writeNote(path, nextBody)
+        body = latestOpenBuffer?.body ?? (await window.zen.readNote(path)).body
       } catch (err) {
-        console.error('writeNote (mutate) failed', err)
+        console.error('readNote (mutate) failed', err)
         if (hasOptimisticChange) void get().rescanTasksForPath(path)
         return
       }
-      if (latestOpenBuffer) {
-        set((s) => {
-          const cached = s.noteContents[path]
-          // Only a still-clean cache entry is ours to move forward; a buffer
-          // the user dirtied since the read above keeps their text.
-          if (!cached || s.noteDirty[path]) return s
-          return { noteContents: { ...s.noteContents, [path]: { ...cached, body: nextBody } } }
-        })
+
+      let nextBody = body
+      if (task.kind === 'file') {
+        // Whole-note task: every field lives in frontmatter, so apply the whole
+        // batch as one frontmatter rewrite rather than per-line edits.
+        nextBody = updateFrontmatterFields(
+          body,
+          fileTaskMutationUpdates(mutations, toIsoDateLocal(new Date()))
+        )
+      } else {
+        for (const m of mutations) {
+          switch (m.kind) {
+            case 'set-checked':
+              nextBody = setTaskCheckedAtIndex(nextBody, task.taskIndex, m.checked)
+              break
+            case 'set-waiting':
+              nextBody = setTaskWaitingAtIndex(nextBody, task.taskIndex, m.waiting)
+              break
+            case 'set-priority':
+              nextBody = setTaskPriorityAtIndex(nextBody, task.taskIndex, m.priority)
+              break
+            case 'set-due':
+              nextBody = setTaskDueAtIndex(nextBody, task.taskIndex, m.due)
+              break
+            case 'set-field':
+              nextBody = setTaskFieldAtIndex(nextBody, task.taskIndex, m.key, m.value)
+              break
+            case 'set-text':
+              nextBody = setTaskTextAtIndex(nextBody, task.taskIndex, m.text)
+              break
+          }
+        }
       }
-    }
+      if (nextBody === body) {
+        if (hasOptimisticChange) void get().rescanTasksForPath(path)
+        return
+      }
+
+      // The buffer route exists to MERGE with unsaved edits, so it is taken only
+      // when the note is genuinely dirty. `noteContents` also caches notes nobody
+      // has open (previews, workspace prefetch), and routing those through
+      // `updateNoteBody` hands the change to an editor autosave that has no
+      // editor: mark-dirty, wait, and hope. In a rapid Kanban chain the watcher
+      // reload from the PREVIOUS write then reloads the cache over the pending
+      // edit, and the move silently reverts on disk (#503). A clean note takes
+      // the disk write like any external edit; the cache is updated in the same
+      // breath so a third move in the chain never reads a stale base.
+      if (latestOpenBuffer && latestState.noteDirty[path]) {
+        get().updateNoteBody(path, nextBody)
+      } else {
+        try {
+          await window.zen.writeNote(path, nextBody)
+        } catch (err) {
+          console.error('writeNote (mutate) failed', err)
+          if (hasOptimisticChange) void get().rescanTasksForPath(path)
+          return
+        }
+        if (latestOpenBuffer) {
+          set((s) => {
+            const cached = s.noteContents[path]
+            // Only a still-clean cache entry is ours to move forward; a buffer
+            // the user dirtied since the read above keeps their text.
+            if (!cached || s.noteDirty[path]) return s
+            return { noteContents: { ...s.noteContents, [path]: { ...cached, body: nextBody } } }
+          })
+        }
+      }
+    })
   },
 
   deleteTaskFromList: async (task) => {
