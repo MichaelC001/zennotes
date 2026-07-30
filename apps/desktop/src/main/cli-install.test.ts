@@ -94,18 +94,37 @@ describe('removeManagedLinks — migrate off `zen`, spare foreign (#126)', () =>
 })
 
 describe('migrateLegacyCliLink — heal pre-2.10 installs on launch', () => {
-  it('replaces a managed `zen` with `zn` in the same directory', async () => {
-    const bin = path.join(home, '.local', 'bin')
-    await mkdir(bin, { recursive: true })
-    await symlink(wrapperLoc().wrapperPath, path.join(bin, 'zen'))
+  // The heal is a symlink operation over POSIX bin dirs; `migrateLegacyCliLink`
+  // deliberately declines off darwin/linux (a pre-2.10 symlink install never
+  // existed on Windows), so the positive path is asserted where it can run and
+  // the platform gate is pinned separately below.
+  it.skipIf(process.platform === 'win32')(
+    'replaces a managed `zen` with `zn` in the same directory',
+    async () => {
+      const bin = path.join(home, '.local', 'bin')
+      await mkdir(bin, { recursive: true })
+      await symlink(wrapperLoc().wrapperPath, path.join(bin, 'zen'))
 
-    const linkPath = await migrateLegacyCliLink(wrapperLoc())
+      const linkPath = await migrateLegacyCliLink(wrapperLoc())
 
-    expect(linkPath).toBe(path.join(bin, 'zn'))
-    expect(await readlink(path.join(bin, 'zn'))).toBe(wrapperLoc().wrapperPath)
-    // The legacy name is gone, so `zen` stops shadowing anything (#126).
-    expect(await linkExists(path.join(bin, 'zen'))).toBe(false)
-  })
+      expect(linkPath).toBe(path.join(bin, 'zn'))
+      expect(await readlink(path.join(bin, 'zn'))).toBe(wrapperLoc().wrapperPath)
+      // The legacy name is gone, so `zen` stops shadowing anything (#126).
+      expect(await linkExists(path.join(bin, 'zen'))).toBe(false)
+    }
+  )
+
+  it.runIf(process.platform === 'win32')(
+    'declines on Windows even with a managed legacy link present',
+    async () => {
+      const bin = path.join(home, '.local', 'bin')
+      await mkdir(bin, { recursive: true })
+      await symlink(wrapperLoc().wrapperPath, path.join(bin, 'zen'))
+
+      expect(await migrateLegacyCliLink(wrapperLoc())).toBeNull()
+      expect(await linkExists(path.join(bin, 'zen'))).toBe(true)
+    }
+  )
 
   it('does nothing when `zn` already exists', async () => {
     const bin = path.join(home, '.local', 'bin')
