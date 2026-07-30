@@ -130,7 +130,7 @@ import { QuickNotesView } from './QuickNotesView'
 import type { MathRenderer } from '@shared/app-config'
 import { isTasksTabPath } from '@shared/tasks'
 import { isWorkflowsTabPath } from '@shared/workflows-view'
-import { WorkflowsView } from './WorkflowsView'
+import { LazyWorkflowsView } from './LazyWorkflowsView'
 import { isDatabaseTabPath, databaseTitleFromTab, databaseTabPath, isDatabaseCsvPath } from '@shared/databases'
 import { isTagsTabPath } from '@shared/tags'
 import { isHelpTabPath } from '@shared/help'
@@ -3529,7 +3529,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             <div className="pointer-events-none absolute inset-3 z-20 rounded-xl border-2 border-dashed border-accent/55 bg-accent/8" />
           )}
           {isWorkflowsTabPath(activeTab) ? (
-            <WorkflowsView />
+            <LazyWorkflowsView />
           ) : isTasksTabPath(activeTab) ? (
             <TasksView />
           ) : isQuickNotesTabPath(activeTab) ? (

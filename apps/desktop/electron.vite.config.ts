@@ -54,7 +54,17 @@ function rendererManualChunk(id: string): string | undefined {
 
   if (!id.includes('node_modules')) return undefined
 
-  if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/zustand/')) {
+  // `@xyflow/react` (and the zustand 4 nested under it) must NOT ride this
+  // rule: `/react/` matches it as a substring, and vendor-react is the one
+  // chunk the entry both statically imports and modulepreloads, so React Flow
+  // was fetched and evaluated on every launch for a feature that is off by
+  // default. No named chunk for it either (see the mermaid comment below):
+  // left alone, it lands in the lazily-imported WorkflowsView chunk and is
+  // fetched the first time a Workflows tab renders.
+  if (
+    (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/zustand/')) &&
+    !id.includes('/@xyflow/')
+  ) {
     return 'vendor-react'
   }
 
@@ -138,6 +148,8 @@ function isDeferredRendererPreload(dep: string): boolean {
   return (
     dep.includes('NoteHoverPreview-') ||
     dep.includes('Preview-') ||
+    dep.includes('WorkflowsView-') ||
+    dep.includes('xyflow') ||
     dep.includes('wardley-') ||
     dep.includes('vendor-markdown') ||
     dep.includes('vendor-highlight') ||
