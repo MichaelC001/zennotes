@@ -513,6 +513,12 @@ function duplicateNote(relPath: string): Promise<NoteMeta> {
   })
 }
 
+// Word export renders in the desktop main process (it reads local image files
+// for embedding); the web app has neither, so the honest answer is a message.
+function exportNoteDocx(_relPath: string): Promise<string | null> {
+  return Promise.reject(new Error('Word export is available in the desktop app.'))
+}
+
 async function exportNotePdf(_relPath: string): Promise<string | null> {
   const url = new URL(window.location.href)
   url.search = ''
@@ -1593,6 +1599,7 @@ export const httpBridge: ZenBridge = {
   unarchiveNote,
   duplicateNote,
   exportNotePdf,
+  exportNoteDocx,
   revealNote,
   openExternalFile,
   fetchLinkMetadata,

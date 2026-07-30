@@ -5,6 +5,7 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
+  nativeImage,
   protocol,
   screen,
   session,
@@ -161,6 +162,7 @@ import {
   listWorkflowRuns,
   undoWorkflowRun
 } from './workflow-apply'
+import { renderNoteDocx } from './note-docx'
 import type {
   ApplyWorkflowInput,
   ExportWorkflowInput,
@@ -1616,6 +1618,97 @@ function sanitizePdfFilename(name: string): string {
   return sanitized || 'Note'
 }
 
+/**
+ * Export a note as a Word document with real Word styles.
+ *
+ * Rendering happens here in the main process (markdown → docx via
+ * `note-docx.ts`) because the two things the renderer cannot do live here:
+ * the save dialog, and reading local image files for embedding. Local vaults
+ * only for now: the serializer reads assets straight off disk.
+ */
+async function exportNoteDocx(
+  relPath: string,
+  parentWindow: BrowserWindow | null | undefined
+): Promise<string | null> {
+  if (isRemoteWorkspaceActive()) {
+    throw new Error('Word export is available for local vaults only, for now.')
+  }
+  const v = requireVault()
+
+  const suggestedName = `${sanitizePdfFilename(noteTitleFromRelPath(relPath))}.docx`
+  const saveDialogOptions = {
+    title: 'Export Note as Word Document',
+    defaultPath: path.join(app.getPath('documents'), suggestedName),
+    buttonLabel: 'Export Word Document',
+    filters: [{ name: 'Word Document', extensions: ['docx'] }]
+  }
+  const result = parentWindow
+    ? await dialog.showSaveDialog(parentWindow, saveDialogOptions)
+    : await dialog.showSaveDialog(saveDialogOptions)
+  if (result.canceled || !result.filePath) return null
+  const targetPath = result.filePath.toLowerCase().endsWith('.docx')
+    ? result.filePath
+    : `${result.filePath}.docx`
+
+  const note = await readNote(v.root, relPath)
+  const noteDir = path.posix.dirname(relPath)
+  const rootAbs = path.resolve(v.root)
+
+  // Resolve a markdown image src to bytes + pixel size, or null for anything
+  // that cannot be embedded (remote URLs, files outside the vault, formats
+  // Word rejects that nativeImage cannot decode either). Null degrades to the
+  // image's alt text in the document rather than failing the export.
+  const resolveImage = async (src: string) => {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return null
+    const decoded = decodeURIComponent(src)
+    const candidates = [
+      path.resolve(rootAbs, noteDir === '.' ? '' : noteDir, decoded),
+      path.resolve(rootAbs, decoded.replace(/^\/+/, ''))
+    ]
+    for (const abs of candidates) {
+      if (abs !== rootAbs && !abs.startsWith(rootAbs + path.sep)) continue
+      let data: Buffer
+      try {
+        data = await fsp.readFile(abs)
+      } catch {
+        continue
+      }
+      const ext = path.extname(abs).toLowerCase()
+      let type: 'png' | 'jpg' | 'gif' | 'bmp'
+      if (ext === '.png') type = 'png'
+      else if (ext === '.jpg' || ext === '.jpeg') type = 'jpg'
+      else if (ext === '.gif') type = 'gif'
+      else if (ext === '.bmp') type = 'bmp'
+      else {
+        // Word will not take this format directly; if Chromium can decode it
+        // (webp, icns…), re-encode to PNG. An empty result means it could not.
+        const converted = nativeImage.createFromBuffer(data)
+        if (converted.isEmpty()) return null
+        data = converted.toPNG()
+        type = 'png'
+      }
+      const size = nativeImage.createFromBuffer(data).getSize()
+      if (size.width === 0 || size.height === 0) return null
+      // Fit the printable Letter column (6.5in at Word's 96dpi), scaling only
+      // ever DOWN so small images keep their intrinsic size.
+      const maxWidth = 624
+      const scale = size.width > maxWidth ? maxWidth / size.width : 1
+      return {
+        data,
+        width: Math.round(size.width * scale),
+        height: Math.round(size.height * scale),
+        type
+      }
+    }
+    return null
+  }
+
+  const buffer = await renderNoteDocx(note.body, note.title, resolveImage)
+  await fsp.mkdir(path.dirname(targetPath), { recursive: true })
+  await fsp.writeFile(targetPath, buffer)
+  return targetPath
+}
+
 function ensurePdfExtension(targetPath: string): string {
   return targetPath.toLowerCase().endsWith('.pdf') ? targetPath : `${targetPath}.pdf`
 }
@@ -2739,6 +2832,10 @@ function registerIpc(): void {
 
   handle(IPC.VAULT_EXPORT_NOTE_PDF, async (event, relPath: string) => {
     return await exportNotePdf(relPath, BrowserWindow.fromWebContents(event.sender))
+  })
+
+  handle(IPC.VAULT_EXPORT_NOTE_DOCX, async (event, relPath: string) => {
+    return await exportNoteDocx(relPath, BrowserWindow.fromWebContents(event.sender))
   })
 
   handle(IPC.VAULT_REVEAL_NOTE, async (_e, relPath: string) => {

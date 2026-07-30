@@ -2851,7 +2851,9 @@ interface Store {
   archiveActive: () => Promise<void>
   unarchiveActive: () => Promise<void>
   exportActiveNotePdf: () => Promise<void>
+  exportActiveNoteDocx: () => Promise<void>
   copyActiveNoteAsMarkdown: () => Promise<void>
+  copyActiveNoteAsHtml: () => Promise<void>
   setSearchOpen: (open: boolean) => void
   setVaultTextSearchOpen: (open: boolean) => void
   setCommandPaletteOpen: (open: boolean, mode?: CommandPaletteInitialMode) => void
@@ -6116,6 +6118,37 @@ export const useStore = create<Store>((set, get) => {
     })
   },
 
+  exportActiveNoteDocx: async () => {
+    const path = get().selectedPath
+    if (!path) return
+    try {
+      // The export reads the file, so unsaved edits must land first: same
+      // rule as the PDF path.
+      await get().persistNote(path)
+      if (get().noteDirty[path]) {
+        throw new Error('Could not save the note before exporting it.')
+      }
+      const docxPath = await window.zen.exportNoteDocx(path)
+      // Null means the save dialog was cancelled, which is not a result.
+      if (docxPath) {
+        const { useToastStore } = await import('./lib/toast')
+        useToastStore.getState().addToast('Word document exported', 'success', {
+          label: 'Show in folder',
+          onClick: () => void window.zen.revealFilePath(docxPath)
+        })
+      }
+    } catch (err) {
+      console.error('exportNoteDocx failed', err)
+      const { useToastStore } = await import('./lib/toast')
+      useToastStore
+        .getState()
+        .addToast(
+          err instanceof Error ? err.message : 'Could not export the note as a Word document.',
+          'error'
+        )
+    }
+  },
+
   exportActiveNotePdf: async () => {
     const path = get().selectedPath
     if (!path) return
@@ -6171,6 +6204,45 @@ export const useStore = create<Store>((set, get) => {
       }
     }
     window.zen.clipboardWriteText(body)
+  },
+
+  copyActiveNoteAsHtml: async () => {
+    const s = get()
+    const active = s.activeNote
+    if (!active) return
+    let body = s.noteContents[active.path]?.body
+    if (body == null) {
+      try {
+        body = (await window.zen.readNote(active.path)).body
+      } catch {
+        return
+      }
+    }
+    const { useToastStore } = await import('./lib/toast')
+    try {
+      // Lazy: the renderer chain rides the markdown vendor chunk, which has
+      // no business on the boot path for a clipboard command.
+      const { renderNoteEmailHtml } = await import('./lib/note-email-html')
+      const { html } = renderNoteEmailHtml(body, active.title)
+      // Both flavors: rich for mail clients, the markdown itself for editors.
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([body], { type: 'text/plain' })
+        })
+      ])
+      useToastStore
+        .getState()
+        .addToast('Copied as HTML, ready to paste into an email', 'success')
+    } catch (err) {
+      console.error('copyActiveNoteAsHtml failed', err)
+      useToastStore
+        .getState()
+        .addToast(
+          err instanceof Error ? err.message : 'Could not copy the note as HTML.',
+          'error'
+        )
+    }
   },
 
   setSearchOpen: (open) =>

@@ -229,6 +229,9 @@ export interface ZenBridge {
   unarchiveNote(relPath: string): Promise<NoteMeta>
   duplicateNote(relPath: string): Promise<NoteMeta>
   exportNotePdf(relPath: string): Promise<string | null>
+  /** Export as a Word document with real Word styles; resolves to the saved
+   *  path, or null when the dialog was cancelled. Desktop, local vaults. */
+  exportNoteDocx(relPath: string): Promise<string | null>
   revealNote(relPath: string): Promise<void>
   /** Reveal the original target of a symlinked note in the OS file manager. */
   revealNoteTarget(relPath: string): Promise<void>

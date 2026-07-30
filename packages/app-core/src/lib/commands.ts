@@ -356,6 +356,16 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       }
     },
     {
+      id: 'note.copy-html',
+      title: 'Copy Note as HTML (for email)',
+      category: 'Note',
+      keywords: 'copy clipboard html email rich mail paste share formatted',
+      when: () => !!getState().activeNote,
+      run: async () => {
+        await getState().copyActiveNoteAsHtml()
+      }
+    },
+    {
       id: 'note.export-pdf',
       title: 'Export Note as PDF…',
       category: 'Note',
@@ -367,6 +377,22 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
           window.zen.getAppInfo().runtime === 'web'),
       run: async () => {
         await getState().exportActiveNotePdf()
+      }
+    },
+    {
+      id: 'note.export-docx',
+      title: 'Export Note as Word Document…',
+      category: 'Note',
+      keywords: 'save word docx doc export office editable',
+      // Desktop-only: the serializer embeds local images from the main
+      // process, which the web app has no access to.
+      when: () =>
+        !!getState().activeNote &&
+        getState().workspaceMode !== 'remote' &&
+        window.zen.getAppInfo().runtime === 'desktop' &&
+        typeof window.zen.exportNoteDocx === 'function',
+      run: async () => {
+        await getState().exportActiveNoteDocx()
       }
     },
     {

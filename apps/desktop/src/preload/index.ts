@@ -391,6 +391,8 @@ const api: ZenBridge = {
     ipcRenderer.invoke(IPC.VAULT_DUPLICATE_NOTE, relPath),
   exportNotePdf: (relPath: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC.VAULT_EXPORT_NOTE_PDF, relPath),
+  exportNoteDocx: (relPath: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.VAULT_EXPORT_NOTE_DOCX, relPath),
   revealNote: (relPath: string): Promise<void> => ipcRenderer.invoke(IPC.VAULT_REVEAL_NOTE, relPath),
   revealNoteTarget: (relPath: string): Promise<void> =>
     ipcRenderer.invoke(IPC.VAULT_REVEAL_NOTE_TARGET, relPath),
