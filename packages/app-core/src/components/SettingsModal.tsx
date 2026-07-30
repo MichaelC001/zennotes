@@ -47,6 +47,7 @@ import type {
 import {
   findKeymapConflict,
   formatKeymapBinding,
+  getDefaultKeymapBinding,
   getKeymapBinding,
   getKeymapDefinitionsByGroup,
   getKeymapDisplay,
@@ -5025,7 +5026,7 @@ function KeymapSettings({
           onSave={(binding) => {
             onSetBinding(
               recording.id,
-              binding === recording.defaultBinding ? null : binding,
+              binding === getDefaultKeymapBinding(recording.id) ? null : binding,
             );
             setRecording(null);
           }}
@@ -5151,7 +5152,7 @@ function KeymapRecorderModal({
           </div>
           <div className="mt-1 text-xs text-ink-500">
             Default:{" "}
-            {formatKeymapBinding(definition.defaultBinding, definition.kind)}
+            {formatKeymapBinding(getDefaultKeymapBinding(definition.id), definition.kind)}
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 border-t border-paper-300/60 px-5 py-3">

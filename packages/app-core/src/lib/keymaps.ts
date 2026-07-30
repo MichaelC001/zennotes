@@ -114,6 +114,13 @@ export interface KeymapDefinition {
   title: string;
   description: string;
   defaultBinding: string;
+  /** macOS-specific default. On a Mac, Option+<printable> chords are how many
+   *  European layouts type everyday characters (`[` is Option+5 on German
+   *  keyboards), so a binding like `Alt+[` swallows the keystroke instead of
+   *  letting it type (#514). Actions whose cross-platform default is such a
+   *  chord carry a Mac-safe default here; keep this in sync with the slim
+   *  catalog in `@shared/keymaps-catalog`. */
+  defaultBindingMac?: string;
   vimOnly?: boolean;
   nonVimOnly?: boolean;
   maxTokens?: number;
@@ -1019,6 +1026,7 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     description:
       "Move the cursor to the far side of the next inline marker on the line — `**bold|**` becomes `**bold**|`, so finishing a formatted word never needs the arrow keys. Crosses `**`, `*`, `~~`, `==`, backticks, `$` and the bracket pairs. Works with Vim mode on or off.",
     defaultBinding: "Alt+]",
+    defaultBindingMac: "Ctrl+.",
   },
   {
     id: "editor.hopMarkerBackward",
@@ -1029,6 +1037,7 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     description:
       "Move the cursor to the near side of the previous inline marker on the line — `**bold**|` becomes `**bold|**`, and again to land before the opening `**`. Works with Vim mode on or off.",
     defaultBinding: "Alt+[",
+    defaultBindingMac: "Ctrl+,",
   },
   {
     id: "editor.moveLineUp",
@@ -1116,7 +1125,10 @@ export function getKeymapGroupLabel(group: KeymapGroup): string {
 }
 
 export function getDefaultKeymapBinding(id: KeymapId): string {
-  return getKeymapDefinition(id).defaultBinding;
+  const def = getKeymapDefinition(id);
+  return isMacPlatform() && def.defaultBindingMac
+    ? def.defaultBindingMac
+    : def.defaultBinding;
 }
 
 export function getKeymapBinding(

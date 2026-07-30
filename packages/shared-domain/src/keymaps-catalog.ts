@@ -12,7 +12,22 @@ export interface KeymapCatalogEntry {
   id: string
   group: string
   defaultBinding: string
+  /** macOS-specific default. On a Mac, Option+<printable> chords are how many
+   *  European layouts type everyday characters (`[` is Option+5 on German
+   *  keyboards), so a binding like `Alt+[` swallows the keystroke instead of
+   *  letting it type (#514). Actions whose cross-platform default is such a
+   *  chord carry a Mac-safe default here. */
+  defaultBindingMac?: string
   title: string
+}
+
+/** The platform-appropriate default binding for a catalog entry (or a full
+ *  keymap definition: anything carrying the two default fields). */
+export function catalogDefaultBinding(
+  entry: { defaultBinding: string; defaultBindingMac?: string },
+  mac: boolean
+): string {
+  return mac && entry.defaultBindingMac ? entry.defaultBindingMac : entry.defaultBinding
 }
 
 /** Display order for keymap groups in the generated config reference. */
@@ -113,8 +128,8 @@ export const KEYMAP_CATALOG: KeymapCatalogEntry[] = [
   { id: "nav.toggleTask", group: "view-actions", defaultBinding: "x", title: "Toggle task" },
   { id: "tasks.moveTaskUp", group: "view-actions", defaultBinding: "K", title: "Move task up" },
   { id: "tasks.moveTaskDown", group: "view-actions", defaultBinding: "J", title: "Move task down" },
-  { id: "editor.hopMarkerForward", group: "view-actions", defaultBinding: "Alt+]", title: "Hop past next marker" },
-  { id: "editor.hopMarkerBackward", group: "view-actions", defaultBinding: "Alt+[", title: "Hop before previous marker" },
+  { id: "editor.hopMarkerForward", group: "view-actions", defaultBinding: "Alt+]", defaultBindingMac: "Ctrl+.", title: "Hop past next marker" },
+  { id: "editor.hopMarkerBackward", group: "view-actions", defaultBinding: "Alt+[", defaultBindingMac: "Ctrl+,", title: "Hop before previous marker" },
   { id: "editor.moveLineUp", group: "view-actions", defaultBinding: "Alt+ArrowUp", title: "Move line up" },
   { id: "editor.moveLineDown", group: "view-actions", defaultBinding: "Alt+ArrowDown", title: "Move line down" },
   { id: "nav.localEx", group: "view-actions", defaultBinding: ":", title: "Open local ex prompt" },

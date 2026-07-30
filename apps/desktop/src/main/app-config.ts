@@ -20,6 +20,7 @@ import {
   type PortablePrefKey
 } from '@shared/app-config'
 import {
+  catalogDefaultBinding,
   KEYMAP_CATALOG,
   KEYMAP_GROUP_ORDER,
   KEYMAP_GROUP_LABELS
@@ -555,7 +556,9 @@ function keymapSectionLines(rawOverrides: unknown): string[] {
     if (entries.length === 0) continue
     lines.push(`# ${KEYMAP_GROUP_LABELS[group] ?? group}`)
     for (const entry of entries) {
-      lines.push(`# ${tomlKey(entry.id)} = ${tomlValue(entry.defaultBinding)}  # ${entry.title}`)
+      lines.push(
+        `# ${tomlKey(entry.id)} = ${tomlValue(catalogDefaultBinding(entry, process.platform === 'darwin'))}  # ${entry.title}`
+      )
     }
   }
 
