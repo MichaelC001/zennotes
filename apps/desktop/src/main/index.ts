@@ -326,6 +326,18 @@ const readyWindowIds = new Set<number>()
 const pendingWindowNoteOpens = new Map<number, string[]>()
 let appStartupComplete = false
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
+// A denied lock means ZenNotes is already running and our argv has already
+// been handed to it: requestSingleInstanceLock delivers the notification
+// synchronously before returning false. Exit right here rather than waiting
+// for `ready` — on macOS (Electron 41) a lock-losing process doesn't get
+// `ready` for ~90 seconds, so quitting from whenReady left every `zn open`
+// against a running app as a zombie in the Dock for a minute and a half,
+// and a burst of opens looked like ZenNotes multiplying (#511). app.exit
+// skips before-quit/will-quit, which is correct: this process created
+// nothing to clean up.
+if (!gotSingleInstanceLock) {
+  app.exit(0)
+}
 
 function isMac(): boolean {
   return process.platform === 'darwin'
@@ -3861,9 +3873,10 @@ app.whenReady().then(async () => {
   // initialization — on Linux this is where fontconfig cache rebuilds and
   // desktop-portal waits land, none of it our code.
   recordBootMark('main.boot.app-ready')
-  // A second launch (e.g. double-clicking a .md on Windows/Linux) hands
-  // its argv to the primary instance via 'second-instance' below, then
-  // quits here so there's only ever one ZenNotes process.
+  // Backstop only: a lock-losing process already called app.exit(0) at
+  // module scope (see requestSingleInstanceLock above). If a future
+  // Electron ever defers that exit long enough for `ready` to fire, this
+  // still keeps a second ZenNotes from booting a full app.
   if (!gotSingleInstanceLock) {
     app.quit()
     return
