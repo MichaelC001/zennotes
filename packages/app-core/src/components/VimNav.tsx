@@ -406,7 +406,12 @@ export function VimNav(): JSX.Element | null {
       if (
         document.querySelector('[data-ctx-menu]') ||
         document.querySelector('[data-prompt-modal]') ||
-        document.querySelector('[data-confirm-modal]')
+        document.querySelector('[data-confirm-modal]') ||
+        // The workflow import review focuses a BUTTON, not a text field, so
+        // the INPUT/TEXTAREA escape below does not cover it: without this
+        // marker, Space armed the leader instead of pressing the focused
+        // button and leader chords fired underneath the dialog.
+        document.querySelector('[data-workflow-import]')
       ) return
 
       // Hint mode — handled entirely by HintOverlay's own listener

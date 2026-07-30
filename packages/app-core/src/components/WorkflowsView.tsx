@@ -2684,8 +2684,12 @@ export function WorkflowsView(): JSX.Element {
    * added later as well.
    */
   const createWorkflow = useCallback(
-    async (slug: string, text: string): Promise<void> => {
-      if (!canWrite) return
+    // Resolves to the write error, or null once the workflow really is in the
+    // list. The gallery doors ignore the answer (the error banner is enough
+    // feedback there); the import door must not, because it follows up with a
+    // success toast that would otherwise fire over a failed write.
+    async (slug: string, text: string): Promise<string | null> => {
+      if (!canWrite) return 'This vault is read-only here.'
       try {
         const file = await window.zen.writeWorkflow({
           slug,
@@ -2709,8 +2713,11 @@ export function WorkflowsView(): JSX.Element {
         if (index >= 0) setCursor(index)
         // The gallery had the keyboard; the list is what the keys mean now.
         listRef.current?.focus()
+        return null
       } catch (err) {
-        setWriteError(err instanceof Error ? err.message : String(err))
+        const message = err instanceof Error ? err.message : String(err)
+        setWriteError(message)
+        return message
       }
     },
     [canWrite, refresh]
@@ -3165,7 +3172,14 @@ export function WorkflowsView(): JSX.Element {
     if (pending === null || !pending.review.ok || pending.review.text === null) return
     setImporting(true)
     try {
-      await createWorkflow(pending.slug, pending.review.text)
+      const failure = await createWorkflow(pending.slug, pending.review.text)
+      if (failure !== null) {
+        // The dialog stays open: nothing was imported, so there is nothing to
+        // review "later", and closing over an error toast would leave the two
+        // messages disagreeing about what just happened.
+        addToast(`Could not import "${pending.review.name}": ${failure}`, 'error')
+        return
+      }
       setPendingImport(null)
       addToast(
         `Imported "${pending.review.name}" as a draft. Activate it when you want to run it.`,

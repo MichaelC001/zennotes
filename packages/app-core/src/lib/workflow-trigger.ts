@@ -115,6 +115,13 @@ async function undoFromToast(receipt: WorkflowRunReceipt): Promise<void> {
  * is a toast, never a throw, because the caller is a palette row.
  */
 export async function runWorkflowById(id: string): Promise<void> {
+  // The single funnel for every headless entry point, so the master switch
+  // holds even for a caller that captured a command object (or an ex name)
+  // before the toggle flipped. Same defensive posture as `openWorkflowsView`.
+  if (!useStore.getState().workflowsEnabled) {
+    toast('Workflows are turned off. Enable them under Settings → Workflows.', 'error')
+    return
+  }
   if (inFlight) return
   inFlight = true
   try {

@@ -172,6 +172,24 @@ describe('Workflow run entries', () => {
     useStore.setState({ workflowsEnabled: true, workspaceMode: 'local', workflowIndex: INDEX })
     expect(buildCommands().some((c) => c.id.startsWith('workflow.run.'))).toBe(false)
   })
+
+  it('a captured Run command dies with the feature switch', async () => {
+    ;(window.zen as unknown as Record<string, unknown>).applyWorkflow = vi.fn()
+    const { buildCommands, useStore } = await loadCommands()
+    useStore.setState({ workflowsEnabled: true, workspaceMode: 'local', workflowIndex: INDEX })
+
+    // The vim ex registry snapshots command objects at editor mount, then
+    // re-checks only `when`. A Run entry must therefore carry the switch as
+    // its `when`, or `:workflow_run_…` keeps writing after the toggle is off.
+    const run = buildCommands().find((c) => c.id === 'workflow.run.reading-log')
+    const picker = buildCommands().find((c) => c.id === 'workflow.runPicker')
+    expect(run?.when?.()).toBe(true)
+    expect(picker?.when?.()).toBe(true)
+
+    useStore.setState({ workflowsEnabled: false })
+    expect(run?.when?.()).toBe(false)
+    expect(picker?.when?.()).toBe(false)
+  })
 })
 
 describe('close-tab command shortcut', () => {

@@ -1769,12 +1769,19 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       window.zen.getAppInfo().runtime === 'desktop' &&
       typeof window.zen.applyWorkflow === 'function'
     if (runnableHere) {
+      // `runnableHere` gates what this build of the list contains; the `when`
+      // guard gates every LATER use of a captured command object. The vim ex
+      // registry snapshots commands at editor mount, so without `when`, a
+      // `:workflow_run_…` name kept running the full write ladder after the
+      // feature was switched off in Settings.
+      const stillOn = (): boolean => getState().workflowsEnabled
       // The browsable list, in the same drill-down shape as `Switch Vault…`.
       cmds.push({
         id: 'workflow.runPicker',
         title: 'Run Workflow…',
         category: 'Workflow',
         keywords: 'workflow run list pick choose automation trigger pipeline',
+        when: stillOn,
         run: () => {
           /* handled by CommandPalette */
         }
@@ -1786,6 +1793,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
           title: `Run: ${entry.name}`,
           category: 'Workflow',
           keywords: `${entry.name} ${entry.description} ${entry.id} workflow run automation trigger pipeline`,
+          when: stillOn,
           run: () => runWorkflowById(entry.id)
         })
       }
