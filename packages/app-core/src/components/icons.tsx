@@ -242,6 +242,12 @@ export const CloseIcon = (p: IconProps): JSX.Element => (
   </I>
 )
 
+export const CheckIcon = (p: IconProps): JSX.Element => (
+  <I {...p}>
+    <path d="M20 6 9 17l-5-5" />
+  </I>
+)
+
 export const MaximizeIcon = (p: IconProps): JSX.Element => (
   <I {...p}>
     <path d="M8 3H5a2 2 0 0 0-2 2v3" />

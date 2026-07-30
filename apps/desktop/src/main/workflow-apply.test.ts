@@ -16,6 +16,7 @@ import type { WorkflowRunReceipt } from '@zennotes/bridge-contract/workflows'
 import type { WorkflowOp } from '@shared/workflows/types'
 import {
   applyWorkflowOps,
+  deleteWorkflowRuns,
   listWorkflowRuns,
   MAX_RETAINED_RUNS,
   parseWorkflowOp,
@@ -1037,5 +1038,26 @@ describe('one run at a time per vault', () => {
     // undo's read-compare-write lands inside the second run's read-write
     // window and 'two' vanishes while `second` still reports it applied.
     expect(await readOrNull(root, 'inbox/A.md')).toBe('a\n')
+  })
+})
+
+describe('deleteWorkflowRuns', () => {
+  it('removes only the named workflow\'s ledgers and reports the count', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'one' }], 'tutorial')
+    await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'two' }], 'tutorial')
+    await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'three' }], 'keeper')
+
+    const removed = await deleteWorkflowRuns(root, 'tutorial')
+
+    expect(removed).toBe(2)
+    const runs = await listWorkflowRuns(root)
+    expect(runs.map((run) => run.workflowId)).toEqual(['keeper'])
+  })
+
+  it('a vault with no runs answers zero', async () => {
+    const root = await makeVault()
+    expect(await deleteWorkflowRuns(root, 'tutorial')).toBe(0)
   })
 })

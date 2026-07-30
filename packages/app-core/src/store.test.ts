@@ -1515,3 +1515,58 @@ describe('applyTaskMutation write queue (#503)', () => {
     expect(writeNote).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('hidden workflow presets', () => {
+  it('normalizes garbage and keeps unknown ids', async () => {
+    installZen()
+    const { useStore } = await loadStore()
+    const { hideWorkflowPreset } = useStore.getState()
+
+    hideWorkflowPreset('reading-log')
+    // Unknown ids are kept on purpose: a preset renamed away and back across
+    // versions must stay hidden through the gap.
+    hideWorkflowPreset('from-a-future-version')
+    hideWorkflowPreset('reading-log') // duplicate, deduped
+    hideWorkflowPreset('   ') // blank, dropped
+
+    expect(useStore.getState().hiddenWorkflowPresets).toEqual([
+      'reading-log',
+      'from-a-future-version'
+    ])
+  })
+
+  it('restore removes one id; wholesale set covers Hide all and Restore all', async () => {
+    installZen()
+    const { useStore } = await loadStore()
+    const state = useStore.getState()
+
+    state.hideWorkflowPreset('reading-log')
+    state.hideWorkflowPreset('meeting-index')
+    useStore.getState().restoreWorkflowPreset('reading-log')
+    expect(useStore.getState().hiddenWorkflowPresets).toEqual(['meeting-index'])
+
+    useStore.getState().setHiddenWorkflowPresets(['a', 'b', 'a', ' '])
+    expect(useStore.getState().hiddenWorkflowPresets).toEqual(['a', 'b'])
+
+    useStore.getState().setHiddenWorkflowPresets([])
+    expect(useStore.getState().hiddenWorkflowPresets).toEqual([])
+  })
+
+  it('survives a reload through prefs persistence', async () => {
+    installZen()
+    const first = await loadStore()
+    first.useStore.getState().hideWorkflowPreset('reading-log')
+    const prefsRaw = localStorage.getItem('zen:prefs:v2')
+    expect(prefsRaw).toContain('reading-log')
+
+    // A fresh module instance reads prefs back from localStorage, which is
+    // exactly the launch path. Not `loadStore()`: that helper clears the
+    // storage this test just seeded.
+    installZen()
+    vi.resetModules()
+    localStorage.clear()
+    if (prefsRaw !== null) localStorage.setItem('zen:prefs:v2', prefsRaw)
+    const second = await import('./store')
+    expect(second.useStore.getState().hiddenWorkflowPresets).toEqual(['reading-log'])
+  })
+})

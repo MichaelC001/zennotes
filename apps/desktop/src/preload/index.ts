@@ -320,6 +320,8 @@ const api: ZenBridge = {
     ipcRenderer.invoke(IPC.VAULT_UNDO_WORKFLOW_RUN, runId),
   listWorkflowRuns: (): Promise<WorkflowRunSummary[]> =>
     ipcRenderer.invoke(IPC.VAULT_LIST_WORKFLOW_RUNS),
+  deleteWorkflowRuns: (workflowId: string): Promise<number> =>
+    ipcRenderer.invoke(IPC.VAULT_DELETE_WORKFLOW_RUNS, workflowId),
   listTemplates: (): Promise<CustomTemplateFile[]> =>
     ipcRenderer.invoke(IPC.VAULT_LIST_TEMPLATES),
   readTemplate: (sourcePath: string): Promise<string> =>

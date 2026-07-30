@@ -307,3 +307,31 @@ export const PRESET_CATEGORIES: readonly PresetCategory[] = [
 export function presetsByCategory(category: PresetCategory): WorkflowPreset[] {
   return WORKFLOW_PRESETS.filter((preset) => preset.category === category)
 }
+
+/**
+ * The category's presets minus the ones the user hid from the gallery.
+ *
+ * Hiding is a per-user taste stored as preset ids ([view]
+ * `hidden_workflow_presets` in config.toml); ids that match nothing are
+ * ignored here rather than pruned, so a hidden preset that disappears in one
+ * version and returns in another stays hidden across the gap.
+ */
+export function visiblePresetsByCategory(
+  category: PresetCategory,
+  hidden: readonly string[]
+): WorkflowPreset[] {
+  const gone = new Set(hidden)
+  return presetsByCategory(category).filter((preset) => !gone.has(preset.id))
+}
+
+/**
+ * The hidden presets, in the gallery's canonical order (category order, then
+ * declaration order) rather than the order they were hidden in, so the Hidden
+ * group reads like the gallery it came from.
+ */
+export function hiddenPresetsInOrder(hidden: readonly string[]): WorkflowPreset[] {
+  const gone = new Set(hidden)
+  return PRESET_CATEGORIES.flatMap((category) =>
+    presetsByCategory(category).filter((preset) => gone.has(preset.id))
+  )
+}

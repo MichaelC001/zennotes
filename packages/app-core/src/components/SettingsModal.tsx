@@ -36,6 +36,8 @@ import {
   type McpServerRuntime,
 } from "@shared/mcp-clients";
 import { useStore, refreshCustomThemes, refreshOverrides } from "../store";
+import { WORKFLOW_PRESETS, hiddenPresetsInOrder } from "@shared/workflows/presets";
+import { startWorkflowTutorial } from "../lib/workflow-tutorial-flow";
 import type { LineNumberMode, WhichKeyHintMode } from "../store";
 import type {
   KeymapDefinition,
@@ -468,6 +470,8 @@ export function SettingsModal(): JSX.Element {
   const setTabsEnabled = useStore((s) => s.setTabsEnabled);
   const workflowsEnabled = useStore((s) => s.workflowsEnabled);
   const setWorkflowsEnabled = useStore((s) => s.setWorkflowsEnabled);
+  const hiddenWorkflowPresets = useStore((s) => s.hiddenWorkflowPresets);
+  const setHiddenWorkflowPresets = useStore((s) => s.setHiddenWorkflowPresets);
   const wrapTabs = useStore((s) => s.wrapTabs);
   const setWrapTabs = useStore((s) => s.setWrapTabs);
   const quickNoteDateTitle = useStore((s) => s.quickNoteDateTitle);
@@ -2407,7 +2411,11 @@ export function SettingsModal(): JSX.Element {
           title: "Workflows",
           description:
             "The Workflows canvas, and whether it appears in the app at all.",
-          searchIds: ["workflows-enabled"],
+          searchIds: [
+            "workflows-enabled",
+            "workflow-hidden-recipes",
+            "workflow-tutorial",
+          ],
           content: (
             <div className="space-y-6">
               <Section
@@ -2421,6 +2429,75 @@ export function SettingsModal(): JSX.Element {
                   settingId="workflows-enabled"
                   onChange={setWorkflowsEnabled}
                 />
+                <div
+                  className="flex items-center justify-between gap-5 px-5 py-4"
+                  {...settingsSearchTargetProps("workflow-tutorial")}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-ink-900">
+                      Guided tutorial
+                    </div>
+                    <div className="mt-1 text-xs leading-5 text-ink-500">
+                      A hands-on walkthrough of the whole loop: canvas, text,
+                      editing, activating, the dry run, apply, and undo. It
+                      seeds a small practice folder to learn on and removes
+                      everything it created when you finish.
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    className="shrink-0"
+                    onClick={() => void startWorkflowTutorial()}
+                  >
+                    Start tutorial
+                  </Button>
+                </div>
+                {(() => {
+                  const total = WORKFLOW_PRESETS.length;
+                  const hidden = hiddenPresetsInOrder(hiddenWorkflowPresets).length;
+                  const copy =
+                    hidden === 0
+                      ? `All ${total} shipped recipes appear in the New-workflow gallery.`
+                      : hidden === total
+                        ? "Every shipped recipe is hidden; the gallery starts from Blank."
+                        : `${hidden} of ${total} recipes are hidden from the New-workflow gallery (press x on a recipe there to hide one at a time).`;
+                  return (
+                    <div
+                      className="flex items-center justify-between gap-5 px-5 py-4"
+                      {...settingsSearchTargetProps("workflow-hidden-recipes")}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-ink-900">
+                          Built-in recipes
+                        </div>
+                        <div className="mt-1 text-xs leading-5 text-ink-500">
+                          {copy}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          size="sm"
+                          disabled={hidden === total}
+                          onClick={() =>
+                            setHiddenWorkflowPresets(
+                              WORKFLOW_PRESETS.map((preset) => preset.id),
+                            )
+                          }
+                        >
+                          Hide all
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={hidden === 0}
+                          onClick={() => setHiddenWorkflowPresets([])}
+                        >
+                          Restore all
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </Section>
             </div>
           ),

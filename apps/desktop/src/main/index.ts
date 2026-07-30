@@ -155,7 +155,12 @@ import {
   safeExportFilename,
   writeWorkflowFile
 } from './workflows'
-import { applyWorkflowOps, listWorkflowRuns, undoWorkflowRun } from './workflow-apply'
+import {
+  applyWorkflowOps,
+  deleteWorkflowRuns,
+  listWorkflowRuns,
+  undoWorkflowRun
+} from './workflow-apply'
 import type {
   ApplyWorkflowInput,
   ExportWorkflowInput,
@@ -2434,6 +2439,15 @@ function registerIpc(): void {
     if (isRemoteWorkspaceActive()) return []
     const v = requireVault()
     return await listWorkflowRuns(v.root)
+  })
+
+  handle(IPC.VAULT_DELETE_WORKFLOW_RUNS, async (_e, workflowId: string) => {
+    if (isRemoteWorkspaceActive()) return 0
+    if (typeof workflowId !== 'string' || !workflowId) {
+      throw new Error('deleteWorkflowRuns needs a workflow id')
+    }
+    const v = requireVault()
+    return await deleteWorkflowRuns(v.root, workflowId)
   })
 
   // Custom templates live on the local filesystem only; remote vaults fall

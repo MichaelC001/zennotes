@@ -1023,6 +1023,42 @@ async function undoWorkflowRunNow(root: string, runId: string): Promise<Workflow
 }
 
 /**
+ * Remove every ledger a workflow's runs left behind, resolving to how many.
+ *
+ * Exists for the guided tutorial's leave-no-trace cleanup: the practice
+ * workflow's ledgers hold copies of the practice notes' bytes, so "the vault
+ * ends exactly as it started" includes them. Serialized on the same per-vault
+ * queue as apply and undo, so it can never race a run into losing its journal
+ * mid-write. An unreadable ledger is left alone: it cannot be proven ours.
+ */
+export async function deleteWorkflowRuns(root: string, workflowId: string): Promise<number> {
+  return withVaultRunLock(root, () => deleteWorkflowRunsNow(root, workflowId))
+}
+
+async function deleteWorkflowRunsNow(root: string, workflowId: string): Promise<number> {
+  const dir = runsDir(root)
+  let names: string[]
+  try {
+    names = await fs.readdir(dir)
+  } catch {
+    return 0
+  }
+  let removed = 0
+  for (const name of names) {
+    if (!name.toLowerCase().endsWith('.json')) continue
+    try {
+      const ledger = await readLedger(path.join(dir, name))
+      if (ledger.workflowId !== workflowId) continue
+      await fs.rm(path.join(dir, name), { force: true })
+      removed += 1
+    } catch {
+      /* unreadable: not provably this workflow's, so it stays */
+    }
+  }
+  return removed
+}
+
+/**
  * Every recorded run, newest first, which is the order a history list shows and
  * the order the most recent undo is reached in.
  *

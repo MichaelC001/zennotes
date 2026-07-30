@@ -5,7 +5,15 @@ import type {
   RefObject
 } from 'react'
 import { Background, Handle, Panel, Position, ReactFlow } from '@xyflow/react'
-import type { Connection, Edge, Node, NodeChange, NodeProps, NodeTypes } from '@xyflow/react'
+import type {
+  Connection,
+  Edge,
+  Node,
+  NodeChange,
+  NodeProps,
+  NodeTypes,
+  ReactFlowInstance
+} from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
 import type {
@@ -37,7 +45,12 @@ import { serializeWorkflow } from '@shared/workflows/serialize'
 // The recipes the gallery offers and the completions the editor pops up. Both
 // are data derived from `NODE_DEFS`, which is why neither lives here: this file
 // renders them, it does not decide what the language contains.
-import { PRESET_CATEGORIES, presetById, presetsByCategory } from '@shared/workflows/presets'
+import {
+  PRESET_CATEGORIES,
+  hiddenPresetsInOrder,
+  presetById,
+  visiblePresetsByCategory
+} from '@shared/workflows/presets'
 import type { WorkflowPreset } from '@shared/workflows/presets'
 import { paramSignature, suggestAt } from '@shared/workflows/suggest'
 import type { MatchRange, Suggestion } from '@shared/workflows/suggest'
@@ -72,6 +85,7 @@ import type {
   WorkflowTrigger
 } from '@shared/workflows/types'
 import { useStore } from '../store'
+import type { WorkflowRunRecord } from '../store'
 import { useToastStore } from '../lib/toast'
 import { createVaultReader } from '../lib/workflow-vault-reader'
 import {
@@ -137,6 +151,8 @@ import { BUILTIN_TEMPLATES } from '@shared/builtin-templates'
 import { mergeTemplates } from '@shared/template-files'
 import { IRREVERSIBLE_KINDS, pathsTooltip, summarizeOps } from '../lib/workflow-op-summary'
 import type { OpSummary } from '../lib/workflow-op-summary'
+import { TUTORIAL_STEPS, TUTORIAL_WORKFLOW_SLUG } from '../lib/workflow-tutorial'
+import { finishWorkflowTutorial } from '../lib/workflow-tutorial-flow'
 import { Button, IconButton } from './ui/Button'
 import { Modal } from './ui/Modal'
 import { ContextMenu } from './ContextMenu'
@@ -145,6 +161,7 @@ import { CloseIcon, PencilIcon, PlusIcon, TrashIcon, ZapIcon } from './icons'
 import { NodeInspector } from './workflows/NodeInspector'
 import type { InspectorVocabulary } from './workflows/NodeInspector'
 import { ImportReviewDialog } from './workflows/ImportReviewDialog'
+import { TutorialPanel } from './workflows/TutorialPanel'
 import { WorkflowListPane } from './workflows/WorkflowListPane'
 import type { WorkflowListRow } from './workflows/WorkflowListPane'
 import { WorkflowStatusToggle } from './workflows/WorkflowStatusToggle'
@@ -448,6 +465,15 @@ function WorkflowStepNode({ data }: NodeProps<StepNode>): JSX.Element {
 // Stable identity: React Flow re-registers node types whenever this object
 // changes, which would remount every node on each render.
 const NODE_TYPES: NodeTypes = { workflowStep: WorkflowStepNode }
+
+type FlowInstance = ReactFlowInstance<StepNode, Edge>
+
+/** How every automatic fit frames a graph. maxZoom above 1, deliberately: a
+ *  typical workflow is five or six nodes, and capping the fit at 100% left
+ *  them small and swimming in padding on every first open. 1.35 frames a
+ *  small graph at a readable size while a large one still zooms out as far
+ *  as it needs to. */
+const FIT_VIEW_OPTIONS = { padding: 0.15, maxZoom: 1.35 } as const
 
 /* -------------------------------------------------------------------------- */
 /*  Node ids                                                                  */
@@ -1043,15 +1069,8 @@ const CARET_KEYS: ReadonlySet<string> = new Set([
  * lets someone walk away not knowing what changed. It is also where Undo lives,
  * so dismissing it is a deliberate "I am done with this run".
  */
-interface RunRecord {
-  /** The workflow it belongs to, so it is never shown over a different graph. */
-  workflowId: string
-  receipt: WorkflowRunReceipt
-  /** Set once undone. The record stays; the offer to undo it does not. */
-  undone: WorkflowUndoResult | null
-  /** An undo that failed must not read as one that worked. */
-  undoError: string | null
-}
+// The run record (receipt + undo state) lives in the STORE, not here: leaving
+// the view must not cost the Undo. See `WorkflowRunRecord` in store.ts.
 
 /* -------------------------------------------------------------------------- */
 /*  View                                                                      */
@@ -1098,6 +1117,15 @@ export function WorkflowsView(): JSX.Element {
   // to be reactive: `apply-template` diagnostics must clear the moment the
   // named template is created.
   const customTemplates = useStore((s) => s.customTemplates)
+  const tutorialStep = useStore((s) => s.workflowTutorialStep)
+  const setTutorialStep = useStore((s) => s.setWorkflowTutorialStep)
+  // For the tutorial's "run from anywhere" chapter, which watches for the
+  // command palette opening over this view.
+  const paletteOpen = useStore((s) => s.commandPaletteOpen)
+  // The tutorial's activation chapter watches the index rather than this
+  // view's own list, because the index is refreshed by the same CRUD paths
+  // that change a status and is already store-shaped.
+  const workflowIndexEntries = useStore((s) => s.workflowIndex)
   // Actions, not state: both identities are stable, so subscribing to them
   // costs nothing. `noteDirty` is deliberately NOT subscribed to here; it is
   // rebuilt on every keystroke in any editor pane, and reading it lazily when
@@ -1123,11 +1151,13 @@ export function WorkflowsView(): JSX.Element {
   // describing the vault as it is now.
   const [planToken, setPlanToken] = useState(0)
 
-  // Running state. The record outlives the run itself; see `RunRecord`.
+  // Running state. The record outlives the run itself AND this view: it is
+  // store state, so glancing at a note and coming back keeps the Undo.
   const [running, setRunning] = useState(false)
   const [undoing, setUndoing] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
-  const [record, setRecord] = useState<RunRecord | null>(null)
+  const record = useStore((s) => s.workflowRunRecord)
+  const setRecord = useStore((s) => s.setWorkflowRunRecord)
 
   // Authoring state. `draft === null` is the read-only view; nothing below here
   // matters until the editor is open.
@@ -1220,6 +1250,30 @@ export function WorkflowsView(): JSX.Element {
   // The canvas column, so a deletion can hand the keyboard back to it instead
   // of leaving focus on the node it just unmounted.
   const canvasRef = useRef<HTMLDivElement>(null)
+  // The live React Flow instance (refreshed by `onInit` on every graphKey
+  // remount) and whether the USER has panned or zoomed it. Auto-refits, on
+  // mount and on container resize, run only until the first hand movement:
+  // a viewport someone placed is theirs, and snapping it back on a pane
+  // resize would fight them mid-thought.
+  const flowInstanceRef = useRef<FlowInstance | null>(null)
+  const viewportTouchedRef = useRef(false)
+
+  // The pane the canvas lives in settles its size a frame or two after the
+  // view mounts (and again when sidebars toggle). React Flow's mount-time
+  // `fitView` measures whatever size exists at that instant, which is how a
+  // first open ended with the graph stranded tiny in a corner. Refit on every
+  // container resize until the user takes the viewport over.
+  useEffect(() => {
+    const el = canvasRef.current
+    if (el === null || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (viewportTouchedRef.current) return
+      const instance = flowInstanceRef.current
+      if (instance) void instance.fitView(FIT_VIEW_OPTIONS)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
   // The node a workflow should open with selected, handed across the render
   // that makes it the active one. Creating a workflow wants the inspector
   // already open on its source step, and the reset that clears the canvas
@@ -1466,10 +1520,15 @@ export function WorkflowsView(): JSX.Element {
   }, [list, editing])
 
   // Opening the view with nothing shown on the right would hide the whole
-  // point, so the first workflow is selected as soon as one exists.
+  // point, so the first workflow is selected as soon as one exists. EXCEPT
+  // during the tutorial: its first todo is "select the workflow", and an
+  // auto-selection landing after the chapter card mounts is indistinguishable
+  // from the user doing it, which both stole the lesson and turned the page
+  // by itself.
   useEffect(() => {
+    if (tutorialStep !== null) return
     if (selectedId === null && list.length > 0) setSelectedId(list[0].workflow.id)
-  }, [list, selectedId])
+  }, [list, selectedId, tutorialStep])
 
   useEffect(() => {
     if (cursor > 0 && cursor >= list.length) setCursor(Math.max(0, list.length - 1))
@@ -4239,6 +4298,80 @@ export function WorkflowsView(): JSX.Element {
     setSelectedNodeId(id)
   }
 
+  // The tutorial seeds its workflow from OUTSIDE this view (Settings). When
+  // the view is already mounted at that moment there is no mount-time load to
+  // pick the file up, and the workflows directory has no watcher, so the
+  // tutorial's arrival is the reload trigger. Once per activation, not per
+  // step: `reload` clears selection state, and re-running it on every chapter
+  // would fight the user mid-lesson.
+  const tutorialReloadedRef = useRef(false)
+  useEffect(() => {
+    if (tutorialStep === null) {
+      tutorialReloadedRef.current = false
+      return
+    }
+    if (tutorialReloadedRef.current) return
+    tutorialReloadedRef.current = true
+    void reload()
+  }, [tutorialStep, reload])
+
+  /** End the guided tutorial, from Finish or from abandoning it: same cleanup
+   *  either way, with a confirm only when chapters remain (Finish on the last
+   *  chapter is the expected exit and should not be second-guessed). */
+  const endTutorial = useCallback(async (): Promise<void> => {
+    const step = useStore.getState().workflowTutorialStep
+    if (step !== null && step < TUTORIAL_STEPS.length - 1) {
+      const ok = await confirmApp({
+        title: 'Leave the tutorial?',
+        description:
+          'The practice folder, the tutorial workflow, and its run history are removed either way; leaving now just skips the remaining chapters.',
+        confirmLabel: 'Leave and clean up',
+        cancelLabel: 'Keep going'
+      })
+      if (!ok) return
+    }
+    await finishWorkflowTutorial()
+    await reload()
+    listRef.current?.focus()
+  }, [reload])
+
+  const tutorial =
+    tutorialStep !== null ? (
+      <TutorialPanel
+        step={tutorialStep}
+        signals={{
+          'select-tutorial': selectedId === TUTORIAL_WORKFLOW_SLUG,
+          'node-inspected': selectedNodeId !== null,
+          'text-mode': textMode,
+          'canvas-mode': !textMode,
+          'where-inspected': selectedNode?.step.kind === 'where',
+          'threshold-eased':
+            active?.workflow.id === TUTORIAL_WORKFLOW_SLUG &&
+            active.workflow.statements.some((statement) =>
+              statement.steps.some(
+                (step) =>
+                  step.kind === 'where' &&
+                  step.args.field === 'rating' &&
+                  step.args.value === '3'
+              )
+            ),
+          'workflow-active': workflowIndexEntries.some(
+            (entry) => entry.id === TUTORIAL_WORKFLOW_SLUG && entry.status === 'active'
+          ),
+          'run-applied':
+            record?.workflowId === TUTORIAL_WORKFLOW_SLUG &&
+            record.undone === null &&
+            record.receipt.rolledBack === undefined,
+          'run-undone': record?.workflowId === TUTORIAL_WORKFLOW_SLUG && record?.undone !== null,
+          'palette-opened': paletteOpen
+        }}
+        onStepChange={(step) =>
+          setTutorialStep(Math.max(0, Math.min(TUTORIAL_STEPS.length - 1, step)))
+        }
+        onFinish={() => void endTutorial()}
+      />
+    ) : null
+
   // Both live outside the three returns below, because both are reachable from
   // every one of them: the gallery is how a workflow is created whether or not
   // any exist yet, and the reference answers the same question in an empty
@@ -4309,7 +4442,7 @@ export function WorkflowsView(): JSX.Element {
 
   if (items === null) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900">
+      <div className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900">
         <WorkflowsHeader
           count={0}
           vimMode={vimMode}
@@ -4339,7 +4472,7 @@ export function WorkflowsView(): JSX.Element {
   // here.
   if (list.length === 0 && draft === null) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900">
+      <div className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900">
         <WorkflowsHeader
           count={0}
           vimMode={vimMode}
@@ -4504,7 +4637,24 @@ export function WorkflowsView(): JSX.Element {
         deleteKeyCode={null}
         elementsSelectable
         fitView
-        fitViewOptions={{ padding: 0.24, maxZoom: 1 }}
+        fitViewOptions={FIT_VIEW_OPTIONS}
+        // React Flow's default floor is 0.5, which quietly forbids fitting a
+        // long pipeline into a narrow pane: the "fit" then overflows both
+        // edges. A workflow is a wide thing by nature, so the floor bends.
+        minZoom={0.2}
+        // A fresh mount is a fresh framing: the remount is how switching
+        // workflows refits, so the hands-off rule resets with it. The resize
+        // observer on the container (see `canvasRef`) handles the pane
+        // settling its real size after this instant.
+        onInit={(instance) => {
+          flowInstanceRef.current = instance
+          viewportTouchedRef.current = false
+        }}
+        onMoveStart={(event) => {
+          // Programmatic moves (our own fits) arrive without an input event;
+          // only a real hand on the canvas takes the viewport over.
+          if (event) viewportTouchedRef.current = true
+        }}
         // React Flow's own badge, off. It sits over the canvas looking like a
         // control of ours and answers to nobody: people ask what it is, which
         // means it reads as a bug in this feature rather than as an attribution.
@@ -4622,7 +4772,7 @@ export function WorkflowsView(): JSX.Element {
   )
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900">
+    <div className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900">
       <WorkflowsHeader
         count={list.length}
         vimMode={vimMode}
@@ -5065,6 +5215,7 @@ export function WorkflowsView(): JSX.Element {
       {gallery}
       {stepPicker}
       {importDialog}
+      {tutorial}
     </div>
   )
 }
@@ -5136,7 +5287,7 @@ function RunRecordCard({
   onUndo,
   onDismiss
 }: {
-  record: RunRecord
+  record: WorkflowRunRecord
   canUndo: boolean
   undoing: boolean
   onUndo: () => void
@@ -5541,6 +5692,8 @@ function WorkflowGallery({
   const [cursor, setCursor] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
   const keysRef = useRef<HTMLInputElement>(null)
+  const hiddenPresets = useStore((s) => s.hiddenWorkflowPresets)
+  const hidePreset = useStore((s) => s.hideWorkflowPreset)
 
   // Grouped and ordered by `PRESET_CATEGORIES`, which the presets module
   // declares as "the gallery's tab order, stated here so the view does not
@@ -5555,14 +5708,20 @@ function WorkflowGallery({
       { title: BLANK_GROUP, items: [{ kind: 'blank' }] }
     ]
     for (const category of PRESET_CATEGORIES) {
-      const items: GalleryItem[] = presetsByCategory(category).map((preset) => ({
-        kind: 'preset',
-        id: preset.id
-      }))
+      const items: GalleryItem[] = visiblePresetsByCategory(category, hiddenPresets).map(
+        (preset) => ({
+          kind: 'preset',
+          id: preset.id
+        })
+      )
       if (items.length > 0) out.push({ title: category, items })
     }
+    // A hidden recipe leaves the gallery ENTIRELY: no greyed pile at the
+    // bottom to scroll past, which on an all-hidden gallery would be taller
+    // than the gallery itself. The footer carries a one-line breadcrumb to
+    // Settings → Workflows, which is where Hide all / Restore all live.
     return out
-  }, [])
+  }, [hiddenPresets])
 
   // One flat index across the groups: the cursor moves through rows, not
   // through headings.
@@ -5585,6 +5744,12 @@ function WorkflowGallery({
     row?.scrollIntoView({ block: 'nearest' })
   }, [cursor])
 
+  // Hiding the last row of the list (or restoring the only hidden one) shrinks
+  // `flat`; the cursor must land on a row that still exists.
+  useEffect(() => {
+    setCursor((index) => Math.max(0, Math.min(flat.length - 1, index)))
+  }, [flat.length])
+
   const choose = (item: GalleryItem): void => {
     if (item.kind === 'blank') {
       onBlank()
@@ -5592,6 +5757,14 @@ function WorkflowGallery({
     }
     const preset = presetById(item.id)
     if (preset) onPick(preset)
+  }
+
+  /** `x` (the gallery's dialect, like its j/k) and Delete/Backspace: hide the
+   *  recipe under the cursor. Blank is furniture. Restoring lives in
+   *  Settings → Workflows, where Hide all sits next to Restore all. */
+  const hideAtCursor = (): void => {
+    const item = flat[cursor]
+    if (item?.kind === 'preset') hidePreset(item.id)
   }
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
@@ -5619,6 +5792,12 @@ function WorkflowGallery({
     if (event.key === 'End' || event.key === 'G') {
       event.preventDefault()
       setCursor(Math.max(0, flat.length - 1))
+      return
+    }
+    if (event.key === 'x' || event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault()
+      event.stopPropagation()
+      hideAtCursor()
       return
     }
     if (event.key === 'Enter') {
@@ -5679,55 +5858,91 @@ function WorkflowGallery({
               const index = starts[groupIndex] + itemIndex
               const preset = item.kind === 'preset' ? presetById(item.id) : null
               return (
-                <button
-                  key={item.kind === 'preset' ? item.id : 'blank'}
+                // A div, not a button, because the row carries a real button of
+                // its own (hide) and interactive content may not nest. The
+                // keyboard never focuses rows either way: it lives on the
+                // combobox field, listbox-style.
+                <div
+                  key={item.kind === 'blank' ? 'blank' : item.id}
                   id={`workflow-preset-${index}`}
                   data-gallery-index={index}
-                  type="button"
                   role="option"
                   aria-selected={index === cursor}
                   // Focus stays on the field that owns the keys, so a click and
                   // then an arrow key still moves this list rather than
-                  // stranding the keyboard on a button.
+                  // stranding the keyboard on a row.
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => choose(item)}
                   onMouseMove={() => setCursor(index)}
-                  className={`mb-1 flex w-full flex-col gap-0.5 rounded-lg px-3 py-2 text-left transition-colors ${
+                  className={`group mb-1 flex w-full cursor-pointer items-start gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
                     index === cursor ? 'bg-paper-200' : 'hover:bg-paper-200/60'
                   }`}
                 >
-                  <span className="flex items-center gap-2">
-                    <span className="min-w-0 truncate text-sm font-medium text-ink-900">
-                      {preset ? preset.name : 'Blank workflow'}
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="flex items-center gap-2">
+                      <span className="min-w-0 truncate text-sm font-medium text-ink-900">
+                        {preset ? preset.name : 'Blank workflow'}
+                      </span>
+                      {preset?.mutating && <WritesBadge />}
                     </span>
-                    {preset?.mutating && <WritesBadge />}
-                  </span>
-                  <span className="text-xs text-ink-600">
-                    {preset
-                      ? preset.description
-                      : 'A starter file with one pipeline in it, for when you already know what you want.'}
-                  </span>
-                  {preset && (
-                    // The rationale, not a second description: why anyone would
-                    // want this workflow, which is the part a name cannot carry.
-                    <span className="text-2xs text-ink-400">{preset.rationale}</span>
+                    <span className="text-xs text-ink-600">
+                      {preset
+                        ? preset.description
+                        : 'A starter file with one pipeline in it, for when you already know what you want.'}
+                    </span>
+                    {preset && (
+                      // The rationale, not a second description: why anyone would
+                      // want this workflow, which is the part a name cannot carry.
+                      <span className="text-2xs text-ink-400">{preset.rationale}</span>
+                    )}
+                  </div>
+                  {item.kind === 'preset' && (
+                    // The mouse's way to hide. Revealed on hover or cursor so
+                    // the gallery does not read as eight delete buttons.
+                    <IconButton
+                      size="sm"
+                      aria-label={`Hide ${preset?.name ?? 'recipe'} from the gallery`}
+                      title="Hide from the gallery (x)"
+                      tabIndex={-1}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        hidePreset(item.id)
+                      }}
+                      className={`transition-opacity ${
+                        index === cursor ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <CloseIcon className="h-3.5 w-3.5" />
+                    </IconButton>
                   )}
-                </button>
+                </div>
               )
             })}
           </div>
         ))}
       </div>
-      <div className="flex items-center justify-end gap-4 border-t border-paper-300/70 bg-paper-50 px-5 py-2 text-2xs text-ink-500">
-        <span>
-          <kbd className="rounded bg-paper-200 px-1">↑↓</kbd>{' '}
-          <kbd className="rounded bg-paper-200 px-1">j / k</kbd> move
+      <div className="flex items-center justify-between gap-4 border-t border-paper-300/70 bg-paper-50 px-5 py-2 text-2xs text-ink-500">
+        {/* Where the recipes went, since they leave without a trace above. */}
+        <span className="min-w-0 truncate text-ink-400">
+          {hiddenPresetsInOrder(hiddenPresets).length > 0
+            ? `${hiddenPresetsInOrder(hiddenPresets).length} hidden · restore under Settings → Workflows`
+            : ''}
         </span>
-        <span>
-          <kbd className="rounded bg-paper-200 px-1">↵</kbd> create
-        </span>
-        <span>
-          <kbd className="rounded bg-paper-200 px-1">esc</kbd> cancel
+        <span className="flex shrink-0 items-center gap-4">
+          <span>
+            <kbd className="rounded bg-paper-200 px-1">↑↓</kbd>{' '}
+            <kbd className="rounded bg-paper-200 px-1">j / k</kbd> move
+          </span>
+          <span>
+            <kbd className="rounded bg-paper-200 px-1">↵</kbd> create
+          </span>
+          <span>
+            <kbd className="rounded bg-paper-200 px-1">x</kbd> hide
+          </span>
+          <span>
+            <kbd className="rounded bg-paper-200 px-1">esc</kbd> cancel
+          </span>
         </span>
       </div>
     </Modal>

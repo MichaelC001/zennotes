@@ -147,6 +147,7 @@ import {
 } from './lib/vault-layout'
 import { renderTemplate, renderTitle } from './lib/template-render'
 import type { NoteTemplate } from '@bridge-contract/templates'
+import type { WorkflowRunReceipt, WorkflowUndoResult } from '@bridge-contract/workflows'
 import { BUILTIN_TEMPLATES } from '@shared/builtin-templates'
 import {
   composeTemplateFile,
@@ -568,6 +569,10 @@ interface Prefs {
    *  closes any tab already showing it. OFF by default, deliberately: it can
    *  rewrite notes in bulk, so it is a one-time opt-in under Settings. */
   workflowsEnabled: boolean
+  /** Built-in workflow recipes hidden from the gallery, by preset id. Unknown
+   *  ids are kept rather than pruned, so hiding a preset survives the preset
+   *  itself being renamed away and back across versions. */
+  hiddenWorkflowPresets: string[]
   /** Full paths of collapsed nodes in the nested-tag tree. */
   collapsedTagNodes: string[]
   /** Auto-show the calendar panel when the active note is a daily or
@@ -702,6 +707,35 @@ function normalizeKanbanColumnOrder(raw: unknown): Record<string, string[]> {
 // A status id is a tag-like slug, matching the `@status:<id>` grammar the task
 // parser accepts (see INLINE_STATUS_RE). Lower-cased, de-duplicated, capped. (#354)
 const KANBAN_STATUS_ID_RE = /^[\p{L}\d][\p{L}\d/_-]*$/u
+
+/** A workflow run as the Workflows view reports and remembers it. */
+export interface WorkflowRunRecord {
+  /** The workflow it belongs to, so it is never shown over a different graph. */
+  workflowId: string
+  receipt: WorkflowRunReceipt
+  /** Set once undone. The record stays; the offer to undo it does not. */
+  undone: WorkflowUndoResult | null
+  /** An undo that failed must not read as one that worked. */
+  undoError: string | null
+}
+
+/** Hidden gallery preset ids: strings, trimmed, deduped, order kept. Unknown
+ *  ids survive on purpose (see the Prefs doc); the cap is a config-file
+ *  hygiene bound, far above the built-in count. */
+export function normalizeHiddenWorkflowPresets(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue
+    const id = entry.trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+    if (out.length >= 64) break
+  }
+  return out
+}
 
 export function normalizeKanbanStatuses(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
@@ -867,6 +901,7 @@ export const DEFAULT_PREFS: Prefs = {
   // graph editor asks more of a new user than any other view. The feature is
   // opted into once in Settings -> Workflows, not stumbled into.
   workflowsEnabled: false,
+  hiddenWorkflowPresets: [],
   collapsedTagNodes: [],
   autoCalendarPanel: true,
   calendarWeekStart: 'monday',
@@ -1139,6 +1174,7 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.workflowsEnabled === 'boolean'
         ? p.workflowsEnabled
         : DEFAULT_PREFS.workflowsEnabled,
+    hiddenWorkflowPresets: normalizeHiddenWorkflowPresets(p.hiddenWorkflowPresets),
     collapsedTagNodes: Array.isArray(p.collapsedTagNodes)
       ? p.collapsedTagNodes.filter((k): k is string => typeof k === 'string')
       : DEFAULT_PREFS.collapsedTagNodes,
@@ -1897,6 +1933,7 @@ function collectPrefs(s: {
   tagsCollapsed: boolean
   nestedTags: boolean
   workflowsEnabled: boolean
+  hiddenWorkflowPresets: string[]
   collapsedTagNodes: string[]
   autoCalendarPanel: boolean
   calendarWeekStart: CalendarWeekStart
@@ -1979,6 +2016,7 @@ function collectPrefs(s: {
     tagsCollapsed: s.tagsCollapsed,
     nestedTags: s.nestedTags,
     workflowsEnabled: s.workflowsEnabled,
+    hiddenWorkflowPresets: s.hiddenWorkflowPresets,
     collapsedTagNodes: s.collapsedTagNodes,
     autoCalendarPanel: s.autoCalendarPanel,
     calendarWeekStart: s.calendarWeekStart,
@@ -2419,6 +2457,18 @@ interface Store {
   tabsEnabled: boolean
   wrapTabs: boolean
   settingsOpen: boolean
+  /** Chapter index of the guided Workflows tutorial, or null when it is not
+   *  running. Session-only on purpose: the tutorial re-seeds (and first
+   *  cleans) its practice material on every start, so resuming a half-done
+   *  one after a restart would point at files that were never re-created. */
+  workflowTutorialStep: number | null
+  /** The most recent workflow run applied from the view, receipt and undo
+   *  state included. Lives HERE rather than in the view so leaving the view
+   *  and coming back does not cost the Undo: the receipt toast expires in
+   *  seconds, and a run someone can no longer take back because they glanced
+   *  at a note is a broken promise. Session-only; the run-history UI is the
+   *  durable version of this, later. */
+  workflowRunRecord: WorkflowRunRecord | null
   themeId: string
   themeFamily: ThemeFamily
   themeMode: ThemeMode
@@ -2511,6 +2561,9 @@ interface Store {
    *  row, the `view.workflows` command, and the leader binding, so the canvas
    *  has no way in at all. */
   workflowsEnabled: boolean
+  /** Built-in recipes hidden from the New-workflow gallery, by preset id.
+   *  Persisted (portable). Hiding is per taste, not per vault. */
+  hiddenWorkflowPresets: string[]
   /** Full paths of collapsed nodes in the nested-tag tree. Persisted. */
   collapsedTagNodes: string[]
   /** Auto-show the calendar panel when the active note is a daily or
@@ -2834,9 +2887,19 @@ interface Store {
   /** Turn the whole Workflows feature on or off. Switching it off also closes
    *  any pane still showing the canvas. */
   setWorkflowsEnabled: (on: boolean) => void
+  hideWorkflowPreset: (id: string) => void
+  restoreWorkflowPreset: (id: string) => void
+  /** Wholesale replacement, for Settings' Hide all / Restore all. The preset
+   *  ids come from the caller so the store never imports the preset bodies
+   *  (they belong to lazy chunks, not the boot path). */
+  setHiddenWorkflowPresets: (ids: readonly string[]) => void
   setTabsEnabled: (on: boolean) => void
   setWrapTabs: (on: boolean) => void
   setSettingsOpen: (open: boolean) => void
+  setWorkflowTutorialStep: (step: number | null) => void
+  setWorkflowRunRecord: (
+    next: WorkflowRunRecord | null | ((prev: WorkflowRunRecord | null) => WorkflowRunRecord | null)
+  ) => void
   setTheme: (next: { id: string; family: ThemeFamily; mode: ThemeMode }) => void
   setEditorFontSize: (px: number) => void
   setEditorLineHeight: (mult: number) => void
@@ -4039,6 +4102,8 @@ export const useStore = create<Store>((set, get) => {
   tabsEnabled: loadPrefs().tabsEnabled,
   wrapTabs: loadPrefs().wrapTabs,
   settingsOpen: false,
+  workflowTutorialStep: null,
+  workflowRunRecord: null,
   themeId: loadPrefs().themeId,
   themeFamily: loadPrefs().themeFamily,
   themeMode: loadPrefs().themeMode,
@@ -4084,6 +4149,7 @@ export const useStore = create<Store>((set, get) => {
   tagsCollapsed: loadPrefs().tagsCollapsed,
   nestedTags: loadPrefs().nestedTags,
   workflowsEnabled: loadPrefs().workflowsEnabled,
+  hiddenWorkflowPresets: loadPrefs().hiddenWorkflowPresets,
   collapsedTagNodes: loadPrefs().collapsedTagNodes,
   autoCalendarPanel: loadPrefs().autoCalendarPanel,
   calendarWeekStart: loadPrefs().calendarWeekStart,
@@ -6284,6 +6350,22 @@ export const useStore = create<Store>((set, get) => {
     savePrefs(collectPrefs(get()))
     if (!on) closeWorkflowsTabsEverywhere()
   },
+  hideWorkflowPreset: (id) => {
+    set((s) => ({
+      hiddenWorkflowPresets: normalizeHiddenWorkflowPresets([...s.hiddenWorkflowPresets, id])
+    }))
+    savePrefs(collectPrefs(get()))
+  },
+  restoreWorkflowPreset: (id) => {
+    set((s) => ({
+      hiddenWorkflowPresets: s.hiddenWorkflowPresets.filter((hidden) => hidden !== id)
+    }))
+    savePrefs(collectPrefs(get()))
+  },
+  setHiddenWorkflowPresets: (ids) => {
+    set({ hiddenWorkflowPresets: normalizeHiddenWorkflowPresets([...ids]) })
+    savePrefs(collectPrefs(get()))
+  },
   setTabsEnabled: (on) => {
     set((s) => {
       if (on) return { tabsEnabled: true }
@@ -6328,6 +6410,11 @@ export const useStore = create<Store>((set, get) => {
     savePrefs(collectPrefs(get()))
   },
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setWorkflowTutorialStep: (step) => set({ workflowTutorialStep: step }),
+  setWorkflowRunRecord: (next) =>
+    set((s) => ({
+      workflowRunRecord: typeof next === 'function' ? next(s.workflowRunRecord) : next
+    })),
   setTheme: ({ id, family, mode }) => {
     set({ themeId: id, themeFamily: family, themeMode: mode })
     savePrefs(collectPrefs(get()))

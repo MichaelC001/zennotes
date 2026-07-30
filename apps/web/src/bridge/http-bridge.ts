@@ -994,6 +994,12 @@ function listWorkflowRuns(): Promise<WorkflowRunSummary[]> {
   return Promise.resolve([])
 }
 
+// Nothing can have recorded a run here (see above), so there is never anything
+// to delete: zero, not a rejection, for the same reason the list is empty.
+function deleteWorkflowRuns(_workflowId: string): Promise<number> {
+  return Promise.resolve(0)
+}
+
 // Custom templates require local-filesystem CRUD, which the web app does not
 // have (supportsCustomTemplates is false). Built-in templates still work since
 // they are renderer constants. List is empty; mutations are rejected.
@@ -1555,6 +1561,7 @@ export const httpBridge: ZenBridge = {
   applyWorkflow,
   undoWorkflowRun,
   listWorkflowRuns,
+  deleteWorkflowRuns,
   listTemplates,
   readTemplate,
   writeTemplate,

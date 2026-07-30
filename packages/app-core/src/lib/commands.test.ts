@@ -173,6 +173,24 @@ describe('Workflow run entries', () => {
     expect(buildCommands().some((c) => c.id.startsWith('workflow.run.'))).toBe(false)
   })
 
+  it('offers the tutorial even before the feature is enabled', async () => {
+    ;(window.zen as unknown as Record<string, unknown>).applyWorkflow = vi.fn()
+    const { buildCommands, useStore } = await loadCommands()
+    // Workflows OFF: starting the tutorial is how someone opts in, so the
+    // palette must surface it exactly like the button in Settings does.
+    useStore.setState({ workflowsEnabled: false, workspaceMode: 'local' })
+    expect(buildCommands().find((c) => c.id === 'workflow.tutorial')?.title).toBe(
+      'Start Workflows Tutorial'
+    )
+  })
+
+  it('offers no tutorial where workflows cannot run at all', async () => {
+    // The stub bridge has no applyWorkflow, which is the web app's shape.
+    const { buildCommands, useStore } = await loadCommands()
+    useStore.setState({ workflowsEnabled: true, workspaceMode: 'local' })
+    expect(buildCommands().some((c) => c.id === 'workflow.tutorial')).toBe(false)
+  })
+
   it('a captured Run command dies with the feature switch', async () => {
     ;(window.zen as unknown as Record<string, unknown>).applyWorkflow = vi.fn()
     const { buildCommands, useStore } = await loadCommands()

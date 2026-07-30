@@ -30,6 +30,7 @@ export const IPC = {
   VAULT_APPLY_WORKFLOW: 'vault:apply-workflow',
   VAULT_UNDO_WORKFLOW_RUN: 'vault:undo-workflow-run',
   VAULT_LIST_WORKFLOW_RUNS: 'vault:list-workflow-runs',
+  VAULT_DELETE_WORKFLOW_RUNS: 'vault:delete-workflow-runs',
   VAULT_WRITE_WORKFLOW: 'vault:write-workflow',
   VAULT_DELETE_WORKFLOW: 'vault:delete-workflow',
   VAULT_EXPORT_WORKFLOW: 'vault:export-workflow',

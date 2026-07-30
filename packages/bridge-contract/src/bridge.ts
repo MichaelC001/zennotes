@@ -183,6 +183,9 @@ export interface ZenBridge {
   applyWorkflow(input: ApplyWorkflowInput): Promise<WorkflowRunReceipt>
   undoWorkflowRun(runId: string): Promise<WorkflowUndoResult>
   listWorkflowRuns(): Promise<WorkflowRunSummary[]>
+  /** Remove every run ledger a workflow left behind; resolves to how many.
+   *  Exists for the guided tutorial's leave-no-trace cleanup. */
+  deleteWorkflowRuns(workflowId: string): Promise<number>
   listTemplates(): Promise<CustomTemplateFile[]>
   readTemplate(sourcePath: string): Promise<string>
   writeTemplate(input: WriteTemplateInput): Promise<CustomTemplateFile>

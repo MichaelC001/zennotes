@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   PRESET_CATEGORIES,
   WORKFLOW_PRESETS,
+  hiddenPresetsInOrder,
   presetById,
-  presetsByCategory
+  presetsByCategory,
+  visiblePresetsByCategory
 } from './presets'
 import type { PresetCategory, WorkflowPreset } from './presets'
 import { parseWorkflow } from './parse'
@@ -329,5 +331,45 @@ describe('presetById', () => {
   it('returns null for an id that is not in the gallery', () => {
     expect(presetById('nope')).toBeNull()
     expect(presetById('')).toBeNull()
+  })
+})
+
+describe('hiding presets from the gallery', () => {
+  it('a hidden preset leaves its category and appears in the hidden list', () => {
+    const first = WORKFLOW_PRESETS[0]
+    const visible = visiblePresetsByCategory(first.category, [first.id])
+    expect(visible.map((preset) => preset.id)).not.toContain(first.id)
+    expect(visible).toHaveLength(presetsByCategory(first.category).length - 1)
+    expect(hiddenPresetsInOrder([first.id]).map((preset) => preset.id)).toEqual([first.id])
+  })
+
+  it('hiding everything empties every category', () => {
+    const all = WORKFLOW_PRESETS.map((preset) => preset.id)
+    for (const category of PRESET_CATEGORIES) {
+      expect(visiblePresetsByCategory(category, all)).toEqual([])
+    }
+    expect(hiddenPresetsInOrder(all)).toHaveLength(WORKFLOW_PRESETS.length)
+  })
+
+  it('unknown ids are ignored, not pruned and not shown', () => {
+    for (const category of PRESET_CATEGORIES) {
+      expect(visiblePresetsByCategory(category, ['not-a-preset'])).toEqual(
+        presetsByCategory(category)
+      )
+    }
+    expect(hiddenPresetsInOrder(['not-a-preset'])).toEqual([])
+  })
+
+  it('the hidden list reads in gallery order, not hide order', () => {
+    // Hide the last preset first and the first preset second: the group must
+    // come back in canonical order regardless.
+    const first = WORKFLOW_PRESETS[0]
+    const last = WORKFLOW_PRESETS[WORKFLOW_PRESETS.length - 1]
+    const ordered = hiddenPresetsInOrder([last.id, first.id]).map((preset) => preset.id)
+    expect(ordered).toEqual(
+      PRESET_CATEGORIES.flatMap((category) => presetsByCategory(category))
+        .filter((preset) => preset.id === first.id || preset.id === last.id)
+        .map((preset) => preset.id)
+    )
   })
 })

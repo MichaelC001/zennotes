@@ -1763,11 +1763,29 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
   // run, and a row that only answers with an error is worse than no row.
   {
     const state = getState()
-    const runnableHere =
-      state.workflowsEnabled &&
+    // Where a workflow could run at all: the desktop app, on a local vault.
+    // Deliberately NOT gated on the feature switch, because the tutorial below
+    // must be findable BEFORE someone has opted in: starting it IS the opt-in,
+    // exactly like the button in Settings.
+    const workflowsPossibleHere =
       state.workspaceMode !== 'remote' &&
       window.zen.getAppInfo().runtime === 'desktop' &&
       typeof window.zen.applyWorkflow === 'function'
+    if (workflowsPossibleHere) {
+      cmds.push({
+        id: 'workflow.tutorial',
+        title: 'Start Workflows Tutorial',
+        category: 'Workflow',
+        keywords: 'workflow tutorial learn guide walkthrough practice lesson automation onboarding',
+        when: () => getState().workspaceMode !== 'remote',
+        run: () => {
+          // Lazy on purpose: the tutorial's chapters and seeds belong to the
+          // lazy layer, and a palette command must not drag them into boot.
+          void import('./workflow-tutorial-flow').then((mod) => mod.startWorkflowTutorial())
+        }
+      })
+    }
+    const runnableHere = state.workflowsEnabled && workflowsPossibleHere
     if (runnableHere) {
       // `runnableHere` gates what this build of the list contains; the `when`
       // guard gates every LATER use of a captured command object. The vim ex

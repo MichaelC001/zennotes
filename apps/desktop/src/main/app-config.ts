@@ -331,6 +331,11 @@ const LIST_FIELDS: Partial<Record<PortablePrefKey, ListFieldMap>> = {
     section: 'view',
     tomlKey: 'kanban_statuses',
     comment: 'custom-status Kanban columns, in order — e.g. ["backlog", "in_progress", "review", "done"]'
+  },
+  hiddenWorkflowPresets: {
+    section: 'view',
+    tomlKey: 'hidden_workflow_presets',
+    comment: 'built-in workflow recipes hidden from the gallery, by id — e.g. ["reading-log"]'
   }
 }
 
