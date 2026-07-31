@@ -11,9 +11,16 @@
 // React. Nothing in this file writes, and nothing in it touches the bridge.
 
 import type { NoteTemplate } from '@bridge-contract/templates'
-import type { WorkflowRunReceipt, WorkflowUndoResult } from '@bridge-contract/workflows'
+import type {
+  WorkflowRunReceipt,
+  WorkflowRunSummary,
+  WorkflowUndoResult
+} from '@bridge-contract/workflows'
 import { slugifyTemplateName } from '@shared/template-files'
 import type { Diagnostic, Workflow, WorkflowOp } from '@shared/workflows/types'
+// Type only, so nothing here imports the store at runtime: this file stays the
+// pure half of running a workflow.
+import type { WorkflowRunRecord } from '../store'
 import { renderTemplate } from './template-render'
 
 /* -------------------------------------------------------------------------- */
@@ -439,4 +446,123 @@ export function undoneHeadline(result: WorkflowUndoResult): string {
   return result.restored === 1
     ? 'Undone. 1 file restored to how it was.'
     : `Undone. ${result.restored} files restored to how they were.`
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Undo, decided at the moment it is pressed                                 */
+/* -------------------------------------------------------------------------- */
+
+/** What an Undo offered on `receipt` may still do. */
+export type UndoOffer = 'ok' | 'superseded' | 'already-undone'
+
+/**
+ * May this receipt's Undo still act?
+ *
+ * Asked when the button is pressed rather than when the offer was made. The
+ * receipt toast lives for twelve seconds and the card in the view lives until
+ * it is dismissed, and a second run of the same workflow can land inside
+ * either: undoing the older receipt then restores bytes from before a run the
+ * newer one has already rewritten, which un-does work nobody asked to lose.
+ *
+ * The store keeps exactly one record per vault, so a record naming the same
+ * workflow with a different run id IS the newer run. A record for a different
+ * workflow says nothing about this one, and no record at all means the offer
+ * was dismissed rather than superseded.
+ */
+export function undoOfferFor(
+  record: WorkflowRunRecord | null,
+  receipt: WorkflowRunReceipt
+): UndoOffer {
+  if (record === null) return 'ok'
+  if (record.receipt.runId === receipt.runId) {
+    return record.undone === null ? 'ok' : 'already-undone'
+  }
+  if (record.workflowId === receipt.workflowId) return 'superseded'
+  return 'ok'
+}
+
+export function supersededUndoMessage(): string {
+  return 'A newer run of this workflow replaced that one, so it can no longer be undone.'
+}
+
+/* -------------------------------------------------------------------------- */
+/*  What an undo overwrote                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** Enough paths to recognize what was lost, in a surface that holds one line. */
+const MAX_DRIFT_PATHS = 3
+
+/**
+ * The files an undo overwrote that had been edited SINCE the run.
+ *
+ * Optional in the contract and read defensively here: a renderer can be talking
+ * to a bridge that predates the field (an older desktop build, a server), and
+ * an undo that cannot report drift is not an undo that failed. A missing field
+ * reads as "nothing to declare" rather than as an error.
+ */
+export function driftedPathsOf(result: WorkflowUndoResult): string[] {
+  const raw: unknown = result.driftedPaths
+  if (!Array.isArray(raw)) return []
+  return raw.filter((path): path is string => typeof path === 'string' && path.length > 0)
+}
+
+/**
+ * The sentence that names them, or null when there is nothing to name.
+ *
+ * Kept apart from `undoneHeadline` on purpose: "restored to how it was" is the
+ * promise the feature makes, and this is the one case where keeping it costs
+ * the user something they did afterwards. Somebody who reads this needs to
+ * reach for their editor's own undo, so the files have to be named.
+ */
+export function driftedPathsNote(result: WorkflowUndoResult): string | null {
+  const paths = driftedPathsOf(result)
+  if (paths.length === 0) return null
+  return `${plural(paths.length, 'file', 'files')} you edited after the run ${
+    paths.length === 1 ? 'was' : 'were'
+  } overwritten: ${formatPathList(paths, MAX_DRIFT_PATHS)}.`
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Runs the app never finished                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How old an interrupted run may be and still be worth interrupting someone
+ * about on vault open. Beyond this the vault has been lived in since, and an
+ * Undo offered over a week of later edits is a worse outcome than the run.
+ */
+export const INTERRUPTED_RUN_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The interrupted run worth offering an undo for on vault open, if any.
+ *
+ * Only the MOST RECENT run is considered: a run that was interrupted and then
+ * followed by other runs is history, and offering to roll it back under
+ * whatever came after would restore bytes from before work that stood. The
+ * `interrupted` flag is optional in the contract for the same reason
+ * `driftedPathsOf` reads defensively, so a bridge that never sets one simply
+ * never raises this.
+ */
+export function interruptedRunToOffer(
+  runs: readonly WorkflowRunSummary[],
+  now: number,
+  maxAgeMs: number = INTERRUPTED_RUN_MAX_AGE_MS
+): WorkflowRunSummary | null {
+  let newest: WorkflowRunSummary | null = null
+  for (const run of runs) {
+    if (newest === null || run.startedAt > newest.startedAt) newest = run
+  }
+  if (newest === null) return null
+  if (newest.interrupted !== true) return null
+  if (!newest.undoable || newest.paths.length === 0) return null
+  if (now - newest.startedAt > maxAgeMs) return null
+  return newest
+}
+
+export function interruptedRunHeadline(run: WorkflowRunSummary): string {
+  return `"${run.workflowId}" was interrupted before it finished. ${plural(
+    run.paths.length,
+    'note',
+    'notes'
+  )} on disk still carry it.`
 }

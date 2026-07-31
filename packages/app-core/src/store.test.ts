@@ -1574,3 +1574,157 @@ describe('hidden workflow presets', () => {
     expect(second.useStore.getState().hiddenWorkflowPresets).toEqual(['reading-log'])
   })
 })
+
+describe('Workflows feature switch and the reopen stack', () => {
+  it('does not let Reopen Closed Tab bring the canvas back after the switch is off', async () => {
+    installZen()
+    const { useStore } = await loadStore()
+    const paneId = useStore.getState().activePaneId
+    useStore.setState({ notes: [makeNote('A', 'inbox/A.md')] })
+    useStore.getState().setWorkflowsEnabled(true)
+
+    await useStore.getState().openNoteInPane(paneId, 'inbox/A.md')
+    await useStore.getState().openWorkflowsView()
+    expect(findLeaf(useStore.getState().paneLayout, paneId)?.tabs).toContain(WORKFLOWS_TAB_PATH)
+
+    useStore.getState().setWorkflowsEnabled(false)
+    await flushAsyncWork()
+    // Closing pushed the tab onto the reopen stack; disabling the feature has
+    // to take it back off, or Cmd+Shift+T walks straight past the switch.
+    expect(
+      useStore.getState().closedTabStack.some((entry) => entry.path === WORKFLOWS_TAB_PATH)
+    ).toBe(false)
+
+    await useStore.getState().reopenLastClosedTab()
+    expect(findLeaf(useStore.getState().paneLayout, paneId)?.tabs ?? []).not.toContain(
+      WORKFLOWS_TAB_PATH
+    )
+  })
+
+  it('refuses the virtual tab at openNoteInPane, whichever caller asks', async () => {
+    installZen()
+    const { useStore } = await loadStore()
+    const paneId = useStore.getState().activePaneId
+    useStore.getState().setWorkflowsEnabled(false)
+
+    // The reopen path calls this directly rather than going through
+    // openWorkflowsView, so the gate cannot live only there.
+    await useStore.getState().openNoteInPane(paneId, WORKFLOWS_TAB_PATH)
+    expect(findLeaf(useStore.getState().paneLayout, paneId)?.tabs ?? []).not.toContain(
+      WORKFLOWS_TAB_PATH
+    )
+
+    await useStore.getState().focusTabInPane(paneId, WORKFLOWS_TAB_PATH)
+    expect(findLeaf(useStore.getState().paneLayout, paneId)?.tabs ?? []).not.toContain(
+      WORKFLOWS_TAB_PATH
+    )
+  })
+})
+
+describe('workflow run record across vaults', () => {
+  const runRecord = {
+    workflowId: 'reading-log',
+    receipt: {
+      runId: 'run-1',
+      workflowId: 'reading-log',
+      startedAt: 0,
+      applied: 2,
+      paths: ['inbox/A.md'],
+      irreversible: 0
+    },
+    undone: null,
+    undoError: null
+  }
+
+  it('drops the receipt and the tutorial when another vault is opened', async () => {
+    installZen({
+      openLocalVault: vi.fn().mockResolvedValue({ root: '/Users/test/Work', name: 'Work' }),
+      listLocalVaults: vi.fn().mockResolvedValue([])
+    })
+    const { useStore } = await loadStore()
+    useStore.setState({
+      vault: { root: '/Users/test/Notes', name: 'Notes' },
+      workflowRunRecord: runRecord,
+      workflowTutorialStep: 2
+    })
+
+    await useStore.getState().openLocalVault('/Users/test/Work')
+
+    // A run id means nothing to another vault's journal: offering the Undo
+    // would fail with "Unknown workflow run" on a same-named preset.
+    expect(useStore.getState().workflowRunRecord).toBeNull()
+    expect(useStore.getState().workflowTutorialStep).toBeNull()
+  })
+
+  it('drops them on closing a vault too', async () => {
+    installZen({
+      closeVault: vi.fn().mockResolvedValue(null),
+      listLocalVaults: vi.fn().mockResolvedValue([])
+    })
+    const { useStore } = await loadStore()
+    useStore.setState({
+      vault: { root: '/Users/test/Notes', name: 'Notes' },
+      workspaceMode: 'local',
+      workflowRunRecord: runRecord,
+      workflowTutorialStep: 1
+    })
+
+    await useStore.getState().closeVault()
+
+    expect(useStore.getState().workflowRunRecord).toBeNull()
+    expect(useStore.getState().workflowTutorialStep).toBeNull()
+  })
+})
+
+describe('vault watcher subscription', () => {
+  it('drops the previous listener when init runs again after a reconnect', async () => {
+    const offs: Array<() => void> = []
+    const onVaultChange = vi.fn(() => {
+      const off = vi.fn()
+      offs.push(off)
+      return off
+    })
+    installZen({
+      onVaultChange,
+      getAppInfo: vi.fn().mockReturnValue({ runtime: 'desktop' }),
+      getServerCapabilities: vi.fn().mockResolvedValue({}),
+      getCurrentVault: vi.fn().mockResolvedValue({ root: '/Users/test/Notes', name: 'Notes' }),
+      retryWorkspaceBoot: vi.fn().mockResolvedValue({ root: '/Users/test/Notes', name: 'Notes' })
+    })
+
+    const { useStore } = await loadStore()
+    await useStore.getState().init()
+    expect(onVaultChange).toHaveBeenCalledTimes(1)
+
+    // The reconnect path re-enters init on purpose; every re-entry that
+    // subscribed without disposing left one duplicate IPC listener behind.
+    await useStore.getState().retryWorkspaceBoot()
+    expect(onVaultChange).toHaveBeenCalledTimes(2)
+    expect(offs[0]).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('flushDirtyNotes drains queued task writes (#503)', () => {
+  it('waits for an in-flight task write instead of leaving it behind on quit', async () => {
+    let disk = '- [ ] alpha'
+    const readNote = vi.fn(async () => makeNote(disk))
+    const writeNote = vi.fn(async (_path: string, body: string) => {
+      await new Promise((resolve) => window.setTimeout(resolve, 10))
+      disk = body
+    })
+    installZen({ readNote, writeNote })
+    const { useStore } = await loadStore()
+
+    // Not awaited: this is the Kanban move still in flight when the window
+    // closes. `flushDirtyNotes` is the only quit-time signal, and the note is
+    // clean, so without the drain the write is simply dropped.
+    void useStore.getState().applyTaskMutation(makeTask('alpha', 0), {
+      kind: 'set-checked',
+      checked: true
+    })
+
+    await useStore.getState().flushDirtyNotes()
+
+    expect(disk).toBe('- [x] alpha')
+  })
+})

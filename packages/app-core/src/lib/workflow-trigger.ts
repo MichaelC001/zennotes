@@ -17,7 +17,7 @@ import { planWorkflow } from '@shared/workflows/engine'
 import { validateWorkflow } from '@shared/workflows/validate'
 import { isRunnable } from '@shared/workflows/types'
 import type { Diagnostic, Workflow, WorkflowOp } from '@shared/workflows/types'
-import type { WorkflowRunReceipt } from '@bridge-contract/workflows'
+import type { WorkflowRunReceipt, WorkflowRunSummary } from '@bridge-contract/workflows'
 import { useStore } from '../store'
 import { useToastStore } from './toast'
 import { confirmApp } from './confirm-requests'
@@ -25,6 +25,9 @@ import { createVaultReader } from './workflow-vault-reader'
 import { IRREVERSIBLE_KINDS, summarizeOps } from './workflow-op-summary'
 import {
   collectRunSideEffects,
+  driftedPathsNote,
+  interruptedRunHeadline,
+  interruptedRunToOffer,
   opsExcludingPaths,
   planWritePaths,
   receiptHeadline,
@@ -32,9 +35,11 @@ import {
   runConfirmDescription,
   runConfirmLabel,
   runConfirmTitle,
+  supersededUndoMessage,
   undoCollisionDescription,
   undoCollisionTitle,
   undoLabel,
+  undoOfferFor,
   undoneHeadline,
   unknownTemplateDiagnostics,
   unsavedCollisionDescription,
@@ -86,10 +91,21 @@ function countErrors(groups: readonly Diagnostic[][]): number {
  * The same collision honesty as the view's undo: undo writes bytes to disk,
  * so a note open with unsaved edits would have the restored file overwritten
  * by its next save, and that is worth a question rather than a surprise.
+ *
+ * It also answers to the same store record the view's card does, which is what
+ * stops a toast left over from an older run rolling back the newer one that
+ * replaced it. Both checks are made HERE rather than when the toast was built:
+ * the run that supersedes this one lands while the offer is on screen.
  */
 async function undoFromToast(receipt: WorkflowRunReceipt): Promise<void> {
   const state = useStore.getState()
   if (typeof window.zen.undoWorkflowRun !== 'function') return
+  const offer = undoOfferFor(state.workflowRunRecord, receipt)
+  if (offer === 'already-undone') return
+  if (offer === 'superseded') {
+    toast(supersededUndoMessage(), 'error')
+    return
+  }
   const dirty = unsavedCollisions(receipt.paths, state.noteDirty)
   if (dirty.length > 0) {
     const ok = await confirmApp({
@@ -103,11 +119,77 @@ async function undoFromToast(receipt: WorkflowRunReceipt): Promise<void> {
   }
   try {
     const result = await window.zen.undoWorkflowRun(receipt.runId)
+    // The record follows the undo wherever it was pressed, so the view's card
+    // stops offering an Undo this toast already spent.
+    useStore
+      .getState()
+      .setWorkflowRunRecord((latest) =>
+        latest && latest.receipt.runId === receipt.runId
+          ? { ...latest, undone: result, undoError: null }
+          : latest
+      )
     toast(undoneHeadline(result), 'success')
+    // Its own toast, not a clause on the success line: this is the one thing an
+    // undo takes away rather than gives back, and it stays until dismissed.
+    const drifted = driftedPathsNote(result)
+    if (drifted) toast(drifted, 'error')
     await state.refreshNotes()
   } catch (err) {
-    toast(errorText(err), 'error')
+    const message = errorText(err)
+    useStore
+      .getState()
+      .setWorkflowRunRecord((latest) =>
+        latest && latest.receipt.runId === receipt.runId
+          ? { ...latest, undoError: message }
+          : latest
+      )
+    toast(message, 'error')
   }
+}
+
+/**
+ * Offer to undo a run the app died in the middle of, once per vault open.
+ *
+ * An interrupted run is the one case where a receipt never reached anyone: the
+ * process went away between the first write and the toast, so the vault carries
+ * changes nobody was told about. The journal outlived the process, so the offer
+ * can be made on the way back in. Silent whenever there is nothing to say,
+ * which is almost always.
+ */
+export async function announceInterruptedWorkflowRun(): Promise<void> {
+  const state = useStore.getState()
+  if (!state.workflowsEnabled) return
+  if (typeof window.zen.listWorkflowRuns !== 'function') return
+  if (typeof window.zen.undoWorkflowRun !== 'function') return
+  let runs: WorkflowRunSummary[]
+  try {
+    runs = await window.zen.listWorkflowRuns()
+  } catch {
+    // A run history that cannot be read is not worth a message of its own; the
+    // vault opened fine and nothing here is something the user asked for.
+    return
+  }
+  const interrupted = interruptedRunToOffer(runs, Date.now())
+  if (interrupted === null) return
+  // Shaped as a receipt so this offer walks the same undo path every other one
+  // in this file does. `irreversible` is 0 rather than unknown: the summary
+  // does not carry it, and nothing on the undo path reads it, so the honest
+  // value is the one that claims nothing.
+  const receipt: WorkflowRunReceipt = {
+    runId: interrupted.runId,
+    workflowId: interrupted.workflowId,
+    startedAt: interrupted.startedAt,
+    applied: interrupted.applied,
+    paths: interrupted.paths,
+    irreversible: 0
+  }
+  // `error`, so it stays until it is dismissed (see `addToast`): this is the
+  // one receipt whose owner was never shown it, and a timer would take the
+  // offer away from someone who has not finished reading what happened.
+  toast(interruptedRunHeadline(interrupted), 'error', {
+    label: undoLabel(receipt),
+    onClick: () => void undoFromToast(receipt)
+  })
 }
 
 /**
@@ -269,6 +351,16 @@ async function runWorkflow(id: string): Promise<void> {
     const receipt = await window.zen.applyWorkflow({
       workflowId: workflow.id,
       ops: withTemplates.ops
+    })
+    // The same store record the view's Undo card reads, written from here too.
+    // A palette run and a canvas run are one event with two doorways, and two
+    // records for one workflow is exactly how an older Undo ends up reverting a
+    // newer run: the newest write wins, on every surface at once.
+    useStore.getState().setWorkflowRunRecord({
+      workflowId: workflow.id,
+      receipt,
+      undone: null,
+      undoError: null
     })
     if (receipt.rolledBack === undefined) {
       const effects = collectRunSideEffects(withTemplates.ops)

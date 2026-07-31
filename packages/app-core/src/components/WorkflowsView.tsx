@@ -127,6 +127,7 @@ import {
 import {
   canUndoReceipt,
   collectRunSideEffects,
+  driftedPathsNote,
   irreversibleNote,
   opsExcludingPaths,
   planWritePaths,
@@ -754,6 +755,18 @@ function writesBackToItsOwnFile(item: LoadedWorkflow): boolean {
 const GRAPH_DEBOUNCE_MS = 150
 
 /**
+ * How long the VAULT has to settle before the plan is recomputed for it.
+ *
+ * Planning reads note bodies over IPC, and the notes slice is rebuilt by every
+ * external change, every save and every refresh anywhere in the app, so a view
+ * left open in a split pane was issuing a burst of reads for edits happening
+ * somewhere else entirely. The workflow's own text is exempt (see the plan
+ * effect): watching the counts move as you type is the feature, and only a
+ * vault moving underneath a view nobody is touching waits.
+ */
+const PLAN_DEBOUNCE_MS = 350
+
+/**
  * How long dragging has to settle before the moved nodes are written.
  *
  * Nudging three boxes into place is one thought, so it is one write. Short
@@ -1245,6 +1258,11 @@ export function WorkflowsView(): JSX.Element {
   // already up to date rather than the state of the previous render.
   const draggedRef = useRef<{ id: string; map: LayoutOverrides } | null>(null)
 
+  // This view's own subtree. Every lookup that is not already anchored to a
+  // more specific ref goes through it: the view can be open in TWO panes, and a
+  // `document.querySelector` then answers with whichever copy React mounted
+  // first, which is how a keystroke in one pane moves the other one.
+  const rootRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   // The canvas column, so a deletion can hand the keyboard back to it instead
@@ -1539,6 +1557,22 @@ export function WorkflowsView(): JSX.Element {
     [notes, selectedPath]
   )
 
+  // Bumped when the window comes back to the front. A hidden window plans
+  // nothing (see the plan effect), so this is what puts the plan back.
+  const [revealToken, setRevealToken] = useState(0)
+  useEffect(() => {
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') setRevealToken((n) => n + 1)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
+
+  // What the last plan was computed for. Compared rather than counted, so the
+  // effect can tell "the workflow on screen changed" (plan now) from "the
+  // vault moved underneath it" (plan once it settles).
+  const plannedForRef = useRef<string | null>(null)
+
   // Plan the workflow on screen. `planWorkflow` never writes, so this runs on
   // selection, again whenever the vault changes underneath it, and again on
   // every debounced keystroke while editing: the counts on the wires are only
@@ -1548,38 +1582,58 @@ export function WorkflowsView(): JSX.Element {
       setPlanned(null)
       return
     }
+    // Nothing is planned for a window nobody is looking at. Sync, an external
+    // editor and the app's own watcher all keep rewriting the notes slice while
+    // the app sits in the background, and each rewrite reached here as a fresh
+    // burst of note-body reads for counts that were never on screen. The reveal
+    // token above is what plans them when there is someone to read them.
+    if (document.visibilityState === 'hidden') return
+
     let cancelled = false
     const id = active.workflow.id
-    const reader = createVaultReader({
-      notes,
-      readBody: async (path) => (await window.zen.readNote(path)).body,
-      current: () => activeNote
-      // No `selection`: the app has no multi-note selection, and the engine
-      // reports "not available in this context" rather than planning over an
-      // empty set that looks like a real answer.
-    })
-    setPlanning(true)
-    planWorkflow(active.workflow, {
-      reader,
-      now: Date.now(),
-      resolve: (other) => byId.get(other) ?? null,
-      systemFolderDirs: useStore.getState().vaultSettings.systemFolderPaths
-    })
-      .then((result) => {
-        if (!cancelled) setPlanned({ id, plan: result })
+    // The workflow's own text is what the author is watching change; the notes
+    // slice is the vault moving on its own. Only the first is worth the round
+    // trip immediately, and `previewText` has already coalesced the typing that
+    // produces it.
+    const planKey = `${id}\x00${planToken}\x00${revealToken}\x00${active.file.raw}`
+    const immediate = plannedForRef.current !== planKey
+    plannedForRef.current = planKey
+
+    const run = (): void => {
+      const reader = createVaultReader({
+        notes,
+        readBody: async (path) => (await window.zen.readNote(path)).body,
+        current: () => activeNote
+        // No `selection`: the app has no multi-note selection, and the engine
+        // reports "not available in this context" rather than planning over an
+        // empty set that looks like a real answer.
       })
-      .catch(() => {
-        // A malformed file must never blank the canvas; the graph below still
-        // renders from the parse, just without counts.
-        if (!cancelled) setPlanned(null)
+      setPlanning(true)
+      planWorkflow(active.workflow, {
+        reader,
+        now: Date.now(),
+        resolve: (other) => byId.get(other) ?? null,
+        systemFolderDirs: useStore.getState().vaultSettings.systemFolderPaths
       })
-      .finally(() => {
-        if (!cancelled) setPlanning(false)
-      })
+        .then((result) => {
+          if (!cancelled) setPlanned({ id, plan: result })
+        })
+        .catch(() => {
+          // A malformed file must never blank the canvas; the graph below still
+          // renders from the parse, just without counts.
+          if (!cancelled) setPlanned(null)
+        })
+        .finally(() => {
+          if (!cancelled) setPlanning(false)
+        })
+    }
+
+    const timer = setTimeout(run, immediate ? 0 : PLAN_DEBOUNCE_MS)
     return () => {
       cancelled = true
+      clearTimeout(timer)
     }
-  }, [active, notes, activeNote, byId, planToken])
+  }, [active, notes, activeNote, byId, planToken, revealToken])
 
   const plan = active && planned?.id === active.workflow.id ? planned.plan : null
 
@@ -2367,6 +2421,18 @@ export function WorkflowsView(): JSX.Element {
       void flushLayoutWrite()
     }
   }, [flushLayoutWrite])
+
+  // The half-typed `g` of a `g g` outlives the view otherwise: the timer that
+  // retires it is the one timer in this file with nothing cancelling it, so
+  // closing the tab mid-sequence left a callback holding this component's refs
+  // for half a second. Everything else here is cleaned up on unmount; so is
+  // this.
+  useEffect(() => {
+    return () => {
+      if (gTimer.current !== undefined) clearTimeout(gTimer.current)
+      gPending.current = 0
+    }
+  }, [])
 
   const openCursor = useCallback(() => {
     const item = list[cursor]
@@ -3559,6 +3625,12 @@ export function WorkflowsView(): JSX.Element {
           ? { ...latest, undone: result, undoError: null }
           : latest
       )
+      // The card below states what the undo restored; this is the one thing it
+      // took away. A toast rather than a line on the card, because it is news
+      // about files that may not be the ones on screen, and it is what sends
+      // someone to their editor's own undo.
+      const drifted = driftedPathsNote(result)
+      if (drifted) addToast(drifted, 'error')
       await refreshNotes()
       setPlanToken((n) => n + 1)
     } catch (err) {
@@ -3571,7 +3643,7 @@ export function WorkflowsView(): JSX.Element {
     } finally {
       setUndoing(false)
     }
-  }, [canUndoRuns, record, refreshNotes, undoing])
+  }, [addToast, canUndoRuns, record, refreshNotes, undoing])
 
   /* ---------------------------------------------------------------------- */
   /*  The list pane                                                         */
@@ -3795,8 +3867,8 @@ export function WorkflowsView(): JSX.Element {
    */
   const focusInspector = useCallback((): void => {
     requestAnimationFrame(() => {
-      const panel = document.querySelector<HTMLElement>('[data-workflow-inspector]')
-      if (panel === null) return
+      const panel = rootRef.current?.querySelector<HTMLElement>('[data-workflow-inspector]')
+      if (panel == null) return
       const field = panel.querySelector<HTMLElement>(
         'input:not([disabled]), textarea:not([disabled]), select:not([disabled])'
       )
@@ -3907,8 +3979,8 @@ export function WorkflowsView(): JSX.Element {
   const openRowMenuAtCursor = useCallback((): void => {
     const target =
       listRef.current?.querySelector<HTMLElement>(`[data-workflow-row="${cursor}"]`) ??
-      document.querySelector<HTMLElement>('[data-workflow-list-pane]')
-    if (target === null) return
+      rootRef.current?.querySelector<HTMLElement>('[data-workflow-list-pane]')
+    if (target == null) return
     dispatchKeyboardContextMenu(target)
   }, [cursor])
 
@@ -4443,7 +4515,10 @@ export function WorkflowsView(): JSX.Element {
 
   if (items === null) {
     return (
-      <div className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900">
+      <div
+        ref={rootRef}
+        className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900"
+      >
         <WorkflowsHeader
           count={0}
           vimMode={vimMode}
@@ -4473,7 +4548,10 @@ export function WorkflowsView(): JSX.Element {
   // here.
   if (list.length === 0 && draft === null) {
     return (
-      <div className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900">
+      <div
+        ref={rootRef}
+        className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900"
+      >
         <WorkflowsHeader
           count={0}
           vimMode={vimMode}
@@ -4773,7 +4851,10 @@ export function WorkflowsView(): JSX.Element {
   )
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900">
+    <div
+      ref={rootRef}
+      className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900"
+    >
       <WorkflowsHeader
         count={list.length}
         vimMode={vimMode}
@@ -5693,6 +5774,7 @@ function WorkflowGallery({
   const [cursor, setCursor] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
   const keysRef = useRef<HTMLInputElement>(null)
+  const vimMode = useStore((s) => s.vimMode)
   const hiddenPresets = useStore((s) => s.hiddenWorkflowPresets)
   const hidePreset = useStore((s) => s.hideWorkflowPreset)
 
@@ -5774,28 +5856,32 @@ function WorkflowGallery({
       event.stopPropagation()
       setCursor((index) => Math.max(0, Math.min(flat.length - 1, index + delta)))
     }
-    // `j`/`k` are unconditional here, not Vim-gated like the list behind this
-    // modal: the field they arrive in is read-only, so they can never steal a
-    // keystroke someone meant as input.
-    if (isPaletteNextKey(event) || event.key === 'j') {
+    // The house rule, which this modal used to be the one exception to: a plain
+    // letter is a Vim-mode key. The read-only field means they could never
+    // steal typed input, but "j moves" being true here and false in the list
+    // behind it is the kind of split someone has to discover twice. Named keys
+    // (arrows, Enter, Escape, Delete) stay universal, so the gallery is never
+    // mouse-only with Vim off.
+    const letter = (key: string): boolean => vimMode && event.key === key
+    if (isPaletteNextKey(event) || letter('j')) {
       move(1)
       return
     }
-    if (isPalettePreviousKey(event) || event.key === 'k') {
+    if (isPalettePreviousKey(event) || letter('k')) {
       move(-1)
       return
     }
-    if (event.key === 'Home' || event.key === 'g') {
+    if (event.key === 'Home' || letter('g')) {
       event.preventDefault()
       setCursor(0)
       return
     }
-    if (event.key === 'End' || event.key === 'G') {
+    if (event.key === 'End' || letter('G')) {
       event.preventDefault()
       setCursor(Math.max(0, flat.length - 1))
       return
     }
-    if (event.key === 'x' || event.key === 'Delete' || event.key === 'Backspace') {
+    if (letter('x') || event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault()
       event.stopPropagation()
       hideAtCursor()
@@ -5903,7 +5989,7 @@ function WorkflowGallery({
                     <IconButton
                       size="sm"
                       aria-label={`Hide ${preset?.name ?? 'recipe'} from the gallery`}
-                      title="Hide from the gallery (x)"
+                      title={vimMode ? 'Hide from the gallery (x)' : 'Hide from the gallery (del)'}
                       tabIndex={-1}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={(event) => {
@@ -5930,16 +6016,25 @@ function WorkflowGallery({
             ? `${hiddenPresetsInOrder(hiddenPresets).length} hidden · restore under Settings → Workflows`
             : ''}
         </span>
+        {/* Vocabulary follows the mode, like the view's own header hint: with
+            Vim off the letters do nothing, and offering them is how someone
+            concludes the gallery is broken. */}
         <span className="flex shrink-0 items-center gap-4">
           <span>
-            <kbd className="rounded bg-paper-200 px-1">↑↓</kbd>{' '}
-            <kbd className="rounded bg-paper-200 px-1">j / k</kbd> move
+            <kbd className="rounded bg-paper-200 px-1">↑↓</kbd>
+            {vimMode && (
+              <>
+                {' '}
+                <kbd className="rounded bg-paper-200 px-1">j / k</kbd>
+              </>
+            )}{' '}
+            move
           </span>
           <span>
             <kbd className="rounded bg-paper-200 px-1">↵</kbd> create
           </span>
           <span>
-            <kbd className="rounded bg-paper-200 px-1">x</kbd> hide
+            <kbd className="rounded bg-paper-200 px-1">{vimMode ? 'x' : 'del'}</kbd> hide
           </span>
           <span>
             <kbd className="rounded bg-paper-200 px-1">esc</kbd> cancel

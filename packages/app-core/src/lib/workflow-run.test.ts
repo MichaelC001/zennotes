@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import type { NoteTemplate } from '@bridge-contract/templates'
-import type { WorkflowRunReceipt } from '@bridge-contract/workflows'
+import type {
+  WorkflowRunSummary,
+  WorkflowRunReceipt,
+  WorkflowUndoResult
+} from '@bridge-contract/workflows'
 import type { Workflow, WorkflowOp } from '@shared/workflows/types'
+import type { WorkflowRunRecord } from '../store'
 import {
   canUndoReceipt,
   collectRunSideEffects,
+  driftedPathsNote,
+  driftedPathsOf,
   findTemplateByRef,
   formatPathList,
+  interruptedRunHeadline,
+  interruptedRunToOffer,
   irreversibleNote,
   opsExcludingPaths,
   planWritePaths,
@@ -16,6 +25,7 @@ import {
   runConfirmLabel,
   undoCollisionDescription,
   undoLabel,
+  undoOfferFor,
   undoneHeadline,
   unknownTemplateDiagnostics,
   unsavedCollisionDescription,
@@ -384,5 +394,119 @@ describe('resolveTemplateOps', () => {
     )
     expect(missing).toEqual(['ghost'])
     expect(ops[2]).toMatchObject({ template: 'Rating: \n\nThoughts on Untitled.' })
+  })
+})
+
+function record(over: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
+  return { workflowId: 'reading-log', receipt: receipt(), undone: null, undoError: null, ...over }
+}
+
+function runSummary(over: Partial<WorkflowRunSummary> = {}): WorkflowRunSummary {
+  return {
+    runId: 'run-1',
+    workflowId: 'reading-log',
+    startedAt: 1_000,
+    applied: 3,
+    paths: ['inbox/A.md', 'inbox/B.md'],
+    undoable: true,
+    ...over
+  }
+}
+
+describe('undoOfferFor', () => {
+  it('lets the current record undo itself', () => {
+    expect(undoOfferFor(record(), receipt())).toBe('ok')
+  })
+
+  it('refuses a second undo of a run already undone', () => {
+    expect(undoOfferFor(record({ undone: { runId: 'run-1', restored: 2 } }), receipt())).toBe(
+      'already-undone'
+    )
+  })
+
+  it('refuses an older receipt once a newer run of the same workflow replaced it', () => {
+    const newer = record({ receipt: receipt({ runId: 'run-2' }) })
+    expect(undoOfferFor(newer, receipt({ runId: 'run-1' }))).toBe('superseded')
+  })
+
+  it('says nothing about a run when the record belongs to another workflow', () => {
+    const other = record({ workflowId: 'archive-old', receipt: receipt({ runId: 'run-9' }) })
+    expect(undoOfferFor(other, receipt())).toBe('ok')
+  })
+
+  it('treats a dismissed record as dismissed, not as superseded', () => {
+    expect(undoOfferFor(null, receipt())).toBe('ok')
+  })
+})
+
+describe('driftedPaths', () => {
+  it('reads nothing from a bridge that does not report them', () => {
+    expect(driftedPathsOf({ runId: 'run-1', restored: 2 })).toEqual([])
+    expect(driftedPathsNote({ runId: 'run-1', restored: 2 })).toBeNull()
+  })
+
+  it('ignores a malformed field rather than showing junk', () => {
+    // A bridge older than the field can send anything at all through it.
+    const result = { runId: 'run-1', restored: 2, driftedPaths: ['inbox/A.md', 7, ''] }
+    expect(driftedPathsOf(result as unknown as WorkflowUndoResult)).toEqual(['inbox/A.md'])
+  })
+
+  it('names what the undo overwrote, singular and plural', () => {
+    expect(driftedPathsNote({ runId: 'run-1', restored: 2, driftedPaths: ['inbox/A.md'] })).toBe(
+      '1 file you edited after the run was overwritten: inbox/A.md.'
+    )
+    expect(
+      driftedPathsNote({
+        runId: 'run-1',
+        restored: 3,
+        driftedPaths: ['inbox/A.md', 'inbox/B.md']
+      })
+    ).toBe('2 files you edited after the run were overwritten: inbox/A.md and inbox/B.md.')
+  })
+
+  it('caps the list so a wide run still reads as one sentence', () => {
+    const note = driftedPathsNote({
+      runId: 'run-1',
+      restored: 5,
+      driftedPaths: ['a.md', 'b.md', 'c.md', 'd.md', 'e.md']
+    })
+    expect(note).toBe('5 files you edited after the run were overwritten: a.md, b.md, c.md and 2 more.')
+  })
+})
+
+describe('interruptedRunToOffer', () => {
+  const now = 10_000
+
+  it('offers the most recent run when it was interrupted and can still be undone', () => {
+    const run = runSummary({ startedAt: 9_000, interrupted: true })
+    expect(interruptedRunToOffer([runSummary({ runId: 'old', startedAt: 1 }), run], now)).toBe(run)
+  })
+
+  it('stays silent for a bridge that never sets the flag', () => {
+    expect(interruptedRunToOffer([runSummary({ startedAt: 9_000 })], now)).toBeNull()
+  })
+
+  it('ignores an interrupted run that later runs have already buried', () => {
+    const interrupted = runSummary({ runId: 'run-1', startedAt: 5_000, interrupted: true })
+    const later = runSummary({ runId: 'run-2', startedAt: 9_000 })
+    expect(interruptedRunToOffer([interrupted, later], now)).toBeNull()
+  })
+
+  it('never offers an undo the journal cannot honour', () => {
+    const undone = runSummary({ startedAt: 9_000, undoable: false, interrupted: true })
+    expect(interruptedRunToOffer([undone], now)).toBeNull()
+    const nothingWritten = runSummary({ startedAt: 9_000, paths: [], interrupted: true })
+    expect(interruptedRunToOffer([nothingWritten], now)).toBeNull()
+  })
+
+  it('lets an old one go rather than offering to undo over a week of later work', () => {
+    const stale = runSummary({ startedAt: 0, interrupted: true })
+    expect(interruptedRunToOffer([stale], 5 * 24 * 60 * 60 * 1000)).toBeNull()
+  })
+
+  it('says what happened and how much of it is still on disk', () => {
+    expect(interruptedRunHeadline(runSummary())).toBe(
+      '"reading-log" was interrupted before it finished. 2 notes on disk still carry it.'
+    )
   })
 })

@@ -330,6 +330,14 @@ async function listNotesFromBridge(): Promise<NoteMeta[]> {
 let coalescedNotesRefreshInFlight: Promise<void> | null = null
 let coalescedNotesRefreshPending = false
 
+/**
+ * How to drop the vault watcher `init` installed, kept because `init` can run
+ * more than once: `retryWorkspaceBoot` re-enters it deliberately, and every
+ * re-entry that subscribed without disposing the previous one left a duplicate
+ * IPC listener behind for the rest of the session.
+ */
+let vaultChangeUnsubscribe: (() => void) | null = null
+
 function refreshNotesCoalesced(): Promise<void> {
   if (coalescedNotesRefreshInFlight) {
     coalescedNotesRefreshPending = true
@@ -357,6 +365,15 @@ async function refreshVaultIndexes(): Promise<void> {
     state.loadWorkflowIndex(),
     state.refreshRootContentHidden()
   ])
+  // A run the app died in the middle of left changes nobody was told about,
+  // and this is the first moment anyone is back to be told. Dynamically
+  // imported (the module imports this one) and never awaited: nothing about
+  // opening a vault waits on a message.
+  void import('./lib/workflow-trigger')
+    .then((mod) => mod.announceInterruptedWorkflowRun())
+    .catch(() => {
+      /* a message that cannot be raised is not a vault that failed to open */
+    })
 }
 
 /** Find a template (built-in or custom) by id, or undefined if it's gone. */
@@ -1721,6 +1738,40 @@ function queueTaskMutation(path: string, run: () => Promise<void>): Promise<void
   return next
 }
 
+/**
+ * Task mutations that have been asked for but have not finished, from the call
+ * itself rather than from the queue above. The optimistic paint yields a frame
+ * before anything is queued, so the queue alone has a blind spot exactly where
+ * a close is most likely to land.
+ */
+const inFlightTaskMutations = new Set<Promise<void>>()
+
+/**
+ * Wait for every task write in flight to settle.
+ *
+ * These writes go to notes that are NOT dirty (see `applyTaskMutation`), so
+ * `flushDirtyNotes` cannot see them on its own: a Kanban move still in flight
+ * when the window closes or the vault switches would simply be dropped. The
+ * queue tails are stored settled, so awaiting them cannot throw, and each entry
+ * removes itself once it resolves; the loop is for a mutation that queued
+ * another behind itself while we waited, and it is bounded so a pathological
+ * chain can never hold a quit open forever.
+ */
+async function drainTaskMutationQueues(): Promise<void> {
+  for (let pass = 0; pass < 5; pass += 1) {
+    if (inFlightTaskMutations.size === 0 && taskMutationQueues.size === 0) return
+    await Promise.all(
+      [...inFlightTaskMutations, ...taskMutationQueues.values()].map(async (pending) => {
+        try {
+          await pending
+        } catch {
+          /* a write that failed already reported itself */
+        }
+      })
+    )
+  }
+}
+
 function sameNoteJumpLocation(a: NoteJumpLocation | null, b: NoteJumpLocation | null): boolean {
   if (!a || !b) return false
   return (
@@ -2461,14 +2512,20 @@ interface Store {
   /** Chapter index of the guided Workflows tutorial, or null when it is not
    *  running. Session-only on purpose: the tutorial re-seeds (and first
    *  cleans) its practice material on every start, so resuming a half-done
-   *  one after a restart would point at files that were never re-created. */
+   *  one after a restart would point at files that were never re-created.
+   *  Cleared on every vault switch with the rest of the per-vault slices: the
+   *  practice notes it is talking about live in the vault it started in. */
   workflowTutorialStep: number | null
-  /** The most recent workflow run applied from the view, receipt and undo
-   *  state included. Lives HERE rather than in the view so leaving the view
-   *  and coming back does not cost the Undo: the receipt toast expires in
-   *  seconds, and a run someone can no longer take back because they glanced
-   *  at a note is a broken promise. Session-only; the run-history UI is the
-   *  durable version of this, later. */
+  /** The most recent workflow run applied in this vault, receipt and undo
+   *  state included. Lives HERE rather than in the view for two reasons:
+   *  leaving the view and coming back must not cost the Undo (the receipt
+   *  toast expires in seconds, and a run someone can no longer take back
+   *  because they glanced at a note is a broken promise), and a run started
+   *  from the palette has to replace the one the view is showing rather than
+   *  leave two receipts for one workflow. Session-only, and per-vault: a run
+   *  id means nothing to another vault's journal, so every vault switch
+   *  clears it rather than offering an Undo that fails. The run-history UI is
+   *  the durable version of this, later. */
   workflowRunRecord: WorkflowRunRecord | null
   themeId: string
   themeFamily: ThemeFamily
@@ -4909,97 +4966,109 @@ export const useStore = create<Store>((set, get) => {
     const optimisticTask = applyTaskMutationsToTask(task, mutations)
     const hasOptimisticChange = optimisticTask !== task
 
-    if (hasOptimisticChange) {
-      set((s) => ({
-        vaultTasks: s.vaultTasks.map((t) =>
-          t.sourcePath === path && t.taskIndex === task.taskIndex ? optimisticTask : t
-        )
-      }))
-      await yieldForOptimisticPaint()
-    }
-
-    // The optimistic paint above is immediate; everything from the body read
-    // down is queued per path, so a second mutation cannot read a base an
-    // in-flight write is about to invalidate.
-    await queueTaskMutation(path, async () => {
-      const latestState = get()
-      const latestOpenBuffer = latestState.noteContents[path]
-      let body: string
-      try {
-        body = latestOpenBuffer?.body ?? (await window.zen.readNote(path)).body
-      } catch (err) {
-        console.error('readNote (mutate) failed', err)
-        if (hasOptimisticChange) void get().rescanTasksForPath(path)
-        return
+    // Tracked from HERE rather than from the write queue below: the optimistic
+    // paint yields a frame before anything is queued, and a quit inside that
+    // frame would find an empty queue and drop the move. See
+    // `drainTaskMutationQueues`.
+    const running = (async () => {
+      if (hasOptimisticChange) {
+        set((s) => ({
+          vaultTasks: s.vaultTasks.map((t) =>
+            t.sourcePath === path && t.taskIndex === task.taskIndex ? optimisticTask : t
+          )
+        }))
+        await yieldForOptimisticPaint()
       }
 
-      let nextBody = body
-      if (task.kind === 'file') {
-        // Whole-note task: every field lives in frontmatter, so apply the whole
-        // batch as one frontmatter rewrite rather than per-line edits.
-        nextBody = updateFrontmatterFields(
-          body,
-          fileTaskMutationUpdates(mutations, toIsoDateLocal(new Date()))
-        )
-      } else {
-        for (const m of mutations) {
-          switch (m.kind) {
-            case 'set-checked':
-              nextBody = setTaskCheckedAtIndex(nextBody, task.taskIndex, m.checked)
-              break
-            case 'set-waiting':
-              nextBody = setTaskWaitingAtIndex(nextBody, task.taskIndex, m.waiting)
-              break
-            case 'set-priority':
-              nextBody = setTaskPriorityAtIndex(nextBody, task.taskIndex, m.priority)
-              break
-            case 'set-due':
-              nextBody = setTaskDueAtIndex(nextBody, task.taskIndex, m.due)
-              break
-            case 'set-field':
-              nextBody = setTaskFieldAtIndex(nextBody, task.taskIndex, m.key, m.value)
-              break
-            case 'set-text':
-              nextBody = setTaskTextAtIndex(nextBody, task.taskIndex, m.text)
-              break
-          }
-        }
-      }
-      if (nextBody === body) {
-        if (hasOptimisticChange) void get().rescanTasksForPath(path)
-        return
-      }
-
-      // The buffer route exists to MERGE with unsaved edits, so it is taken only
-      // when the note is genuinely dirty. `noteContents` also caches notes nobody
-      // has open (previews, workspace prefetch), and routing those through
-      // `updateNoteBody` hands the change to an editor autosave that has no
-      // editor: mark-dirty, wait, and hope. In a rapid Kanban chain the watcher
-      // reload from the PREVIOUS write then reloads the cache over the pending
-      // edit, and the move silently reverts on disk (#503). A clean note takes
-      // the disk write like any external edit; the cache is updated in the same
-      // breath so a third move in the chain never reads a stale base.
-      if (latestOpenBuffer && latestState.noteDirty[path]) {
-        get().updateNoteBody(path, nextBody)
-      } else {
+      // The optimistic paint above is immediate; everything from the body read
+      // down is queued per path, so a second mutation cannot read a base an
+      // in-flight write is about to invalidate.
+      await queueTaskMutation(path, async () => {
+        const latestState = get()
+        const latestOpenBuffer = latestState.noteContents[path]
+        let body: string
         try {
-          await window.zen.writeNote(path, nextBody)
+          body = latestOpenBuffer?.body ?? (await window.zen.readNote(path)).body
         } catch (err) {
-          console.error('writeNote (mutate) failed', err)
+          console.error('readNote (mutate) failed', err)
           if (hasOptimisticChange) void get().rescanTasksForPath(path)
           return
         }
-        if (latestOpenBuffer) {
-          set((s) => {
-            const cached = s.noteContents[path]
-            // Only a still-clean cache entry is ours to move forward; a buffer
-            // the user dirtied since the read above keeps their text.
-            if (!cached || s.noteDirty[path]) return s
-            return { noteContents: { ...s.noteContents, [path]: { ...cached, body: nextBody } } }
-          })
+
+        let nextBody = body
+        if (task.kind === 'file') {
+          // Whole-note task: every field lives in frontmatter, so apply the whole
+          // batch as one frontmatter rewrite rather than per-line edits.
+          nextBody = updateFrontmatterFields(
+            body,
+            fileTaskMutationUpdates(mutations, toIsoDateLocal(new Date()))
+          )
+        } else {
+          for (const m of mutations) {
+            switch (m.kind) {
+              case 'set-checked':
+                nextBody = setTaskCheckedAtIndex(nextBody, task.taskIndex, m.checked)
+                break
+              case 'set-waiting':
+                nextBody = setTaskWaitingAtIndex(nextBody, task.taskIndex, m.waiting)
+                break
+              case 'set-priority':
+                nextBody = setTaskPriorityAtIndex(nextBody, task.taskIndex, m.priority)
+                break
+              case 'set-due':
+                nextBody = setTaskDueAtIndex(nextBody, task.taskIndex, m.due)
+                break
+              case 'set-field':
+                nextBody = setTaskFieldAtIndex(nextBody, task.taskIndex, m.key, m.value)
+                break
+              case 'set-text':
+                nextBody = setTaskTextAtIndex(nextBody, task.taskIndex, m.text)
+                break
+            }
+          }
         }
-      }
-    })
+        if (nextBody === body) {
+          if (hasOptimisticChange) void get().rescanTasksForPath(path)
+          return
+        }
+
+        // The buffer route exists to MERGE with unsaved edits, so it is taken only
+        // when the note is genuinely dirty. `noteContents` also caches notes nobody
+        // has open (previews, workspace prefetch), and routing those through
+        // `updateNoteBody` hands the change to an editor autosave that has no
+        // editor: mark-dirty, wait, and hope. In a rapid Kanban chain the watcher
+        // reload from the PREVIOUS write then reloads the cache over the pending
+        // edit, and the move silently reverts on disk (#503). A clean note takes
+        // the disk write like any external edit; the cache is updated in the same
+        // breath so a third move in the chain never reads a stale base.
+        if (latestOpenBuffer && latestState.noteDirty[path]) {
+          get().updateNoteBody(path, nextBody)
+        } else {
+          try {
+            await window.zen.writeNote(path, nextBody)
+          } catch (err) {
+            console.error('writeNote (mutate) failed', err)
+            if (hasOptimisticChange) void get().rescanTasksForPath(path)
+            return
+          }
+          if (latestOpenBuffer) {
+            set((s) => {
+              const cached = s.noteContents[path]
+              // Only a still-clean cache entry is ours to move forward; a buffer
+              // the user dirtied since the read above keeps their text.
+              if (!cached || s.noteDirty[path]) return s
+              return { noteContents: { ...s.noteContents, [path]: { ...cached, body: nextBody } } }
+            })
+          }
+        }
+      })
+    })()
+    inFlightTaskMutations.add(running)
+    try {
+      await running
+    } finally {
+      inFlightTaskMutations.delete(running)
+    }
   },
 
   deleteTaskFromList: async (task) => {
@@ -7370,6 +7439,8 @@ export const useStore = create<Store>((set, get) => {
     // a file, so it must short-circuit before the disk read or readNote tries to
     // open `<vault>/zen:/workflows` and the tab never opens.
     if (isWorkflowsTabPath(path)) {
+      // Same gate as `openNoteInPane`: a disabled feature has no focusable tab.
+      if (!s.workflowsEnabled) return
       set((cur) => {
         const nextLayout =
           updateLeaf(cur.paneLayout, paneId, (l) => leafWithAddedTab(l, path)) ??
@@ -7539,6 +7610,11 @@ export const useStore = create<Store>((set, get) => {
     const s = get()
     const leaf = findLeaf(s.paneLayout, paneId)
     if (!leaf) return
+    // The feature switch, at the layer every caller funnels through rather than
+    // only in `openWorkflowsView`. Reopen Closed Tab lands here directly, and a
+    // canvas that can write to the vault may never come back past a switch that
+    // turned it off.
+    if (isWorkflowsTabPath(path) && !s.workflowsEnabled) return
     // Tasks / Tags / Help / Trash tabs are virtual — add them without touching disk.
     if (isWorkspaceVirtualTabPath(path)) {
       set((cur) => {
@@ -8210,7 +8286,12 @@ export const useStore = create<Store>((set, get) => {
         savePrefs(collectPrefs(get()))
       }
     }
-    window.zen.onVaultChange((ev) => {
+    // `retryWorkspaceBoot` re-enters `init` on every successful reconnect, so
+    // the previous subscription has to go before a new one is made. Without
+    // this each reconnect left a live listener behind and one file change
+    // arrived as N changes, each running the full `applyChange`.
+    vaultChangeUnsubscribe?.()
+    vaultChangeUnsubscribe = window.zen.onVaultChange((ev) => {
       void get().applyChange(ev)
     })
   },
@@ -8291,6 +8372,8 @@ export const useStore = create<Store>((set, get) => {
       assetFiles: [],
       assetUndoStack: [],
       closedTabStack: [],
+      workflowRunRecord: null,
+      workflowTutorialStep: null,
       vaultTasks: [],
       selectedTags: [],
       view: { kind: 'folder', folder: 'inbox', subpath: '' },
@@ -8343,6 +8426,8 @@ export const useStore = create<Store>((set, get) => {
         assetFiles: [],
         assetUndoStack: [],
         closedTabStack: [],
+        workflowRunRecord: null,
+        workflowTutorialStep: null,
         vaultTasks: [],
         selectedTags: [],
         view: { kind: 'folder', folder: 'inbox', subpath: '' },
@@ -8404,6 +8489,8 @@ export const useStore = create<Store>((set, get) => {
           assetFiles: [],
           assetUndoStack: [],
           closedTabStack: [],
+          workflowRunRecord: null,
+          workflowTutorialStep: null,
           vaultTasks: [],
           selectedTags: [],
           view: { kind: 'folder', folder: 'inbox', subpath: '' },
@@ -8440,6 +8527,8 @@ export const useStore = create<Store>((set, get) => {
         assetFiles: [],
         assetUndoStack: [],
         closedTabStack: [],
+        workflowRunRecord: null,
+        workflowTutorialStep: null,
         vaultTasks: [],
         selectedTags: [],
         view: { kind: 'folder', folder: 'inbox', subpath: '' },
@@ -8569,6 +8658,8 @@ export const useStore = create<Store>((set, get) => {
         assetFiles: [],
         assetUndoStack: [],
         closedTabStack: [],
+        workflowRunRecord: null,
+        workflowTutorialStep: null,
         vaultTasks: [],
         selectedTags: [],
         view: { kind: 'folder', folder: 'inbox', subpath: '' },
@@ -8652,6 +8743,8 @@ export const useStore = create<Store>((set, get) => {
         assetFiles: [],
         assetUndoStack: [],
         closedTabStack: [],
+        workflowRunRecord: null,
+        workflowTutorialStep: null,
         vaultTasks: [],
         selectedTags: [],
         view: { kind: 'folder', folder: 'inbox', subpath: '' },
@@ -8733,6 +8826,8 @@ export const useStore = create<Store>((set, get) => {
         assetFiles: [],
         assetUndoStack: [],
         closedTabStack: [],
+        workflowRunRecord: null,
+        workflowTutorialStep: null,
         vaultTasks: [],
         selectedTags: [],
         view: { kind: 'folder', folder: 'inbox', subpath: '' },
@@ -8778,6 +8873,8 @@ export const useStore = create<Store>((set, get) => {
           assetFiles: [],
           assetUndoStack: [],
           closedTabStack: [],
+          workflowRunRecord: null,
+          workflowTutorialStep: null,
           vaultTasks: [],
           selectedTags: [],
           view: { kind: 'folder', folder: 'inbox', subpath: '' },
@@ -8812,6 +8909,8 @@ export const useStore = create<Store>((set, get) => {
         assetFiles: [],
         assetUndoStack: [],
         closedTabStack: [],
+        workflowRunRecord: null,
+        workflowTutorialStep: null,
         vaultTasks: [],
         selectedTags: [],
         view: { kind: 'folder', folder: 'inbox', subpath: '' },
@@ -8876,6 +8975,10 @@ export const useStore = create<Store>((set, get) => {
 
   flushDirtyNotes: async () => {
     get().persistWorkspace()
+    // Before the dirty sweep, not after: a queued task write on a note someone
+    // has open lands in the buffer rather than on disk, so draining first is
+    // what puts it in the set the sweep below persists.
+    await drainTaskMutationQueues()
     const dirtyPaths = Object.entries(get().noteDirty)
       .filter(([, isDirty]) => isDirty)
       .map(([path]) => path)
@@ -8895,6 +8998,13 @@ function closeWorkflowsTabsEverywhere(): void {
       void state.closeTabInPane(leaf.id, WORKFLOWS_TAB_PATH)
     }
   }
+  // Closing a tab records it for Reopen Closed Tab, so without this the canvas
+  // is one Cmd+Shift+T away from being back. Safe to run straight after the
+  // loop: a virtual tab holds no unsaved body, so every close above reached its
+  // `set` synchronously.
+  useStore.setState((s) => ({
+    closedTabStack: s.closedTabStack.filter((entry) => !isWorkflowsTabPath(entry.path))
+  }))
 }
 
 // --- Portable config file sync (desktop) ------------------------------------

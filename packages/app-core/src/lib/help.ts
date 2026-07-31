@@ -555,7 +555,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'Enter', action: 'Open for editing', detail: 'Open the selected workflow on the canvas.' },
       { keys: 'R', action: 'Run', detail: 'Plan the selected workflow and show the dry-run confirmation: every change grouped and counted before anything is written. Applying journals each file, so the run can be undone byte for byte from the receipt.' },
       { keys: 't', action: 'Toggle draft / active', detail: 'A draft is saved but inert: it cannot run, from here or from the palette. Activating a workflow that writes lists exactly what it changes first.' },
-      { keys: 'a', action: 'Add a step', detail: 'Insert a step after the focused node, picked from the registry with its arguments explained.' },
+      { keys: 'a', action: 'Add a step', detail: 'Start a new line with a source, picked from the registry with its arguments explained. To insert into an existing line, use Add step after on the node itself.' },
       { keys: 'e', action: 'Edit as text', detail: 'Flip between the canvas and the raw file. Both edit the same workflow; neither is the "real" one.' },
       { keys: 'n', action: 'New workflow', detail: 'Open the recipe gallery. Every recipe is a plain file that copies into your vault and opens in this same editor. Press x on a recipe to hide it from the gallery; hide or restore them all under Settings → Workflows.' },
       { keys: 'y / p', action: 'Copy / import via clipboard', detail: 'y puts the selected workflow file on the clipboard as text; p reviews whatever workflow text is on the clipboard before it can land, always as a manual-trigger draft.' },
