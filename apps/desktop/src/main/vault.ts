@@ -1288,9 +1288,14 @@ async function vaultLooksEmpty(root: string): Promise<boolean> {
 
 export async function getVaultSettings(root: string): Promise<VaultSettings> {
   const settingsFile = vaultSettingsPath(root)
-  let stat
+  // One handle serves both the mtime check and the read, so the mtime that
+  // keys the cache always describes the bytes that were parsed. A stat of the
+  // path followed by a read of the path leaves a window where the file is
+  // swapped in between, caching version A's mtime with version B's content
+  // (js/file-system-race; same treatment as readWorkflowImportFile).
+  let handle
   try {
-    stat = await fs.stat(settingsFile)
+    handle = await fs.open(settingsFile, 'r')
   } catch {
     const cached = vaultSettingsCache.get(root)
     if (cached) {
@@ -1299,20 +1304,24 @@ export async function getVaultSettings(root: string): Promise<VaultSettings> {
     const fallbackPrimary = await inferPrimaryNotesLocation(root)
     return normalizeVaultSettings(null, fallbackPrimary)
   }
-  const cached = vaultSettingsCache.get(root)
-  if (cached && sameMtimeMs(cached.mtimeMs, stat.mtimeMs)) {
-    return cached.settings
-  }
-  let fallbackPrimary = DEFAULT_VAULT_SETTINGS.primaryNotesLocation
   try {
-    fallbackPrimary = await inferPrimaryNotesLocation(root)
-    const raw = await fs.readFile(settingsFile, 'utf8')
-    const settings = normalizeVaultSettings(JSON.parse(raw), fallbackPrimary)
-    vaultSettingsCache.set(root, { settings, mtimeMs: stat.mtimeMs })
-    return settings
-  } catch {
-    const fallback = normalizeVaultSettings(null, fallbackPrimary)
-    return fallback
+    const stat = await handle.stat()
+    const cached = vaultSettingsCache.get(root)
+    if (cached && sameMtimeMs(cached.mtimeMs, stat.mtimeMs)) {
+      return cached.settings
+    }
+    let fallbackPrimary = DEFAULT_VAULT_SETTINGS.primaryNotesLocation
+    try {
+      fallbackPrimary = await inferPrimaryNotesLocation(root)
+      const raw = await handle.readFile({ encoding: 'utf8' })
+      const settings = normalizeVaultSettings(JSON.parse(raw), fallbackPrimary)
+      vaultSettingsCache.set(root, { settings, mtimeMs: stat.mtimeMs })
+      return settings
+    } catch {
+      return normalizeVaultSettings(null, fallbackPrimary)
+    }
+  } finally {
+    await handle.close().catch(() => {})
   }
 }
 
