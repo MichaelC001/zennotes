@@ -81,6 +81,7 @@ import {
   noteFolderSubpath,
   parseFavoriteFolderKey,
 } from "../lib/vault-layout";
+import { resolveFolderPath } from "@shared/system-folder-paths";
 import {
   getCurrentDragPayload,
   hasZenItem,
@@ -264,7 +265,8 @@ function vaultRelativeFolderPath(
   vaultSettings: ReturnType<typeof useStore.getState>["vaultSettings"],
 ): string {
   if (folder === "inbox" && isPrimaryNotesAtRoot(vaultSettings)) return subpath;
-  return subpath ? `${folder}/${subpath}` : folder;
+  const folderPath = resolveFolderPath(folder, vaultSettings.systemFolderPaths);
+  return subpath ? `${folderPath}/${subpath}` : folderPath;
 }
 
 type SidebarSelectionItem =

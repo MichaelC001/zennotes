@@ -68,6 +68,11 @@ import {
   isObsidianExcalidrawMarkdown
 } from '@shared/excalidraw'
 import { DEMO_TOUR_ASSETS, DEMO_TOUR_NOTES } from './demo-tour-data'
+import {
+  normalizeSystemFolderPaths,
+  resolveFolderPath,
+  buildReverseFolderMap
+} from '@shared/system-folder-paths'
 
 const CONFIG_FILE = 'zennotes.config.json'
 const FOLDERS: NoteFolder[] = ['inbox', 'quick', 'archive', 'trash']
@@ -256,6 +261,7 @@ const noteMetaCache = new Map<
 >()
 const loadedPersistedNoteMetaCacheRoots = new Set<string>()
 const noteMetaCachePersistTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const vaultSettingsCache = new Map<string, { settings: VaultSettings; mtimeMs: number }>()
 
 export interface PersistedWindowState {
   x: number
@@ -1023,6 +1029,7 @@ function normalizeVaultSettings(
     folderColors?: Record<string, unknown> | null
     favorites?: unknown
     view?: unknown
+    systemFolderPaths?: unknown
   }
   const folderIcons: Record<string, FolderIconId> = {}
   if (candidate.folderIcons && typeof candidate.folderIcons === 'object') {
@@ -1076,7 +1083,8 @@ function normalizeVaultSettings(
     folderIcons,
     folderColors: normalizeFolderColors(candidate.folderColors),
     favorites: normalizeFavorites(candidate.favorites),
-    view: normalizeVaultViewSettings(candidate.view)
+    view: normalizeVaultViewSettings(candidate.view),
+    systemFolderPaths: normalizeSystemFolderPaths(candidate.systemFolderPaths)
   }
 }
 
@@ -1264,13 +1272,32 @@ async function vaultLooksEmpty(root: string): Promise<boolean> {
 }
 
 export async function getVaultSettings(root: string): Promise<VaultSettings> {
+  const settingsFile = vaultSettingsPath(root)
+  let stat
+  try {
+    stat = await fs.stat(settingsFile)
+  } catch {
+    const cached = vaultSettingsCache.get(root)
+    if (cached) {
+      vaultSettingsCache.delete(root)
+    }
+    const fallbackPrimary = await inferPrimaryNotesLocation(root)
+    return normalizeVaultSettings(null, fallbackPrimary)
+  }
+  const cached = vaultSettingsCache.get(root)
+  if (cached && sameMtimeMs(cached.mtimeMs, stat.mtimeMs)) {
+    return cached.settings
+  }
   let fallbackPrimary = DEFAULT_VAULT_SETTINGS.primaryNotesLocation
   try {
     fallbackPrimary = await inferPrimaryNotesLocation(root)
-    const raw = await fs.readFile(vaultSettingsPath(root), 'utf8')
-    return normalizeVaultSettings(JSON.parse(raw), fallbackPrimary)
+    const raw = await fs.readFile(settingsFile, 'utf8')
+    const settings = normalizeVaultSettings(JSON.parse(raw), fallbackPrimary)
+    vaultSettingsCache.set(root, { settings, mtimeMs: stat.mtimeMs })
+    return settings
   } catch {
-    return normalizeVaultSettings(null, fallbackPrimary)
+    const fallback = normalizeVaultSettings(null, fallbackPrimary)
+    return fallback
   }
 }
 
@@ -1285,10 +1312,16 @@ export async function setVaultSettings(
   if (isEphemeralRoot(root)) return cloneVaultSettings(normalized)
   await fs.mkdir(path.dirname(vaultSettingsPath(root)), { recursive: true })
   await fs.writeFile(vaultSettingsPath(root), JSON.stringify(normalized, null, 2), 'utf8')
+  const writeStat = await fs.stat(vaultSettingsPath(root))
+  vaultSettingsCache.set(root, { settings: normalized, mtimeMs: writeStat.mtimeMs })
   if (normalized.primaryNotesLocation === 'inbox') {
     await fs.mkdir(path.join(root, 'inbox'), { recursive: true })
   }
   return cloneVaultSettings(normalized)
+}
+
+export function invalidateVaultSettingsCache(root: string): void {
+  vaultSettingsCache.delete(root)
 }
 
 async function primaryNotesRoot(root: string): Promise<string> {
@@ -1296,20 +1329,44 @@ async function primaryNotesRoot(root: string): Promise<string> {
   return settings.primaryNotesLocation === 'root' ? root : path.join(root, 'inbox')
 }
 
-function shouldHidePrimaryRootEntry(name: string): boolean {
-  return HIDDEN_PRIMARY_ROOT_NAMES.has(name)
+function shouldHidePrimaryRootEntry(name: string, extra?: Set<string>): boolean {
+  return HIDDEN_PRIMARY_ROOT_NAMES.has(name) || (extra?.has(name) ?? false)
+}
+
+function customHiddenPrimaryRootNames(settings: VaultSettings): Set<string> {
+  const names = new Set<string>()
+  if (!settings.systemFolderPaths) return names
+  for (const f of ['quick', 'archive', 'trash'] as NoteFolder[]) {
+    const custom = settings.systemFolderPaths[f]
+    if (custom && custom !== f) names.add(custom)
+  }
+  return names
 }
 
 export async function folderRoot(root: string, folder: NoteFolder): Promise<string> {
-  if (folder === 'inbox') return await primaryNotesRoot(root)
-  return path.join(root, folder)
+  if (folder === 'inbox') {
+    const settings = await getVaultSettings(root)
+    if (settings.primaryNotesLocation === 'root') return root
+    return path.join(root, resolveFolderPath('inbox', settings.systemFolderPaths))
+  }
+  const settings = await getVaultSettings(root)
+  return path.join(root, resolveFolderPath(folder, settings.systemFolderPaths))
 }
 
-export function folderForRelativePath(rel: string): NoteFolder | null {
+export function folderForRelativePath(
+  rel: string,
+  settings?: VaultSettings | null
+): NoteFolder | null {
   const normalized = normalizeVaultRelativePath(rel)
   const top = normalized.split('/')[0]
-  if (SYSTEM_FOLDERS.has(top as NoteFolder)) return top as NoteFolder
   if (!top || top.startsWith('.')) return null
+  const lower = top.toLowerCase()
+  if (SYSTEM_FOLDERS.has(lower as NoteFolder)) return lower as NoteFolder
+  if (settings?.systemFolderPaths) {
+    const reverseMap = buildReverseFolderMap(settings.systemFolderPaths)
+    const mapped = reverseMap.get(lower)
+    if (mapped) return mapped
+  }
   if (RESERVED_ROOT_NAMES.has(top)) return null
   return 'inbox'
 }
@@ -1324,7 +1381,8 @@ export async function ensureVaultLayout(root: string): Promise<void> {
   const settings = await getVaultSettings(root)
   for (const f of FOLDERS) {
     if (f === 'inbox' && settings.primaryNotesLocation === 'root') continue
-    await fs.mkdir(path.join(root, f), { recursive: true })
+    const dirPath = resolveFolderPath(f, settings.systemFolderPaths)
+    await fs.mkdir(path.join(root, dirPath), { recursive: true })
   }
   if (wasEmpty) {
     const welcomeDir = await primaryNotesRoot(root)
@@ -1577,8 +1635,9 @@ function markdownDestination(p: string): string {
   return `<${p.replace(/>/g, '%3E')}>`
 }
 
-function folderOf(root: string, absPath: string): NoteFolder | null {
-  return folderForRelativePath(path.relative(root, absPath))
+async function folderOf(root: string, absPath: string): Promise<NoteFolder | null> {
+  const settings = await getVaultSettings(root)
+  return folderForRelativePath(path.relative(root, absPath), settings)
 }
 
 /**
@@ -2133,8 +2192,8 @@ function resolveSearchBackend(
   return 'builtin'
 }
 
-function noteFolderFromRelPath(relPath: string): NoteFolder | null {
-  return folderForRelativePath(relPath)
+function noteFolderFromRelPath(relPath: string, settings?: VaultSettings | null): NoteFolder | null {
+  return folderForRelativePath(relPath, settings)
 }
 
 // A directory entry counts as a markdown note when it's a real .md file
@@ -2207,6 +2266,8 @@ async function resolveDirDescent(
 
 async function collectBuiltinSearchCandidates(root: string): Promise<VaultTextSearchCandidate[]> {
   const files: Array<{ full: string; folder: NoteFolder }> = []
+  const settings = await getVaultSettings(root)
+  const extraHidden = customHiddenPrimaryRootNames(settings)
   const walkFolder = async (
     folder: NoteFolder,
     dirAbs: string,
@@ -2227,7 +2288,7 @@ async function collectBuiltinSearchCandidates(root: string): Promise<VaultTextSe
       const childReal = await resolveDirDescent(full, entry, dirReal, ancestors)
       if (childReal !== null) {
         if (entry.name.startsWith('.')) continue
-        if (isPrimaryRoot && dirAbs === topAbs && shouldHidePrimaryRootEntry(entry.name)) continue
+        if (isPrimaryRoot && dirAbs === topAbs && shouldHidePrimaryRootEntry(entry.name, extraHidden)) continue
         ancestors.add(childReal)
         await walkFolder(folder, full, childReal, topAbs, isPrimaryRoot, ancestors)
         ancestors.delete(childReal)
@@ -2284,6 +2345,7 @@ async function collectRipgrepSearchCandidates(
   root: string,
   paths: Required<VaultTextSearchToolPaths>
 ): Promise<VaultTextSearchCandidate[]> {
+  const settings = await getVaultSettings(root)
   let stdout = ''
   try {
     const ripgrep = await searchExecutable('ripgrep', paths)
@@ -2345,7 +2407,7 @@ async function collectRipgrepSearchCandidates(
         ? (rawLines as { text: string }).text.replace(/\r?\n$/, '')
         : null
     if (!relPath || rawLineText == null || typeof lineNumber !== 'number') continue
-    const folder = noteFolderFromRelPath(relPath)
+    const folder = noteFolderFromRelPath(relPath, settings)
     if (!folder || !SEARCHABLE_TEXT_FOLDERS.includes(folder)) continue
     candidates.push({
       path: relPath,
@@ -2629,6 +2691,8 @@ async function mapLimit<T, U>(
  */
 export async function listFolders(root: string): Promise<FolderEntry[]> {
   const out: FolderEntry[] = []
+  const settings = await getVaultSettings(root)
+  const extraHidden = customHiddenPrimaryRootNames(settings)
   for (const folder of FOLDERS) {
     const topAbs = await folderRoot(root, folder)
     const isPrimaryRoot = folder === 'inbox' && path.resolve(topAbs) === path.resolve(root)
@@ -2646,7 +2710,7 @@ export async function listFolders(root: string): Promise<FolderEntry[]> {
         const childReal = await resolveDirDescent(full, e, dirReal, ancestors)
         if (childReal === null) continue
         if (e.name.startsWith('.')) continue
-        if (isPrimaryRoot && dirAbs === topAbs && shouldHidePrimaryRootEntry(e.name)) continue
+        if (isPrimaryRoot && dirAbs === topAbs && shouldHidePrimaryRootEntry(e.name, extraHidden)) continue
         const nextSub = subpath ? `${subpath}/${e.name}` : e.name
         out.push({ folder, subpath: nextSub, siblingOrder: index, isSymlink: e.isSymbolicLink() })
         // A `<Name>.base` database folder is listed (the renderer shows it as a
@@ -2666,6 +2730,8 @@ export async function listFolders(root: string): Promise<FolderEntry[]> {
 export async function listNotes(root: string): Promise<NoteMeta[]> {
   const startedAt = performance.now()
   await hydratePersistedNoteMetaCache(root)
+  const settings = await getVaultSettings(root)
+  const extraHidden = customHiddenPrimaryRootNames(settings)
   const noteFiles: Array<{
     full: string
     folder: NoteFolder
@@ -2691,7 +2757,7 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
       const childReal = await resolveDirDescent(full, entry, dirReal, ancestors)
       if (childReal !== null) {
         if (entry.name.startsWith('.')) continue
-        if (isPrimaryRoot && dirAbs === topAbs && shouldHidePrimaryRootEntry(entry.name)) continue
+        if (isPrimaryRoot && dirAbs === topAbs && shouldHidePrimaryRootEntry(entry.name, extraHidden)) continue
         ancestors.add(childReal)
         await walkFolder(folder, full, childReal, topAbs, isPrimaryRoot, ancestors)
         ancestors.delete(childReal)
@@ -2785,7 +2851,7 @@ function resolveSafe(root: string, rel: string): string {
 
 export async function readNote(root: string, rel: string): Promise<NoteContent> {
   const abs = resolveSafe(root, rel)
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   const body = await fs.readFile(abs, 'utf8')
   const meta = await readMeta(root, abs, folder)
@@ -2798,7 +2864,7 @@ export async function writeNote(root: string, rel: string, body: string): Promis
   await fs.writeFile(abs, body, 'utf8')
   invalidateNoteMetaCache(root, rel)
   invalidateVaultTextSearchCache(root)
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
 }
@@ -2938,7 +3004,7 @@ export async function appendToNote(
   position: 'start' | 'end'
 ): Promise<NoteMeta> {
   const abs = resolveSafe(root, rel)
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   const existing = await fs.readFile(abs, 'utf8')
   const trimmedAddition = body.replace(/\s+$/u, '')
@@ -3194,7 +3260,7 @@ export async function createExcalidraw(
  */
 export async function convertObsidianExcalidraw(root: string, rel: string): Promise<NoteMeta> {
   const abs = resolveSafe(root, rel)
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Drawing is not in a known folder: ${rel}`)
   const markdown = await fs.readFile(abs, 'utf8')
   if (!isObsidianExcalidrawPath(rel) && !isObsidianExcalidrawMarkdown(markdown)) {
@@ -3244,7 +3310,7 @@ export async function importExternalNote(root: string, sourceAbsPath: string): P
   const rel = toPosix(path.relative(root, destAbs))
   invalidateNoteMetaCache(root, rel)
   invalidateVaultTextSearchCache(root)
-  return await readMeta(root, destAbs, folderForRelativePath(rel) ?? 'inbox')
+  return await readMeta(root, destAbs, folderForRelativePath(rel, await getVaultSettings(root)) ?? 'inbox')
 }
 
 export async function renameNote(
@@ -3253,7 +3319,7 @@ export async function renameNote(
   nextTitle: string
 ): Promise<NoteMeta> {
   const abs = resolveSafe(root, rel)
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   const dir = path.dirname(abs)
   const trimmed = sanitizeNoteTitle(nextTitle)
@@ -3336,7 +3402,7 @@ async function updateInboundWikilinks(
  * the reverse move puts the note back in the subfolder it came from.
  */
 async function folderSubpathOf(root: string, abs: string): Promise<string> {
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) return ''
   const sourceRoot = await folderRoot(root, folder)
   const relDir = path.relative(sourceRoot, path.dirname(abs))
@@ -3389,10 +3455,12 @@ export function unarchiveNote(root: string, rel: string): Promise<NoteMeta> {
 }
 
 export async function emptyTrash(root: string): Promise<void> {
-  const trashDir = path.join(root, 'trash')
+  const trashDir = await folderRoot(root, 'trash')
+  const settings = await getVaultSettings(root)
+  const trashRelPrefix = resolveFolderPath('trash', settings.systemFolderPaths)
   try {
     const entries = await fs.readdir(trashDir)
-    await Promise.all(entries.map((e) => removeNoteComments(root, `trash/${e}`)))
+    await Promise.all(entries.map((e) => removeNoteComments(root, `${trashRelPrefix}/${e}`)))
     await Promise.all(
       entries.map((e) => fs.rm(path.join(trashDir, e), { recursive: true, force: true }))
     )
@@ -3863,7 +3931,7 @@ export async function moveNote(
 
   // No-op if the source already lives at the destination.
   if (path.dirname(oldAbs) === destDir) {
-    const folder = folderOf(root, oldAbs)
+    const folder = await folderOf(root, oldAbs)
     if (!folder) throw new Error(`Note not in a known folder: ${oldRel}`)
     return await readMeta(root, oldAbs, folder)
   }
@@ -3884,7 +3952,7 @@ export async function moveNote(
 
 export async function duplicateNote(root: string, rel: string): Promise<NoteMeta> {
   const abs = resolveSafe(root, rel)
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   const dir = path.dirname(abs)
   const ext = path.extname(abs)

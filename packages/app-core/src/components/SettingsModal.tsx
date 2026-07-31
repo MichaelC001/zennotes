@@ -84,6 +84,7 @@ import {
   DEFAULT_SYSTEM_FOLDER_LABELS,
   getSystemFolderLabel,
 } from "../lib/system-folder-labels";
+import { DEFAULT_FOLDER_PATHS, resolveFolderPath } from "@shared/system-folder-paths";
 import {
   normalizeDailyNoteLocale,
   normalizeDailyNotesDirectory,
@@ -4022,6 +4023,10 @@ export function SettingsModal(): JSX.Element {
             "archive-label",
             "trash-label",
             "tasks-label",
+            "inbox-path",
+            "quick-notes-path",
+            "archive-path",
+            "trash-path",
           ],
           content: (
             <div className="space-y-6">
@@ -4077,6 +4082,47 @@ export function SettingsModal(): JSX.Element {
                   {getSystemFolderLabel("trash", systemFolderLabels)}, and{" "}
                   {getSystemFolderLabel("tasks", systemFolderLabels)}.
                 </InlineNote>
+              </Section>
+              <Section
+                title="Folder Paths"
+                description="Map each system folder to a directory in your vault. Leave empty for the default. Changing a path does not move existing notes."
+              >
+                <div className="space-y-6">
+                  {(
+                    [
+                      { key: "inbox" as const, label: "Inbox path", desc: "Main notes area." },
+                      { key: "quick" as const, label: "Quick Notes path", desc: "Quick-capture folder." },
+                      { key: "archive" as const, label: "Archive path", desc: "Cold-storage notes." },
+                      { key: "trash" as const, label: "Trash path", desc: "Deleted-note recovery." },
+                    ] as const
+                  ).map(({ key, label, desc }) => (
+                    <TextInputRow
+                      key={key}
+                      label={label}
+                      description={desc}
+                      value={vaultSettings.systemFolderPaths?.[key] ?? ""}
+                      placeholder={DEFAULT_FOLDER_PATHS[key]}
+                      settingId={`${key}-path`}
+                      onChange={(next) => {
+                        const trimmed = (next ?? "").trim()
+                        void persistVaultSettings({
+                          ...vaultSettings,
+                          systemFolderPaths: {
+                            ...vaultSettings.systemFolderPaths,
+                            [key]: trimmed || undefined,
+                          },
+                        });
+                      }}
+                    />
+                  ))}
+                  <InlineNote>
+                    Resolved paths:{" "}
+                    {(["inbox", "quick", "archive", "trash"] as const)
+                      .map((f) => resolveFolderPath(f, vaultSettings.systemFolderPaths))
+                      .join(", ")}
+                    .
+                  </InlineNote>
+                </div>
               </Section>
             </div>
           ),

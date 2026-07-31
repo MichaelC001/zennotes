@@ -18,6 +18,7 @@ import {
   type NoteMeta,
   type VaultSettings
 } from '@shared/ipc'
+import { buildReverseFolderMap, normalizeSystemFolderPaths, resolveFolderPath } from '@shared/system-folder-paths'
 import { getISOWeek, getISOWeekYear, mondayOfISOWeek } from './template-render'
 
 const SYSTEM_FOLDERS = new Set<NoteFolder>(['inbox', 'quick', 'archive', 'trash'])
@@ -651,6 +652,7 @@ export function normalizeVaultSettings(
     folderIcons: normalizedFolderIcons,
     folderColors: normalizedFolderColors,
     favorites: normalizedFavorites,
+    systemFolderPaths: normalizeSystemFolderPaths(settings?.systemFolderPaths),
     // Per-vault view overrides (#292): passed through as-is; the store validates
     // each value when it overlays them onto the live prefs.
     ...(settings?.view ? { view: settings.view } : {})
@@ -915,11 +917,8 @@ export function notePathWithinFolder(
   settings: VaultSettings | null | undefined
 ): string {
   if (folder === 'inbox' && isPrimaryNotesAtRoot(settings)) return path
-  const prefix = `${folder}/`
-  // Case-insensitive so a note under a capitalized on-disk system folder
-  // (e.g. `Inbox/`) lands in the same subpath as its sibling assets, which use
-  // the same lenient stripping. Mirrors `assetPathWithinFolder`. (#186)
-  return path.toLowerCase().startsWith(prefix) ? path.slice(prefix.length) : path
+  const prefix = `${resolveFolderPath(folder, settings?.systemFolderPaths)}/`
+  return path.toLowerCase().startsWith(prefix.toLowerCase()) ? path.slice(prefix.length) : path
 }
 
 export function noteFolderSubpath(
@@ -1465,9 +1464,12 @@ export function findDateNoteByTitle(
 // `listAssets`/the watcher walk real directory entries and preserve the on-disk
 // case (e.g. `Inbox/…`). Comparing case-sensitively dropped those assets to
 // `null`, so a capitalized `Inbox/` showed its notes but hid its images/PDFs. (#186)
-function systemFolderForTopSegment(top: string): NoteFolder | null {
+function systemFolderForTopSegment(
+  top: string,
+  reverseMap: Map<string, NoteFolder>
+): NoteFolder | null {
   const lower = top.toLowerCase()
-  return SYSTEM_FOLDERS.has(lower as NoteFolder) ? (lower as NoteFolder) : null
+  return SYSTEM_FOLDERS.has(lower as NoteFolder) ? (lower as NoteFolder) : reverseMap.get(lower) ?? null
 }
 
 export function folderForVaultRelativePath(
@@ -1477,7 +1479,10 @@ export function folderForVaultRelativePath(
   const normalized = relPath.replace(/\\/g, '/').replace(/^\/+/, '')
   const top = normalized.split('/')[0] ?? ''
   if (!top || top.startsWith('.')) return null
-  const system = systemFolderForTopSegment(top)
+  const reverseMap = settings?.systemFolderPaths
+    ? buildReverseFolderMap(settings.systemFolderPaths)
+    : new Map<string, NoteFolder>()
+  const system = systemFolderForTopSegment(top, reverseMap)
   if (system) return system
   if (isPrimaryNotesAtRoot(settings) && !RESERVED_ROOT_NAMES.has(top.toLowerCase())) return 'inbox'
   return null
@@ -1490,10 +1495,8 @@ export function assetPathWithinFolder(
 ): string {
   const normalized = assetPath.replace(/\\/g, '/').replace(/^\/+/, '')
   if (folder === 'inbox' && isPrimaryNotesAtRoot(settings)) return normalized
-  const prefix = `${folder}/`
-  // Strip the system-folder prefix case-insensitively so a capitalized on-disk
-  // folder (e.g. `Inbox/`) lands in the same subpath tree as its notes. (#186)
-  return normalized.toLowerCase().startsWith(prefix)
+  const prefix = `${resolveFolderPath(folder, settings?.systemFolderPaths)}/`
+  return normalized.toLowerCase().startsWith(prefix.toLowerCase())
     ? normalized.slice(prefix.length)
     : normalized
 }

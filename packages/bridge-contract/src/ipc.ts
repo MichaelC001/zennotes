@@ -428,6 +428,15 @@ export interface VaultSettings {
    * distinguishable. Order is the display order in the Favorites section.
    */
   favorites: string[]
+  /**
+   * Per-system-folder on-disk path overrides (#115). Maps internal folder IDs
+   * to vault-relative directory names (e.g. `{ inbox: '01 - Entry', archive: 'Archive' }`).
+   * Absent entries fall back to the default folder name (same as the ID).
+   * Notes stored in remapped folders retain their vault-relative paths as-is
+   * (e.g. `01 - Entry/Projects/Idea.md`), while `NoteMeta.folder` remains the
+   * internal ID (`inbox`).
+   */
+  systemFolderPaths?: Partial<Record<NoteFolder, string>>
 }
 
 export const DEFAULT_DAILY_NOTES_DIRECTORY = 'Daily Notes'
@@ -467,7 +476,8 @@ export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
   tasksLocation: { mode: 'primary' },
   folderIcons: {},
   folderColors: {},
-  favorites: []
+  favorites: [],
+  systemFolderPaths: {}
 }
 
 export interface NoteMeta {

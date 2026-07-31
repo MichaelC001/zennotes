@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { EditorView } from '@codemirror/view'
 import { DEFAULT_VAULT_SETTINGS } from '@shared/ipc'
+import { resolveFolderPath } from '@shared/system-folder-paths'
 import type {
   AssetMeta,
   DateNotePatternSettings,
@@ -7859,13 +7860,16 @@ export const useStore = create<Store>((set, get) => {
   renameFolder: async (folder, oldSubpath, newSubpath) => {
     await window.zen.renameFolder(folder, oldSubpath, newSubpath)
 
-    const oldPrefix = `${folder}/${oldSubpath}/`
-    const newPrefix = `${folder}/${newSubpath}/`
+    const folderPath = resolveFolderPath(folder, get().vaultSettings.systemFolderPaths)
+    const oldPrefix = `${folderPath}/${oldSubpath}/`
+    const newPrefix = `${folderPath}/${newSubpath}/`
     const rewritePath = (p: string): string =>
-      p.startsWith(oldPrefix) ? newPrefix + p.slice(oldPrefix.length) : p
+      p.toLowerCase().startsWith(oldPrefix.toLowerCase())
+        ? newPrefix + p.slice(oldPrefix.length)
+        : p
 
     const notes = get().notes.map((n) =>
-      n.path.startsWith(oldPrefix) ? { ...n, path: rewritePath(n.path) } : n
+      n.path.toLowerCase().startsWith(oldPrefix.toLowerCase()) ? { ...n, path: rewritePath(n.path) } : n
     )
     const folders = get().folders.map((f) => {
       if (f.folder !== folder) return f
@@ -7956,7 +7960,8 @@ export const useStore = create<Store>((set, get) => {
     ) {
       set({ view: { kind: 'folder', folder, subpath: '' } })
     }
-    const prefix = `${folder}/${subpath}/`
+    const folderPath = resolveFolderPath(folder, get().vaultSettings.systemFolderPaths)
+    const prefix = `${folderPath}/${subpath}/`
     const nextFolderIcons = removeFolderIcons(get().vaultSettings.folderIcons, folder, subpath)
     const nextFolderColors = removeFolderColors(get().vaultSettings.folderColors, folder, subpath)
     set((s) => {
