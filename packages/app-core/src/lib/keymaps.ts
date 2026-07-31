@@ -1171,6 +1171,17 @@ export function isMacPlatform(): boolean {
   return /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
 }
 
+export function isLinuxPlatform(): boolean {
+  const runtimePlatform = getRuntimePlatform();
+  if (runtimePlatform) return runtimePlatform === "linux";
+  if (typeof navigator === "undefined") return false;
+  // Android's user agent also says "Linux"; the X11/Wayland desktops this
+  // distinguishes are the ones that say "Linux" without saying "Android".
+  return (
+    /Linux|X11/i.test(navigator.platform) && !/Android/i.test(navigator.userAgent)
+  );
+}
+
 function isModifierKey(key: string): boolean {
   return (
     key === "Shift" || key === "Control" || key === "Alt" || key === "Meta"
@@ -1426,7 +1437,12 @@ export function normalizeKeymapOverrides(input: unknown): KeymapOverrides {
     const raw = (input as Record<string, unknown>)[definition.id];
     if (typeof raw !== "string") continue;
     const normalized = normalizeKeymapBinding(definition.id, raw);
-    if (normalized && normalized !== definition.defaultBinding) {
+    // The platform's default, not the cross-platform one: a definition with a
+    // `defaultBindingMac` has two defaults, and comparing against the wrong one
+    // on macOS threw away a deliberate rebind back to the Mac default (it read
+    // as "same as default, drop it") while keeping the Mac default itself as a
+    // stored override on Windows/Linux.
+    if (normalized && normalized !== getDefaultKeymapBinding(definition.id)) {
       overrides[definition.id] = normalized;
     }
   }

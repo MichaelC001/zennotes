@@ -4103,6 +4103,7 @@ export function SettingsModal(): JSX.Element {
                       value={vaultSettings.systemFolderPaths?.[key] ?? ""}
                       placeholder={DEFAULT_FOLDER_PATHS[key]}
                       settingId={`${key}-path`}
+                      commitOnBlur
                       onChange={(next) => {
                         const trimmed = (next ?? "").trim()
                         void persistVaultSettings({

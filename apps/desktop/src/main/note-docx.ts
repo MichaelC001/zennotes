@@ -284,11 +284,23 @@ const CODE_SHADE = 'F2F2F2'
 const NUMBERING_BULLETS = 'zn-bullets'
 const NUMBERING_ORDERED = 'zn-ordered'
 
+// C0 control characters (and DEL) are not legal XML 1.0 content, and docx
+// writes run text into word/document.xml verbatim. A note holding a stray
+// \x01 or \x0B (pasted from a terminal capture, a binary blob, some
+// exporters' output) therefore produced a .docx Word refuses to open at all
+// ("unreadable content"). Tab, LF, and CR are legal and carry meaning here
+// (LF becomes a Word line break below), so they survive.
+const XML_ILLEGAL_CONTROL_CHARS_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g
+
+function stripControlChars(text: string): string {
+  return text.replace(XML_ILLEGAL_CONTROL_CHARS_RE, '')
+}
+
 function textRunsOf(runs: IRRun[]): (TextRun | ExternalHyperlink)[] {
   const out: (TextRun | ExternalHyperlink)[] = []
   for (const run of runs) {
     // Line breaks inside a run become real Word line breaks.
-    const pieces = run.text.split('\n')
+    const pieces = stripControlChars(run.text).split('\n')
     const make = (extra: { style?: string } = {}): TextRun[] =>
       pieces.map(
         (piece, index) =>
@@ -340,14 +352,16 @@ async function blockToDocx(
         })
       ]
     case 'code':
-      return block.lines.map(
-        (line, index) =>
-          new Paragraph({
-            spacing: { after: index === block.lines.length - 1 ? 200 : 0 },
-            shading: { type: ShadingType.CLEAR, fill: CODE_SHADE },
-            children: [new TextRun({ text: line === '' ? ' ' : line, font: MONO_FONT, size: 19 })]
-          })
-      )
+      return block.lines.map((line, index) => {
+        // A fenced block is where terminal captures (and their control bytes)
+        // most often land, so it needs the same strip as prose runs.
+        const text = stripControlChars(line)
+        return new Paragraph({
+          spacing: { after: index === block.lines.length - 1 ? 200 : 0 },
+          shading: { type: ShadingType.CLEAR, fill: CODE_SHADE },
+          children: [new TextRun({ text: text === '' ? ' ' : text, font: MONO_FONT, size: 19 })]
+        })
+      })
     case 'quote': {
       const out: (Paragraph | Table)[] = []
       for (const inner of block.blocks) {
@@ -440,7 +454,10 @@ async function blockToDocx(
         return [
           new Paragraph({
             children: [
-              new TextRun({ text: block.alt ? `[${block.alt}]` : `[image: ${block.src}]`, italics: true })
+              new TextRun({
+                text: stripControlChars(block.alt ? `[${block.alt}]` : `[image: ${block.src}]`),
+                italics: true
+              })
             ]
           })
         ]

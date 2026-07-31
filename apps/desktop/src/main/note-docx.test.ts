@@ -129,4 +129,34 @@ describe('renderNoteDocx', () => {
       }
     }
   )
+
+  // C0 control characters are illegal in XML 1.0, and docx writes run text
+  // into document.xml verbatim: one stray \x01 pasted from a terminal capture
+  // used to be enough for Word to reject the whole file as unreadable.
+  it.skipIf(process.platform === 'win32')(
+    'strips XML-illegal control characters out of runs, code, and alt text',
+    async () => {
+      const markdown =
+        'A \x01bell\x07 and a \x0Bvtab in prose.\n\n' +
+        '```\nlog\x02line\n```\n\n' +
+        '![al\x03t](missing.png)\n\n' +
+        '| a\x04 | b |\n| - | - |\n| 1\x05 | 2 |\n'
+      const buffer = await renderNoteDocx(markdown, 'file', async () => null)
+      const dir = await mkdtemp(path.join(os.tmpdir(), 'zennotes-docx-ctrl-'))
+      try {
+        const file = path.join(dir, 'out.docx')
+        await writeFile(file, buffer)
+        const xml = execFileSync('unzip', ['-p', file, 'word/document.xml'], {
+          encoding: 'utf8'
+        })
+        expect(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(xml)).toBe(false)
+        // The surrounding text is untouched; only the control bytes go.
+        expect(xml).toContain('bell')
+        expect(xml).toContain('logline')
+        expect(xml).toContain('alt')
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    }
+  )
 })

@@ -17,6 +17,8 @@
 // guard disarms itself immediately after one event or the deadline, whichever
 // comes first.
 
+import { isLinuxPlatform } from './keymaps'
+
 /** Long enough for the click's paste to arrive, far too short to eat a real one. */
 const GUARD_WINDOW_MS = 150
 
@@ -28,8 +30,12 @@ let disarm: (() => void) | null = null
  * Call it from the middle-click handler BEFORE closing the tab, so the guard
  * exists no matter how quickly the paste follows. Re-arming while armed just
  * extends the deadline; two guards would eat two pastes.
+ *
+ * A no-op off Linux: primary-selection paste is a Linux desktop convention, so
+ * anywhere else the guard could only ever cancel a paste the user meant.
  */
 export function armMiddleClickPasteGuard(windowMs: number = GUARD_WINDOW_MS): void {
+  if (!isLinuxPlatform()) return
   disarm?.()
 
   const onPaste = (event: Event): void => {
