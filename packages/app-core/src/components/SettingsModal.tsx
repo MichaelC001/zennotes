@@ -2460,10 +2460,10 @@ export function SettingsModal(): JSX.Element {
                   const hidden = hiddenPresetsInOrder(hiddenWorkflowPresets).length;
                   const copy =
                     hidden === 0
-                      ? `All ${total} shipped recipes appear in the New-workflow gallery.`
+                      ? `All ${total} shipped recipes appear in the recipe gallery, behind New workflow in the Workflows view.`
                       : hidden === total
-                        ? "Every shipped recipe is hidden; the gallery starts from Blank."
-                        : `${hidden} of ${total} recipes are hidden from the New-workflow gallery (press x on a recipe there to hide one at a time).`;
+                        ? "Every shipped recipe is hidden; the recipe gallery (New workflow) starts from Blank."
+                        : `${hidden} of ${total} recipes are hidden from the recipe gallery, behind New workflow (press x on a recipe there to hide one at a time).`;
                   return (
                     <div
                       className="flex items-center justify-between gap-5 px-5 py-4"

@@ -177,7 +177,7 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
   {
     title: 'Run from anywhere',
     intro:
-      'Once a workflow is active the view is optional: "Run Workflow…" opens a browsable picker, Space a opens this view from anywhere with Vim on, and pressing x in the New-workflow gallery hides recipes you will never use.',
+      'Once a workflow is active the view is optional: "Run Workflow…" opens a browsable picker, Space a opens this view from anywhere with Vim on, and pressing x in the recipe gallery (the New workflow button) hides recipes you will never use.',
     tasks: [
       {
         text: 'Open the command palette and spot "Run: Tutorial reading list". (No need to run it.)',

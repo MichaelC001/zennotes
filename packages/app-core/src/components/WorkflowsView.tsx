@@ -5908,8 +5908,8 @@ function WorkflowGallery({
           New workflow
         </div>
         <p className="mt-1 text-xs text-ink-500">
-          Every one of these is a working workflow you can read and change. It arrives as a draft,
-          so it cannot run until you activate it.
+          The recipe gallery: every one of these is a working workflow you can read and change. It
+          arrives as a draft, so it cannot run until you activate it.
         </p>
       </div>
       {/* The keyboard lives on a read-only text field, not on the list.
