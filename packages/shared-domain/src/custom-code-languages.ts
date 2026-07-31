@@ -3,7 +3,21 @@
 export const CUSTOM_CODE_LANGUAGE_SCHEMA_VERSION = 1;
 export const CUSTOM_CODE_LANGUAGE_MAX_BYTES = 2 * 1024 * 1024;
 
-/** Tags with app-defined behavior or bundled editor/preview grammars. */
+/**
+ * Tags with app-defined behavior or bundled editor/preview grammars.
+ *
+ * This is the single authority on "a built-in already owns this tag", and it
+ * has to stay a superset of every tag any highlighting layer claims, because
+ * the layers disagree about how they match: the preview runs lowlight, the
+ * editor runs `@codemirror/language-data` (whose matcher is substring-fuzzy),
+ * and the app itself owns a handful of diagram and embed fences. A tag missing
+ * from this list either shadows a built-in in one surface, or installs fine and
+ * then renders as plain text in the other. Enumerated by hand rather than
+ * imported so shared-domain stays dependency-free; regenerate from
+ * `lowlight`'s `common` + `hljs.getLanguage(name).aliases` and
+ * `@codemirror/language-data`'s `name`/`alias` fields when either is upgraded,
+ * dropping entries that are not legal fence tags ("plain text", "vb.net", …).
+ */
 export const RESERVED_CODE_FENCE_TAGS = [
   "javascript",
   "js",
@@ -202,7 +216,69 @@ export const RESERVED_CODE_FENCE_TAGS = [
   "jsxgraph",
   "function-plot",
   "functionplot",
+  // App-owned fences that the preview turns into a widget rather than code.
+  "embed",
+  "bookmark",
+  // Names and aliases from lowlight's `common` bundle that the list above did
+  // not already cover. rehype-highlight runs on every rendered note, so a
+  // custom language claiming one of these would lose the preview to lowlight
+  // while still winning the editor.
+  "arduino",
+  "ino",
+  "atom",
+  "cjs",
+  "mjs",
+  "cts",
+  "mts",
+  "console",
+  "shellsession",
+  "pycon",
+  "ipython",
+  "irb",
+  "gemspec",
+  "podspec",
+  "thor",
+  "gql",
+  "gyp",
+  "h++",
+  "hh",
+  "hxx",
+  "jsp",
+  "kt",
+  "kts",
+  "mak",
+  "make",
+  "mk",
+  "mkd",
+  "mkdown",
+  "mm",
+  "obj-c",
+  "obj-c++",
+  "patch",
+  "pl",
+  "pm",
+  "plist",
+  "pluto",
+  "text",
+  "txt",
+  "vb",
+  "wsf",
+  "xjb",
+  "xsl",
 ] as const;
+
+let reservedTagSet: Set<string> | null = null;
+
+/**
+ * True when a bundled grammar or an app fence already owns this tag. Callers
+ * that decide "built-in or custom?" at render time must use this rather than
+ * CodeMirror's `matchLanguageName`, whose fuzzy mode matches on substrings and
+ * so hands `jsonnet` to JSON and `crystalline` to Crystal.
+ */
+export function isReservedCodeFenceTag(tag: string): boolean {
+  reservedTagSet ??= new Set<string>(RESERVED_CODE_FENCE_TAGS);
+  return reservedTagSet.has(normalizeCodeFenceTag(tag));
+}
 
 export interface CustomCodeLanguageManifest {
   schemaVersion: 1;

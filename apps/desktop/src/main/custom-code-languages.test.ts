@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,7 +9,9 @@ import {
   ensureCustomCodeLanguagesDir,
   getCustomCodeLanguagesDir,
   installCustomCodeLanguage,
+  isGrammarFastEnough,
   listCustomCodeLanguages,
+  SLOW_GRAMMAR_ERROR,
   updateCustomCodeLanguage,
 } from "./custom-code-languages";
 
@@ -17,6 +19,19 @@ const GLEAM_GRAMMAR = JSON.stringify({
   name: "Gleam",
   scopeName: "source.gleam",
   patterns: [{ match: "\\b(?:fn|let)\\b", name: "keyword.control.gleam" }],
+});
+
+// Passes every structural check and still hangs Oniguruma: nested quantifiers
+// whose match ultimately fails backtrack exponentially, and the vetting corpus
+// feeds exactly the shape that triggers it (a long run plus a failing tail).
+const RUNAWAY_GRAMMAR = JSON.stringify({
+  name: "Runaway",
+  scopeName: "source.runaway",
+  patterns: [
+    { match: "(a+)+Nz$", name: "keyword.control.runaway" },
+    { match: "([a-z]+)+#$", name: "comment.line.runaway" },
+    { match: "(\\s+)+!$", name: "string.quoted.runaway" },
+  ],
 });
 
 let tempConfig: string;
@@ -108,6 +123,39 @@ describe("custom code languages (main)", () => {
     ).rejects.toThrow("already used");
   });
 
+  it("normalizes an id from IPC before deciding whether it replaces a pack", async () => {
+    await installCustomCodeLanguage({
+      fileName: "gleam.tmLanguage.json",
+      grammar: GLEAM_GRAMMAR,
+      id: "gleam",
+      name: "Gleam",
+      aliases: [],
+    });
+
+    await expect(
+      installCustomCodeLanguage({
+        fileName: "gleam.tmLanguage.json",
+        grammar: GLEAM_GRAMMAR,
+        id: "Gleam",
+        name: "Gleam Again",
+        aliases: [],
+      }),
+    ).rejects.toThrow("already exists");
+
+    const replaced = await installCustomCodeLanguage({
+      fileName: "gleam.tmLanguage.json",
+      grammar: GLEAM_GRAMMAR,
+      id: "Gleam",
+      name: "Gleam Again",
+      aliases: [],
+      replace: true,
+    });
+    expect(replaced.id).toBe("gleam");
+    const languages = await listCustomCodeLanguages();
+    expect(languages).toHaveLength(1);
+    expect(languages[0]).toMatchObject({ id: "gleam", name: "Gleam Again" });
+  });
+
   it("surfaces hand-edited broken packs without loading their grammar", async () => {
     const dir = await ensureCustomCodeLanguagesDir();
     const installed = await installCustomCodeLanguage({
@@ -127,4 +175,66 @@ describe("custom code languages (main)", () => {
       error: "This file is not valid JSON.",
     });
   });
+});
+
+// These share the process-wide verdict cache on purpose: the second assertion
+// in each pair is that the cache is what makes the later checks instant.
+describe("grammar vetting", () => {
+  it("kills a grammar that cannot finish the corpus, then remembers the verdict", async () => {
+    expect(await isGrammarFastEnough(GLEAM_GRAMMAR, "source.gleam", 4000)).toBe(
+      true,
+    );
+
+    const timeout = 1500;
+    const firstRun = Date.now();
+    expect(
+      await isGrammarFastEnough(RUNAWAY_GRAMMAR, "source.runaway", timeout),
+    ).toBe(false);
+    expect(Date.now() - firstRun).toBeGreaterThanOrEqual(timeout - 50);
+
+    const secondRun = Date.now();
+    expect(
+      await isGrammarFastEnough(RUNAWAY_GRAMMAR, "source.runaway", timeout),
+    ).toBe(false);
+    expect(Date.now() - secondRun).toBeLessThan(timeout / 2);
+  }, 20_000);
+
+  it("refuses to install a runaway grammar", async () => {
+    await expect(
+      installCustomCodeLanguage({
+        fileName: "runaway.tmLanguage.json",
+        grammar: RUNAWAY_GRAMMAR,
+        id: "runaway",
+        name: "Runaway",
+        aliases: [],
+      }),
+    ).rejects.toThrow(SLOW_GRAMMAR_ERROR);
+    expect(existsSync(join(getCustomCodeLanguagesDir(), "runaway"))).toBe(
+      false,
+    );
+  }, 20_000);
+
+  it("disables a hand-copied runaway grammar instead of shipping it to the renderer", async () => {
+    const folder = join(await ensureCustomCodeLanguagesDir(), "runaway");
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, "grammar.tmLanguage.json"), RUNAWAY_GRAMMAR);
+    await writeFile(
+      join(folder, "manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        id: "runaway",
+        name: "Runaway",
+        aliases: ["runaway"],
+        scopeName: "source.runaway",
+        enabled: true,
+      }),
+    );
+
+    expect((await listCustomCodeLanguages())[0]).toMatchObject({
+      id: "runaway",
+      enabled: false,
+      grammar: "",
+      error: SLOW_GRAMMAR_ERROR,
+    });
+  }, 20_000);
 });

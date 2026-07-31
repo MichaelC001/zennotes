@@ -8,11 +8,11 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
+import { isReservedCodeFenceTag } from "@shared/custom-code-languages";
 import {
   customCodeLanguageRegistry,
   EDITOR_TOKEN_CLASS,
 } from "./custom-code-languages";
-import { resolveCodeLanguage } from "./cm-code-languages";
 
 const refreshCustomLanguages = StateEffect.define<void>();
 
@@ -29,9 +29,13 @@ function buildDecorations(view: EditorView): DecorationSet {
       const body = node.node.getChild("CodeText");
       if (!info || !body) return false;
       const tag = view.state.doc.sliceString(info.from, info.to);
-      // Built-in CodeMirror languages always win, even if a pack was added by
-      // hand with a conflicting alias outside the Settings validation path.
-      if (resolveCodeLanguage(tag)) return false;
+      // Built-in grammars always win, even if a pack was added by hand with a
+      // conflicting alias outside the Settings validation path. The claim is
+      // settled by exact tag, not by `resolveCodeLanguage`: its fallback to
+      // CodeMirror's fuzzy `matchLanguageName` also claims every tag that
+      // merely *contains* a built-in name, which left importable tags like
+      // `jsonnet` and `crystalline` installed but never decorated.
+      if (isReservedCodeFenceTag(tag)) return false;
       if (!customCodeLanguageRegistry.resolve(tag)) return false;
       const source = view.state.doc.sliceString(body.from, body.to);
       for (const token of customCodeLanguageRegistry.tokenize(tag, source)) {
@@ -68,9 +72,14 @@ export const customCodeFenceHighlightExtension: Extension =
       }
 
       update(update: ViewUpdate): void {
+        // `buildDecorations` walks the whole document, so the set does not go
+        // stale when the viewport moves: rebuilding on `viewportChanged` only
+        // re-tokenized every fence on every scroll frame. It does go stale
+        // when the incremental parse catches up, which is how a fence far down
+        // a long note gets decorated at all.
         if (
           update.docChanged ||
-          update.viewportChanged ||
+          syntaxTree(update.state) !== syntaxTree(update.startState) ||
           update.transactions.some((transaction) =>
             transaction.effects.some((effect) =>
               effect.is(refreshCustomLanguages),

@@ -1,5 +1,11 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   RESERVED_CODE_FENCE_TAGS,
   parseTextMateGrammar,
@@ -8,6 +14,7 @@ import {
 } from "@shared/custom-code-languages";
 import { refreshCustomCodeLanguages, useStore } from "../store";
 import {
+  customCodeLanguageRegistry,
   PREVIEW_TOKEN_CLASS,
   tokenizeCustomGrammarPreview,
   type CodeHighlightToken,
@@ -15,6 +22,7 @@ import {
 import { confirmApp } from "../lib/confirm-requests";
 import { TrashIcon, ExternalIcon } from "./icons";
 import { Button } from "./ui/Button";
+import { Modal } from "./ui/Modal";
 
 const DEFAULT_SAMPLE = `module hello
 
@@ -42,11 +50,26 @@ function slugify(value: string): string {
     .slice(0, 64);
 }
 
+// A language the renderer gave up on mid-session is not reflected on disk, so
+// this state comes from the registry rather than the store.
+const subscribeToRegistry = (onChange: () => void): (() => void) =>
+  customCodeLanguageRegistry.subscribe(onChange);
+const registryRevision = (): number => customCodeLanguageRegistry.revision;
+
 export function CustomCodeLanguagesSettings(): JSX.Element {
   const languages = useStore((state) => state.customCodeLanguages);
+  const revision = useSyncExternalStore(subscribeToRegistry, registryRevision);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const quarantined = useMemo(() => {
+    const reasons = new Map<string, string>();
+    for (const language of languages) {
+      const reason = customCodeLanguageRegistry.quarantineReason(language.id);
+      if (reason) reasons.set(language.id, reason);
+    }
+    return reasons;
+  }, [languages, revision]);
 
   const chooseFile = (): void => inputRef.current?.click();
 
@@ -101,7 +124,9 @@ export function CustomCodeLanguagesSettings(): JSX.Element {
       refreshCustomCodeLanguages();
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not update this language.",
+        error instanceof Error
+          ? error.message
+          : "Could not update this language.",
       );
     } finally {
       setBusyId(null);
@@ -125,7 +150,9 @@ export function CustomCodeLanguagesSettings(): JSX.Element {
       refreshCustomCodeLanguages();
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Could not remove this language.",
+        error instanceof Error
+          ? error.message
+          : "Could not remove this language.",
       );
     } finally {
       setBusyId(null);
@@ -193,9 +220,14 @@ export function CustomCodeLanguagesSettings(): JSX.Element {
                   {language.error && (
                     <span className="text-xs text-danger">error</span>
                   )}
+                  {!language.error && quarantined.has(language.id) && (
+                    <span className="text-xs text-warning">paused</span>
+                  )}
                 </div>
                 <div className="mt-0.5 truncate font-mono text-2xs text-ink-400">
-                  {language.error ?? language.aliases.join(" · ")}
+                  {language.error ??
+                    quarantined.get(language.id) ??
+                    language.aliases.join(" · ")}
                 </div>
               </div>
               {!language.error && (
@@ -298,17 +330,6 @@ function LanguageImportDialog({
   }
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
-
-  useEffect(() => {
     let cancelled = false;
     setTokens([]);
     setPreviewError(null);
@@ -381,40 +402,22 @@ function LanguageImportDialog({
     }
   };
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/35 p-6 backdrop-blur-sm"
-      role="presentation"
-      onMouseDown={onClose}
+  return (
+    <Modal
+      size="lg"
+      layer="nested"
+      align="center"
+      onClose={onClose}
+      labelledBy="custom-language-dialog-title"
+      className="flex max-h-[88vh] flex-col"
     >
-      <div
-        className="max-h-[88vh] w-full max-w-3xl overflow-auto rounded-2xl border border-paper-300 bg-paper-50 p-5 shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="custom-language-dialog-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2
-              id="custom-language-dialog-title"
-              className="text-base font-semibold text-ink-900"
-            >
-              {draft.editingId ? "Edit language" : "Add language"}
-            </h2>
-            <p className="mt-1 text-xs text-ink-500">
-              {draft.fileName} · {draft.scopeName}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-sm text-ink-500 hover:text-ink-900"
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+      <Modal.Header
+        titleId="custom-language-dialog-title"
+        title={draft.editingId ? "Edit language" : "Add language"}
+        description={`${draft.fileName} · ${draft.scopeName}`}
+      />
+      <Modal.Body className="flex-1 overflow-auto">
+        <div className="grid gap-4 sm:grid-cols-2">
           <label className="text-xs text-ink-600">
             Display name
             <input
@@ -511,30 +514,27 @@ function LanguageImportDialog({
             {validationError ?? previewError}
           </p>
         )}
+      </Modal.Body>
 
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={
-              !!validationError || !!previewError || previewing || saving
-            }
-            onClick={() => void save()}
-          >
-            {previewing
-              ? "Checking grammar…"
-              : saving
+      <Modal.Footer>
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          disabled={!!validationError || !!previewError || previewing || saving}
+          onClick={() => void save()}
+        >
+          {previewing
+            ? "Checking grammar…"
+            : saving
               ? "Saving…"
               : draft.editingId
                 ? "Save changes"
                 : "Install language"}
-          </Button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+        </Button>
+      </Modal.Footer>
+    </Modal>
   );
 }
 

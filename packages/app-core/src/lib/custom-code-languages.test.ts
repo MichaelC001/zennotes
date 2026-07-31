@@ -32,6 +32,18 @@ const gleam: CustomCodeLanguage = {
   }),
 };
 
+// `jsonnet` is importable (nothing bundled claims it) but CodeMirror's fuzzy
+// `matchLanguageName` used to hand it to JSON on a substring match, which left
+// it installed and never decorated.
+const jsonnet: CustomCodeLanguage = {
+  ...gleam,
+  id: "jsonnet",
+  name: "Jsonnet",
+  aliases: ["jsonnet"],
+  scopeName: "source.jsonnet",
+  grammar: gleam.grammar.replaceAll("gleam", "jsonnet"),
+};
+
 afterEach(async () => {
   await customCodeLanguageRegistry.replace([]);
 });
@@ -101,5 +113,66 @@ describe("custom code language runtime", () => {
     expect(host.querySelector(".tok-keyword")).toBeNull();
     view.destroy();
     host.remove();
+  });
+
+  it("decorates a tag that only fuzzy-matched a built-in", async () => {
+    await customCodeLanguageRegistry.replace([jsonnet]);
+    // The fuzzy matcher claims this tag for JSON; the reserved list does not.
+    expect(resolveCodeLanguage("jsonnet")).not.toBeNull();
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({
+        doc: "```jsonnet\nlet answer = 42\n```",
+        extensions: [
+          markdownLanguage({ codeLanguages: resolveCodeLanguage }),
+          customCodeFenceHighlightExtension,
+        ],
+      }),
+    });
+    expect(host.querySelector(".tok-keyword")?.textContent).toBe("let");
+    view.destroy();
+    host.remove();
+  });
+
+  it("drops a language that blows its tokenize budget instead of paying it twice", async () => {
+    await customCodeLanguageRegistry.replace([gleam]);
+    const engine = await import("./custom-code-language-engine");
+    const loaded = customCodeLanguageRegistry.resolve("gleam");
+    if (!loaded) throw new Error("gleam should be registered");
+
+    // Constructing a genuinely catastrophic grammar is timing-dependent, so
+    // the stall is injected: what matters is that one slow fence is enough.
+    const realTokenizeLine = loaded.grammar.tokenizeLine.bind(loaded.grammar);
+    let calls = 0;
+    loaded.grammar.tokenizeLine = ((line, state, limit) => {
+      calls++;
+      const until = performance.now() + 120;
+      while (performance.now() < until) {
+        /* burn past the per-line budget */
+      }
+      return realTokenizeLine(line, state, limit);
+    }) as typeof loaded.grammar.tokenizeLine;
+
+    expect(customCodeLanguageRegistry.tokenize("gleam", "let n = 1")).toEqual(
+      [],
+    );
+    expect(calls).toBe(1);
+    expect(engine.quarantinedCustomLanguages().get("gleam")).toContain(
+      "too slow",
+    );
+    expect(customCodeLanguageRegistry.quarantineReason("gleam")).toContain(
+      "too slow",
+    );
+
+    // Every alias is unhooked, so the next render never reaches the grammar.
+    expect(customCodeLanguageRegistry.resolve("gleam")).toBeNull();
+    expect(customCodeLanguageRegistry.resolve("gl")).toBeNull();
+    expect(customCodeLanguageRegistry.tokenize("gleam", "let n = 1")).toEqual(
+      [],
+    );
+    expect(calls).toBe(1);
   });
 });

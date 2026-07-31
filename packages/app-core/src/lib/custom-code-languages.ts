@@ -31,6 +31,7 @@ export interface CodeHighlightToken {
 type CustomCodeLanguageEngine = typeof import("./custom-code-language-engine");
 
 const MAX_BLOCK_CHARS = 200_000;
+const TOKEN_CACHE_LIMIT = 48;
 
 class CustomCodeLanguageRegistry {
   private byAlias = new Map<string, EngineLoadedLanguage>();
@@ -38,26 +39,48 @@ class CustomCodeLanguageRegistry {
   private listeners = new Set<() => void>();
   private generation = 0;
   private cache = new Map<string, CodeHighlightToken[]>();
+  private quarantined = new Map<string, string>();
   revision = 0;
 
+  /**
+   * Never rejects. Both callers fire this and walk away (`void applyCustom…`),
+   * so a failing dynamic import or a dead WASM engine has to end as "no custom
+   * languages" rather than as an unhandled rejection on every settings change.
+   */
   async replace(definitions: readonly CustomCodeLanguage[]): Promise<void> {
     const generation = ++this.generation;
     const hasEnabledLanguage = definitions.some(
       (definition) =>
         definition.enabled && !definition.error && !!definition.grammar,
     );
-    const engine = hasEnabledLanguage
-      ? await import("./custom-code-language-engine")
-      : null;
-    const next = engine
-      ? await engine.buildTextMateRegistry(definitions)
-      : new Map<string, EngineLoadedLanguage>();
+    let engine: CustomCodeLanguageEngine | null = null;
+    let next = new Map<string, EngineLoadedLanguage>();
+    try {
+      if (hasEnabledLanguage) {
+        engine = await import("./custom-code-language-engine");
+        next = await engine.buildTextMateRegistry(definitions);
+      }
+    } catch (error) {
+      engine = null;
+      next = new Map();
+      console.warn("[zen] could not load custom code languages:", error);
+    }
     if (generation !== this.generation) return;
     this.byAlias = next;
     this.engine = engine;
     this.cache.clear();
+    this.quarantined.clear();
     this.revision++;
     for (const listener of this.listeners) listener();
+  }
+
+  /**
+   * Why a language stopped highlighting mid-session, for Settings to show.
+   * Mirrored off the engine so the UI can ask without pulling the TextMate
+   * bundle into the entry chunk.
+   */
+  quarantineReason(id: string): string | null {
+    return this.quarantined.get(id) ?? null;
   }
 
   /** True when no language is installed and enabled, i.e. nothing here can
@@ -77,15 +100,49 @@ class CustomCodeLanguageRegistry {
       return [];
     const key = `${this.revision}\0${loaded.definition.id}\0${source}`;
     const cached = this.cache.get(key);
-    if (cached) return cached;
-    const tokens = this.engine.tokenizeWithGrammar(loaded.grammar, source);
+    // Re-insert on hit so the map evicts least-recently-used, not
+    // first-inserted: a note with more fences than the cap used to age out the
+    // entry it was about to need and re-tokenize everything per keystroke.
+    if (cached) {
+      this.cache.delete(key);
+      this.cache.set(key, cached);
+      return cached;
+    }
+    const tokens = this.engine.tokenizeWithGrammar(loaded, source);
+    const reason = this.engine
+      .quarantinedCustomLanguages()
+      .get(loaded.definition.id);
+    if (reason) {
+      this.dropQuarantined(loaded.definition.id, reason);
+      return tokens;
+    }
     this.cache.set(key, tokens);
-    while (this.cache.size > 48) {
+    while (this.cache.size > TOKEN_CACHE_LIMIT) {
       const oldest = this.cache.keys().next().value;
       if (typeof oldest !== "string") break;
       this.cache.delete(oldest);
     }
     return tokens;
+  }
+
+  /**
+   * Unhook every alias of a language the engine just gave up on, so the next
+   * render treats its fences as plain text instead of paying the same stall
+   * again. Listeners are notified off the current task because `tokenize` runs
+   * inside a CodeMirror view update, which must not dispatch re-entrantly.
+   */
+  private dropQuarantined(id: string, reason: string): void {
+    this.quarantined.set(id, reason);
+    for (const [alias, loaded] of this.byAlias) {
+      if (loaded.definition.id === id) this.byAlias.delete(alias);
+    }
+    this.cache.clear();
+    // Bumping the revision is what evicts already-rendered Markdown for this
+    // language from the HTML cache in `markdown.ts`.
+    this.revision++;
+    queueMicrotask(() => {
+      for (const listener of this.listeners) listener();
+    });
   }
 
   subscribe(listener: () => void): () => void {
@@ -108,7 +165,7 @@ export async function tokenizeCustomGrammarPreview(
   const loaded = registry.get(
     normalizeCodeFenceTag(definition.aliases[0] ?? definition.id),
   );
-  return loaded ? engine.tokenizeWithGrammar(loaded.grammar, source) : [];
+  return loaded ? engine.tokenizeWithGrammar(loaded, source) : [];
 }
 
 export const EDITOR_TOKEN_CLASS: Record<CodeTokenKind, string> = {
