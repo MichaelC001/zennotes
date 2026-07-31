@@ -63,6 +63,13 @@ const budgets = {
 }
 const enforceDeferredChunks =
   process.env.ZEN_PERF_ENFORCE === '1' || process.env.ZEN_PERF_ENFORCE_DEFERRED_CHUNKS === '1'
+// The gate used to be opt-out. Anyone still exporting the old escape hatch is
+// getting enforcement they think they turned off, silently.
+if (process.env.ZEN_PERF_ALLOW_DEFERRED_CHUNKS) {
+  console.warn(
+    'ZEN_PERF_ALLOW_DEFERRED_CHUNKS is set but no longer does anything; the deferred-chunk check is opt-in via ZEN_PERF_ENFORCE (or ZEN_PERF_ENFORCE_DEFERRED_CHUNKS).'
+  )
+}
 const deferredNormalFlowChunkPatterns = [
   /^Preview-/,
   /^NoteHoverPreview-/,
