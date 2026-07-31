@@ -5,17 +5,27 @@
 // returns `WorkflowOp`s for the caller to apply. Dry run is therefore not a flag
 // somebody can forget to pass, it is the only thing the engine is able to do.
 //
-// Three rules keep the rest of the file honest:
+// Four rules keep the rest of the file honest:
 //
-//   1. Nothing throws. A missing arg, an uncompilable regex, an unknown wire, a
-//      reader that rejects: each becomes a `Diagnostic` and the plan carries on.
-//      A half-written workflow still has to plan, because the canvas draws the
-//      plan and the author is editing while looking at it.
+//   1. Nothing throws. A missing arg, an uncompilable pattern, an unknown wire,
+//      a reader that rejects: each becomes a `Diagnostic` and the plan carries
+//      on. A half-written workflow still has to plan, because the canvas draws
+//      the plan and the author is editing while looking at it.
 //   2. A step that cannot be evaluated never *widens* the note set. It yields
 //      the empty set (an unevaluable filter matches nothing) or aborts the rest
 //      of that one pipeline. The engine must never invent a write the author did
 //      not ask for, and every failure mode is chosen with that in mind.
-//   3. Note bodies are read lazily, only for steps whose `NodeDef.needsBody` is
+//   3. A statement that raised an ERROR contributes no ops at all. Rule 2 hands
+//      a broken filter the empty set, and an empty set is a perfectly good thing
+//      to render, so `all | where title matches [unclosed | write "Report.md"`
+//      planned a zero-byte overwrite of the report right next to the diagnostic
+//      saying the filter never ran. The diagnostics survive, the writes do not.
+//      A wire that is genuinely empty and raised nothing still writes, because
+//      an empty report is a report somebody asked for. The limits go through the
+//      same rule: a run stopped by `maxOps` or `maxDepth` leaves behind the
+//      statements that fitted whole, and never half of one, so a note can never
+//      end up with the first of its two tags and not the second.
+//   4. Note bodies are read lazily, only for steps whose `NodeDef.needsBody` is
 //      set, only for the notes actually on the wire at that point, and cached
 //      for the whole run including across `call` recursion. A `where` over 5000
 //      notes therefore touches disk exactly zero times.
@@ -25,9 +35,22 @@
 // (see `validate`), but a resolver that changes between runs can still build one
 // dynamically, which is what `maxDepth` and `maxOps` are for.
 
+import { compileMatcher } from './matches'
+import type { Matcher } from './matches'
 import { isCompareOp, nodeDef, RENDER_STYLES } from './nodes'
 import type { CompareOp, NodeDef, RenderStyle } from './nodes'
-import { folderTarget, moveTarget, relBasename, relDirname, renameTarget, stripNoteExtension } from './paths'
+import {
+  folderPathProblem,
+  folderTarget,
+  moveTarget,
+  noteExtensionOf,
+  notePathProblem,
+  NOTE_EXTENSIONS,
+  relBasename,
+  relDirname,
+  renameTarget,
+  stripNoteExtension
+} from './paths'
 import { parseFrontmatter } from '../template-files'
 import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_OPS, IRREVERSIBLE_OP_KINDS, isRunnable } from './types'
 import type {
@@ -68,6 +91,12 @@ interface RunState {
   bodies: Map<string, string>
   /** `listNotes()` result, or null until the first source asks for it. */
   notes: WorkflowNote[] | null
+  /** Every path a `create-each` has already claimed, so two notes with the same
+   *  title cannot plan the same new note twice. See `uniqueCreatePath`. */
+  created: Set<string>
+  /** Error diagnostics so far. `runStatement` reads it before and after a
+   *  statement to decide whether that statement may keep its ops (rule 3). */
+  errors: number
   maxDepth: number
   maxOps: number
   /** Set when a limit was hit. Every loop checks it and unwinds. */
@@ -101,6 +130,8 @@ export async function planWorkflow(workflow: Workflow, ctx: PlanContext): Promis
     wires: {},
     bodies: new Map(),
     notes: null,
+    created: new Set(),
+    errors: 0,
     maxDepth: ctx.maxDepth ?? DEFAULT_MAX_DEPTH,
     maxOps: ctx.maxOps ?? DEFAULT_MAX_OPS,
     stopped: false,
@@ -121,9 +152,17 @@ export async function planWorkflow(workflow: Workflow, ctx: PlanContext): Promis
 /*  Diagnostics                                                               */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Record a diagnostic, and with an error also record that SOMETHING in the
+ * statement being evaluated could not be worked out. `runStatement` reads the
+ * count to decide whether the ops that statement planned are trustworthy, which
+ * is rule 3 of the module header, so every error raised anywhere in this file
+ * participates in that rule by construction rather than by remembering to.
+ */
 function diagnose(state: RunState, severity: Diagnostic['severity'], message: string, line: number): void {
   const label = state.prefix ? `${state.prefix.slice(0, -1)}: ` : ''
   state.diagnostics.push({ severity, message: `${label}${message}`, line })
+  if (severity === 'error') state.errors += 1
 }
 
 function fail(state: RunState, message: string, line: number): null {
@@ -258,6 +297,8 @@ async function runStatement(
   depth: number
 ): Promise<void> {
   let current: NoteSet = []
+  const opsBefore = state.ops.length
+  const errorsBefore = state.errors
 
   if (statement.input !== null) {
     const upstream = scope.get(statement.input)
@@ -317,6 +358,13 @@ async function runStatement(
     current = result.notes
     text = result.text
   }
+
+  // Rule 3. The wire is still published, because the canvas draws it and the
+  // author is looking at what their half-written statement selected; it is only
+  // the WRITES that are withdrawn. Dropping them here rather than at each sink
+  // is what makes the rule cover a sink that ran before the error as well as
+  // one that ran after it.
+  if (state.errors > errorsBefore) state.ops.length = opsBefore
 
   setWire(state, statement, current)
   if (statement.name) scope.set(statement.name, current)
@@ -557,14 +605,15 @@ function buildPredicate(
   line: number
 ): ((value: string | number | undefined) => boolean) | null {
   if (op === 'matches') {
-    let pattern: RegExp
-    try {
-      pattern = new RegExp(raw, 'i')
-    } catch (error) {
-      diagnose(state, 'error', `\`${raw}\` is not a valid pattern: ${errorText(error)}`, line)
+    // Not `new RegExp`: see `./matches`. A workflow file is something people
+    // share, and `matches ^(a+)+$` handed to a backtracker is a way to hang the
+    // renderer on the click that selects the workflow.
+    const matcher = compileMatcher(raw)
+    if (!matcher.ok) {
+      diagnose(state, 'error', `\`${raw}\` is not a valid pattern: ${matcher.reason}`, line)
       return null
     }
-    return (value) => pattern.test(asText(value))
+    return (value) => matcher.matches(asText(value))
   }
   if (op === 'contains') {
     const needle = raw.toLowerCase()
@@ -622,12 +671,105 @@ function safeRenameTarget(rel: string, pattern: string): string {
   }
 }
 
+/**
+ * Refuse a destination this layer must never plan a write to, naming the step
+ * and the value so the author can see which one it was.
+ *
+ * Composes with rule 3: the diagnostic withdraws every op the statement
+ * planned, so a `move` that escapes the vault for one note does not half-move
+ * the rest of them either.
+ */
+function allowsTarget(state: RunState, step: WorkflowStep, target: string): boolean {
+  const problem = notePathProblem(target)
+  return problem === null ? true : refuseTarget(state, step, target, problem)
+}
+
+/**
+ * The same for a `move`, which has two values to answer for: the destination
+ * folder as it was written, and the path the note lands on.
+ *
+ * Both, because `moveTarget` normalises a leading slash away, so `move "/etc"`
+ * would otherwise pass the landing check as an ordinary `etc/` inside the vault
+ * and file the note somewhere the author never named.
+ */
+function allowsMove(state: RunState, step: WorkflowStep, folder: string, target: string): boolean {
+  const problem = folderPathProblem(folder) ?? notePathProblem(target)
+  return problem === null ? true : refuseTarget(state, step, folder, problem)
+}
+
+function refuseTarget(state: RunState, step: WorkflowStep, value: string, problem: string): false {
+  diagnose(state, 'error', `\`${step.kind}\` cannot write \`${value}\`: ${problem}`, step.line)
+  return false
+}
+
+/**
+ * A create target that no earlier step in this run already claimed.
+ *
+ * Two notes with the same title in different folders both expand
+ * `create-each "reviews/{{title}}"` to one path, and the applier refuses the
+ * second create rather than clobbering the first, failing the whole run over
+ * what is really a naming clash. Suffixing is what the rest of the app does
+ * with a taken name (`X.md`, `X 2.md`), and it is only a warning because the
+ * run is fine; but it IS a warning, because the plan the author read said
+ * `X.md` and one of these notes will not be there.
+ */
+function uniqueCreatePath(state: RunState, path: string, line: number): string {
+  if (!state.created.has(path)) {
+    state.created.add(path)
+    return path
+  }
+  const ext = noteExtensionOf(path)
+  const stem = ext ? path.slice(0, path.length - ext.length) : path
+  // `created` is finite, so a free suffix exists within one more attempt than
+  // it holds entries. No `while (true)` in a planner.
+  for (let n = 2; n <= state.created.size + 2; n += 1) {
+    const candidate = `${stem} ${n}${ext}`
+    if (state.created.has(candidate)) continue
+    state.created.add(candidate)
+    diagnose(
+      state,
+      'warning',
+      `\`${path}\` is created twice in this run, so one of them becomes \`${candidate}\``,
+      line
+    )
+    return candidate
+  }
+  return path
+}
+
 /** Prefix match, so `folder inbox` also sees `inbox/projects`. */
 function inFolder(note: WorkflowNote, folder: string): boolean {
   const target = normalizeFolder(folder).toLowerCase()
-  if (!target) return true
+  // A nameless folder is not "every folder". `folder ""` matching the whole
+  // vault put the Trash and the Archive on the wire, which is wider than any
+  // source goes and the exact widening rule 2 forbids. The steps ask
+  // `hasFolderName` first and report it; this is the backstop for a caller
+  // added later that forgets to.
+  if (!target) return false
   const own = normalizeFolder(note.folder).toLowerCase()
   return own === target || own.startsWith(`${target}/`)
+}
+
+/** Whether a `folder`/`in` argument actually names something. */
+function hasFolderName(folder: string): boolean {
+  return normalizeFolder(folder).trim() !== ''
+}
+
+/**
+ * Why this `rename` pattern is not a name, or null when it is one.
+ *
+ * `rename` gives a note a new filename in the folder it already sits in, which
+ * is what the node's own description promises, but `renameTarget` keeps the
+ * interior slashes of its pattern, so `rename "sub/deep"` quietly RELOCATED the
+ * note. Refused rather than obeyed: the step that changes a note's folder is
+ * `move`, and a workflow that means to move should have to say so.
+ */
+function renamePatternProblem(pattern: string): string | null {
+  if (!pattern.trim()) return '`rename` needs a name'
+  if (/[/\\]/.test(pattern)) {
+    return `\`rename\` cannot take a path (\`${pattern}\`): \`move\` is the step that changes folders`
+  }
+  return null
 }
 
 /** Tags are hierarchical in ZenNotes, so `tag project` sees `project/compiler`,
@@ -645,9 +787,19 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** `*` stops at a path separator, `**` crosses them, and `**\/` also matches
- *  zero folders so `**\/*.md` covers a note sitting at the vault root. */
-function globToRegExp(glob: string): RegExp {
+/**
+ * `*` stops at a path separator, `**` crosses them, and `**\/` also matches
+ * zero folders so `**\/*.md` covers a note sitting at the vault root.
+ *
+ * Compiled by the same automaton as `matches`, and for the same reason: handed
+ * to a backtracker, `matching "**\/**\/**\/…"` is a dozen nested `.*` and an
+ * ordinary vault path answers it in minutes rather than microseconds. The
+ * source below is generated from an escaped glob, so it is always inside the
+ * subset `./matches` accepts; it is still returned as a `Matcher` rather than
+ * asserted, because a glob feature added later must fail as a diagnostic and
+ * not as a throw.
+ */
+function globMatcher(glob: string): Matcher {
   let source = ''
   for (let index = 0; index < glob.length; index++) {
     const char = glob[index]
@@ -667,7 +819,7 @@ function globToRegExp(glob: string): RegExp {
     }
     source += '[^/]*'
   }
-  return new RegExp(`^${source}$`, 'i')
+  return compileMatcher(`^${source}$`)
 }
 
 const MS_PER_UNIT: Record<string, number> = {
@@ -794,6 +946,7 @@ async function runStep(
     case 'folder': {
       const folder = argString(step, 'folder')
       if (folder === null) return missingArg(state, step, 'folder')
+      if (!hasFolderName(folder)) return fail(state, '`folder` needs a name', step.line)
       // `folder trash` / `folder archive` mean THE Trash / THE Archive, not a
       // directory that happens to carry that name, so on a vault with remapped
       // system folders they match by the reader's classification too.
@@ -881,14 +1034,16 @@ async function runStep(
     case 'in': {
       const folder = argString(step, 'folder')
       if (folder === null) return missingArg(state, step, 'folder')
+      if (!hasFolderName(folder)) return fail(state, '`in` needs a folder name', step.line)
       return keep(current.filter((note) => inFolder(note, folder)))
     }
 
     case 'matching': {
       const glob = argString(step, 'glob')
       if (glob === null) return missingArg(state, step, 'glob')
-      const pattern = globToRegExp(glob)
-      return keep(current.filter((note) => pattern.test(note.path)))
+      const matcher = globMatcher(glob)
+      if (!matcher.ok) return fail(state, `\`${glob}\` is not a usable glob: ${matcher.reason}`, step.line)
+      return keep(current.filter((note) => matcher.matches(note.path)))
     }
 
     case 'contains': {
@@ -996,9 +1151,15 @@ async function runStep(
       for (const note of current) {
         // `to` is the destination folder. `rename` is the op that changes a
         // name, which is the only reason these are two ops and not one.
-        const to = normalizeFolder(expandForNote(folder, note, now))
+        const written = expandForNote(folder, note, now)
+        const to = normalizeFolder(written)
+        const target = moveTarget(note.path, to)
+        if (!allowsMove(state, step, written, target)) {
+          moved.push(note)
+          continue
+        }
         if (!pushOp(state, { kind: 'move', path: note.path, to }, step.line)) return keep(current)
-        moved.push(relocated(note, moveTarget(note.path, to)))
+        moved.push(relocated(note, target))
       }
       return keep(moved)
     }
@@ -1006,13 +1167,25 @@ async function runStep(
     case 'rename': {
       const pattern = argString(step, 'pattern')
       if (pattern === null) return missingArg(state, step, 'pattern')
+      // Checked before the loop as well as inside it: a separator written in the
+      // pattern itself is one authoring mistake and deserves one diagnostic,
+      // not one per note.
+      const wrong = renamePatternProblem(pattern)
+      if (wrong) return fail(state, wrong, step.line)
       const renamed: NoteSet = []
       for (const note of current) {
         const to = expandForNote(pattern, note, now)
+        const expandedWrong = renamePatternProblem(to)
+        if (expandedWrong) return fail(state, expandedWrong, step.line)
+        const target = safeRenameTarget(note.path, to)
+        if (!allowsTarget(state, step, target)) {
+          renamed.push(note)
+          continue
+        }
         if (!pushOp(state, { kind: 'rename', path: note.path, to }, step.line)) {
           return keep(current)
         }
-        renamed.push(relocated(note, safeRenameTarget(note.path, to)))
+        renamed.push(relocated(note, target))
       }
       return keep(renamed)
     }
@@ -1066,6 +1239,7 @@ async function runStep(
     case 'write': {
       const path = argString(step, 'path')
       if (path === null) return missingArg(state, step, 'path')
+      if (!allowsTarget(state, step, path)) return keep(current)
       pushOp(state, { kind: 'write-note', path, text: sinkText(text, current) }, step.line)
       return keep(current)
     }
@@ -1075,6 +1249,7 @@ async function runStep(
       if (path === null) return missingArg(state, step, 'path')
       const heading = argString(step, 'heading')
       if (heading === null) return missingArg(state, step, 'heading')
+      if (!allowsTarget(state, step, path)) return keep(current)
       const op: WorkflowOp = {
         kind: 'write-section',
         path,
@@ -1092,7 +1267,9 @@ async function runStep(
         // Bodies stay empty on purpose: `create-each` does not consume rendered
         // text, and copying one rendering into every created note is never what
         // the author meant.
-        const path = ensureNotePath(expandForNote(pattern, note, now))
+        const target = ensureNotePath(expandForNote(pattern, note, now))
+        if (!allowsTarget(state, step, target)) continue
+        const path = uniqueCreatePath(state, target, step.line)
         if (!pushOp(state, { kind: 'create-note', path, body: '' }, step.line)) break
       }
       return keep(current)
@@ -1115,7 +1292,15 @@ async function runStep(
 
     /* ----- Compose ----- */
     case 'call': {
+      // Whatever went wrong inside the call is the child's, and the child's own
+      // statements already withdrew whatever they planned. `call` is the one
+      // step that cannot change the wire (look at the `keep(current)` below), so
+      // a failure in it can never have made the ops around it wrong, and rule 3
+      // leaves them alone. A limit that stopped the run is the exception: it
+      // cuts every caller short, which is the case rule 3 exists for.
+      const errorsBefore = state.errors
       await runCall(step, state, depth)
+      if (!state.stopped) state.errors = errorsBefore
       return keep(current)
     }
 
@@ -1142,8 +1327,10 @@ function readWire(
   return wire
 }
 
+/** A pattern that already names a note type keeps it, so `create-each` can make
+ *  a drawing; anything else is a markdown note. */
 function ensureNotePath(path: string): string {
-  return /\.md$/i.test(path) ? path : `${path}.md`
+  return noteExtensionOf(path) ? path : `${path}${NOTE_EXTENSIONS[0]}`
 }
 
 /**

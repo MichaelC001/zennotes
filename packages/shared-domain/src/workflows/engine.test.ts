@@ -204,6 +204,23 @@ describe('sources', () => {
     expect(await outTitles([step('folder', ['inbox/projects'])])).toEqual(['Compiler', 'Engine'])
   })
 
+  it('`folder` with no name selects nothing rather than the whole vault', async () => {
+    // An empty folder used to match every note, Trash and Archive included,
+    // which is wider than any source goes and one `| trash` away from a
+    // disaster. Same for the filter that shares the matching.
+    const source = await planPipeline([step('folder', ['""'])])
+    expect(titles(source.wires.out)).toEqual([])
+    expect(source.diagnostics[0].severity).toBe('error')
+    expect(source.diagnostics[0].message).toBe('`folder` needs a name')
+
+    const blank = await planPipeline([step('folder', ['"  "'])])
+    expect(titles(blank.wires.out)).toEqual([])
+
+    const filter = await planPipeline([step('all'), step('in', ['""']), step('trash')])
+    expect(filter.ops).toEqual([])
+    expect(filter.diagnostics[0].message).toBe('`in` needs a folder name')
+  })
+
   it('`tag` sees nested tags, the way the tag tree does', async () => {
     // Neuromancer is only tagged `book/scifi`, and still belongs to `book`.
     expect(await outTitles([step('tag', ['#book'])])).toEqual([
@@ -339,6 +356,31 @@ describe('where', () => {
     expect(plan.diagnostics[0].severity).toBe('error')
     expect(plan.diagnostics[0].message).toContain('not a valid pattern')
   })
+
+  it('reports a pattern outside the subset the same way', async () => {
+    // Lookaround and backreferences are what no automaton can run, so they read
+    // as "not a valid pattern" here rather than being quietly mistranslated.
+    const plan = await planPipeline([
+      step('all'),
+      step('where', ['title', 'matches', '(?=Dune)'])
+    ])
+    expect(titles(plan.wires.out)).toEqual([])
+    expect(plan.diagnostics[0].message).toContain('lookahead is not supported')
+  })
+
+  it('answers a pattern written to hang a backtracker, in milliseconds', async () => {
+    // `^(a+)+$` over a long run of `a` that cannot match is the case that took
+    // RegExp the better part of a minute, on the thread that draws the canvas.
+    const title = `${'a'.repeat(60)}!`
+    const hostile = note(`inbox/${title}.md`, title, 'inbox', [], {}, DAY)
+    const started = Date.now()
+    const plan = await planPipeline([step('all'), step('where', ['title', 'matches', '^(a+)+$'])], {
+      notes: [hostile]
+    })
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(titles(plan.wires.out)).toEqual([])
+    expect(plan.diagnostics).toEqual([])
+  })
 })
 
 describe('filters', () => {
@@ -363,6 +405,20 @@ describe('filters', () => {
     expect(await outTitles([step('folder', ['archive']), step('matching', ['**/Old*.md'])])).toEqual(
       ['Old Note']
     )
+  })
+
+  it('`matching` answers a stack of ** without hanging', async () => {
+    // A dozen `**/` is a dozen nested `.*`, which a backtracker answers in
+    // minutes on an ordinary path. Same automaton as `matches`, same bound.
+    const deep = note(`inbox/${'a/'.repeat(40)}Nope.txt`, 'Nope', 'inbox', [], {}, DAY)
+    const started = Date.now()
+    const plan = await planPipeline(
+      [step('all'), step('matching', [`${'**/'.repeat(12)}x.md`])],
+      { notes: [deep] }
+    )
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(titles(plan.wires.out)).toEqual([])
+    expect(plan.diagnostics).toEqual([])
   })
 
   it('`contains` reads bodies and ignores case', async () => {
@@ -693,6 +749,39 @@ describe('sinks', () => {
     ])
   })
 
+  it('`create-each` keeps a note type the pattern already names', async () => {
+    const plan = await planPipeline([
+      step('tag', ['#book/scifi']),
+      step('create-each', ['"boards/{{title}}.excalidraw"'])
+    ])
+    expect(plan.ops).toEqual([
+      { kind: 'create-note', path: 'boards/Dune.excalidraw', body: '' },
+      { kind: 'create-note', path: 'boards/Neuromancer.excalidraw', body: '' }
+    ])
+  })
+
+  it('`create-each` suffixes a path it already planned in this run', async () => {
+    // Same title, two folders, one pattern: the applier refuses the second
+    // create and fails the whole run, so the plan resolves it first.
+    const twins = [
+      note('inbox/Report.md', 'Report', 'inbox', ['weekly'], {}, DAY),
+      note('inbox/2025/Report.md', 'Report', 'inbox/2025', ['weekly'], {}, DAY),
+      note('inbox/2024/Report.md', 'Report', 'inbox/2024', ['weekly'], {}, DAY)
+    ]
+    const plan = await planPipeline(
+      [step('tag', ['#weekly']), step('create-each', ['"reviews/{{title}}"'])],
+      { notes: twins }
+    )
+    expect(plan.ops).toEqual([
+      { kind: 'create-note', path: 'reviews/Report.md', body: '' },
+      { kind: 'create-note', path: 'reviews/Report 2.md', body: '' },
+      { kind: 'create-note', path: 'reviews/Report 3.md', body: '' }
+    ])
+    expect(plan.diagnostics).toHaveLength(2)
+    expect(plan.diagnostics[0].severity).toBe('warning')
+    expect(plan.diagnostics[0].message).toContain('reviews/Report 2.md')
+  })
+
   it('`notify` expands {{count}}, and falls back to the rendered text', async () => {
     const withMessage = await planPipeline([
       step('tag', ['#book']),
@@ -708,6 +797,176 @@ describe('sinks', () => {
       step('notify')
     ])
     expect(fromRender.ops).toEqual([{ kind: 'notify', message: '4' }])
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Rule 3: a statement that failed writes nothing                            */
+/* -------------------------------------------------------------------------- */
+
+describe('a statement that raised an error', () => {
+  it('plans no sink op over the wire the error emptied', async () => {
+    // The filter could not run, so the wire is empty for a reason that has
+    // nothing to do with the vault, and writing that emptiness over the report
+    // is a zero-byte overwrite of a real note.
+    const plan = await planPipeline([
+      step('all'),
+      step('where', ['title', 'matches', '[unclosed']),
+      step('write', ['"inbox/Report.md"'])
+    ])
+    expect(plan.ops).toEqual([])
+    expect(plan.diagnostics[0].message).toContain('not a valid pattern')
+  })
+
+  it('still writes an empty report when the wire is honestly empty', async () => {
+    const plan = await planPipeline([
+      step('all'),
+      step('where', ['title', '=', 'no such note']),
+      step('render', ['list']),
+      step('write', ['"inbox/Report.md"'])
+    ])
+    expect(plan.ops).toEqual([{ kind: 'write-note', path: 'inbox/Report.md', text: '' }])
+    expect(plan.diagnostics).toEqual([])
+  })
+
+  it('withdraws the ops planned before the error, not only after it', async () => {
+    const plan = await planPipeline([
+      step('tag', ['#book']),
+      step('add-tag', ['#starred']),
+      step('where', ['title', 'matches', '[unclosed']),
+      step('archive')
+    ])
+    expect(plan.ops).toEqual([])
+  })
+
+  it('leaves every other statement`s ops standing', async () => {
+    const { reader } = makeVault()
+    const plan = await planWorkflow(
+      workflow([
+        stmt(null, null, [step('tag', ['#recipe'], 1), step('add-tag', ['#filed'], 1)], 1),
+        stmt(null, null, [
+          step('all', [], 2),
+          step('where', ['title', 'matches', '[unclosed'], 2),
+          step('write', ['"inbox/Report.md"'], 2)
+        ], 2)
+      ]),
+      makeCtx(reader)
+    )
+    expect(plan.ops).toEqual([{ kind: 'add-tag', path: 'inbox/Recipe.md', tag: 'filed' }])
+    expect(plan.diagnostics).toHaveLength(1)
+  })
+
+  it('does not answer for a failure that happened inside a call', async () => {
+    // `call` hands the wire straight through, so nothing that went wrong in the
+    // child can have made the caller's own ops wrong.
+    const broken = workflow(
+      [stmt('out', null, [step('tag', ['#meeting'], 1), step('union', ['ghosts'], 1)], 1)],
+      'child'
+    )
+    const { reader } = makeVault()
+    const plan = await planWorkflow(
+      workflow([
+        stmt(null, null, [
+          step('tag', ['#recipe'], 1),
+          step('call', ['child'], 1),
+          step('add-tag', ['#filed'], 1)
+        ], 1)
+      ]),
+      makeCtx(reader, { resolve: () => broken })
+    )
+    expect(plan.ops).toEqual([{ kind: 'add-tag', path: 'inbox/Recipe.md', tag: 'filed' }])
+    expect(plan.diagnostics[0].message).toBe('child: unknown wire `ghosts`')
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Destinations                                                              */
+/* -------------------------------------------------------------------------- */
+
+// The desktop applier refuses these shapes too, and keeps doing so. These pin
+// the refusal that a DRY RUN can see, and the one a Go runtime mirroring this
+// layer would inherit.
+describe('destinations', () => {
+  async function refusal(steps: WorkflowStep[], options: ReaderOptions = {}): Promise<string> {
+    const plan = await planPipeline(steps, options)
+    expect(plan.ops).toEqual([])
+    expect(plan.diagnostics[0]?.severity).toBe('error')
+    return plan.diagnostics[0]?.message ?? ''
+  }
+
+  it('refuses a move that climbs out of the vault', async () => {
+    const plan = await planPipeline([step('tag', ['#recipe']), step('move', ['../../escape'])])
+    expect(plan.ops).toEqual([])
+    expect(plan.diagnostics[0].message).toBe(
+      '`move` cannot write `../../escape`: a path may not climb out of the vault'
+    )
+    // Refused, so the note is still where it was for anything downstream.
+    expect(plan.wires.out.map((item) => item.path)).toEqual(['inbox/Recipe.md'])
+  })
+
+  it('refuses an absolute destination rather than reading it as relative', async () => {
+    expect(await refusal([step('tag', ['#recipe']), step('move', ['/tmp'])])).toContain(
+      'may not be absolute'
+    )
+    expect(await refusal([step('tag', ['#recipe']), step('move', ['C:/tmp'])])).toContain(
+      'may not be absolute'
+    )
+    expect(await refusal([step('tag', ['#book']), step('write', ['"/tmp/out.md"'])])).toContain(
+      'may not be absolute'
+    )
+  })
+
+  it('refuses the app`s own directory', async () => {
+    expect(await refusal([step('tag', ['#recipe']), step('move', ['.zennotes/workflows'])])).toContain(
+      'may not be inside .zennotes'
+    )
+  })
+
+  it('refuses a sink path that is not a note', async () => {
+    expect(await refusal([step('tag', ['#book']), step('write', ['reports/weekly'])])).toContain(
+      'must end in .md or .excalidraw'
+    )
+    expect(
+      await refusal([
+        step('tag', ['#book']),
+        step('render', ['count']),
+        step('write-section', ['reports/weekly', '"Books"'])
+      ])
+    ).toContain('must end in')
+  })
+
+  it('refuses a destination an interpolated field smuggled a climb into', async () => {
+    const escaping = note('inbox/Recipe.md', 'Recipe', 'inbox', ['recipe'], { dest: '../secrets' }, DAY)
+    expect(
+      await refusal([step('tag', ['#recipe']), step('move', ['{{dest}}'])], { notes: [escaping] })
+    ).toBe('`move` cannot write `../secrets`: a path may not climb out of the vault')
+  })
+
+  it('refuses a create-each pattern that escapes', async () => {
+    expect(
+      await refusal([step('tag', ['#book/scifi']), step('create-each', ['"../{{title}}"'])])
+    ).toContain('may not climb out of the vault')
+  })
+
+  it('refuses a rename with no name', async () => {
+    expect(await refusal([step('tag', ['#recipe']), step('rename', ['""'])])).toBe(
+      '`rename` needs a name'
+    )
+  })
+
+  it('refuses a rename that would move the note to another folder', async () => {
+    // `renameTarget` keeps interior slashes, so this used to relocate the note
+    // through the step that promises to keep it where it is.
+    const plan = await planPipeline([step('tag', ['#recipe']), step('rename', ['sub/deep'])])
+    expect(plan.ops).toEqual([])
+    expect(plan.diagnostics[0].message).toBe(
+      '`rename` cannot take a path (`sub/deep`): `move` is the step that changes folders'
+    )
+    expect(plan.wires.out.map((item) => item.path)).toEqual(['inbox/Recipe.md'])
+
+    // The rename that stays in its folder is untouched.
+    const fine = await planPipeline([step('tag', ['#recipe']), step('rename', ['Cookbook'])])
+    expect(fine.ops).toEqual([{ kind: 'rename', path: 'inbox/Recipe.md', to: 'Cookbook' }])
   })
 })
 
@@ -886,22 +1145,66 @@ describe('call', () => {
     )
     const { reader } = makeVault()
     const plan = await planWorkflow(loop, makeCtx(reader, { resolve: () => loop, maxDepth: 2 }))
-    // One pass per allowed level: the root plus two nested calls.
-    expect(plan.ops).toHaveLength(3)
+    // The limit cut every level of the recursion short, and a statement that was
+    // cut short keeps none of its ops (rule 3), so a runaway workflow plans
+    // nothing at all rather than an arbitrary three tags deep into a loop.
+    expect(plan.ops).toEqual([])
     const last = plan.diagnostics[plan.diagnostics.length - 1]
     expect(last.severity).toBe('error')
     expect(last.message).toContain('maxDepth')
   })
 
-  it('stops at maxOps and still returns the partial plan', async () => {
+  it('stops at maxOps, dropping the statement the budget cut in half', async () => {
     const { reader } = makeVault()
     const plan = await planWorkflow(
       workflow([stmt('out', null, [step('tag', ['#book'], 1), step('archive', [], 1)], 1)]),
       makeCtx(reader, { maxOps: 3 })
     )
-    expect(plan.ops).toHaveLength(3)
+    // Four books and room for three: applying three of them is a half-done
+    // filing job, so the statement contributes nothing and says why.
+    expect(plan.ops).toEqual([])
+    expect(titles(plan.wires.out)).toHaveLength(4)
     const last = plan.diagnostics[plan.diagnostics.length - 1]
     expect(last.message).toContain('maxOps')
+  })
+
+  it('keeps the ops of the statements that fitted inside the budget', async () => {
+    const { reader } = makeVault()
+    const plan = await planWorkflow(
+      workflow([
+        stmt(null, null, [step('tag', ['#recipe'], 1), step('add-tag', ['#filed'], 1)], 1),
+        stmt(null, null, [step('tag', ['#book'], 2), step('archive', [], 2)], 2)
+      ]),
+      makeCtx(reader, { maxOps: 3 })
+    )
+    expect(plan.ops).toEqual([{ kind: 'add-tag', path: 'inbox/Recipe.md', tag: 'filed' }])
+  })
+
+  it('never plans some of a note`s mutations and not the rest', async () => {
+    const twoTags = workflow([
+      stmt(null, null, [
+        step('all', [], 1),
+        step('add-tag', ['#x'], 1),
+        step('add-tag', ['#y'], 1)
+      ], 1)
+    ])
+    // Nine notes, two tags each. A budget of three lands inside the first
+    // `add-tag`, where the old truncation left three notes carrying `#x` and
+    // not one of them `#y`. There is no budget at which half a note is planned:
+    // the statement either fits whole or contributes nothing.
+    const cut = await planWorkflow(twoTags, makeCtx(makeVault().reader, { maxOps: 3 }))
+    expect(cut.ops).toEqual([])
+
+    const whole = await planWorkflow(twoTags, makeCtx(makeVault().reader, { maxOps: 100 }))
+    const tagsByPath = new Map<string, string[]>()
+    for (const op of whole.ops) {
+      if (op.kind !== 'add-tag') continue
+      tagsByPath.set(op.path, [...(tagsByPath.get(op.path) ?? []), op.tag])
+    }
+    expect(tagsByPath.size).toBe(9)
+    for (const [path, tags] of tagsByPath) {
+      expect(tags, path).toEqual(['x', 'y'])
+    }
   })
 })
 
