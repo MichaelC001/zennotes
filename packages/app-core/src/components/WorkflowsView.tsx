@@ -1562,7 +1562,8 @@ export function WorkflowsView(): JSX.Element {
     planWorkflow(active.workflow, {
       reader,
       now: Date.now(),
-      resolve: (other) => byId.get(other) ?? null
+      resolve: (other) => byId.get(other) ?? null,
+      systemFolderDirs: useStore.getState().vaultSettings.systemFolderPaths
     })
       .then((result) => {
         if (!cancelled) setPlanned({ id, plan: result })

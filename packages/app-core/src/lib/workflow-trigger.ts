@@ -179,7 +179,8 @@ async function runWorkflow(id: string): Promise<void> {
   const plan = await planWorkflow(workflow, {
     reader,
     now: Date.now(),
-    resolve: (other) => byId.get(other) ?? null
+    resolve: (other) => byId.get(other) ?? null,
+    systemFolderDirs: state.vaultSettings.systemFolderPaths
   })
 
   if (plan.ops.length === 0) {

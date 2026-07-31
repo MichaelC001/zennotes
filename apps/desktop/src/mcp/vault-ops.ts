@@ -43,6 +43,81 @@ const HIDDEN_PRIMARY_ROOT_NAMES = new Set<string>([
 
 export type PrimaryNotesLocation = 'inbox' | 'root'
 
+/** Custom on-disk names for the four system folders (vault.json
+ *  `systemFolderPaths`, #398): `{ trash: '99 - Deleted' }` makes that
+ *  directory THE trash. Validation mirrors `normalizeSystemFolderPaths`
+ *  in `@shared/system-folder-paths` — a synced copy, like the parsers in
+ *  this file, because the MCP process cannot import the shared packages. */
+type SystemFolderPathsMap = Partial<Record<NoteFolder, string>>
+
+const RESERVED_FOLDER_PATH_NAMES = new Set([
+  ASSETS_DIR,
+  INTERNAL_VAULT_DIR,
+  ...LEGACY_ATTACHMENTS_DIRS,
+  'deleted-assets',
+  'comments'
+])
+
+function validFolderPathName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed || trimmed.length > 128) return null
+  if (trimmed.includes('/') || trimmed.includes('\\')) return null
+  if (trimmed === '.' || trimmed === '..' || trimmed.startsWith('.')) return null
+  if (/[:*?"<>|#^[\]]/.test(trimmed)) return null
+  if (RESERVED_FOLDER_PATH_NAMES.has(trimmed.toLowerCase())) return null
+  return trimmed
+}
+
+async function readSystemFolderPaths(root: string): Promise<SystemFolderPathsMap> {
+  const settingsPath = path.join(root, INTERNAL_VAULT_DIR, VAULT_SETTINGS_FILE)
+  let raw: Record<string, unknown>
+  try {
+    raw = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+  const value = raw['systemFolderPaths']
+  if (!value || typeof value !== 'object') return {}
+  const candidate = value as Partial<Record<NoteFolder, unknown>>
+  const next: SystemFolderPathsMap = {}
+  for (const folder of FOLDERS) {
+    const p = validFolderPathName(candidate[folder])
+    if (p && p !== folder) next[folder] = p
+  }
+  // Drop entries whose resolved name collides with another folder's resolved
+  // name (defaults included), matching the shared normalizer.
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const folder of FOLDERS) {
+      if (!next[folder]) continue
+      const own = (next[folder] ?? folder).toLowerCase()
+      for (const other of FOLDERS) {
+        if (other === folder) continue
+        if ((next[other] ?? other).toLowerCase() === own) {
+          delete next[folder]
+          changed = true
+          break
+        }
+      }
+    }
+  }
+  return next
+}
+
+function resolvedFolderDirName(folder: NoteFolder, paths: SystemFolderPathsMap): string {
+  return paths[folder] ?? folder
+}
+
+function hiddenRootNamesWith(paths: SystemFolderPathsMap): Set<string> {
+  const names = new Set(HIDDEN_PRIMARY_ROOT_NAMES)
+  for (const value of Object.values(paths)) {
+    if (value) names.add(value)
+  }
+  return names
+}
+
 /** Read `.zennotes/vault.json` if present and pull out an explicit
  *  primaryNotesLocation setting. Returns null when the file is
  *  missing, unreadable (TCC), malformed, or doesn't include the
@@ -67,18 +142,20 @@ async function readExplicitPrimaryNotesLocation(
  *  strong signals the user organizes their vault flat-style. The
  *  four system folders (inbox/quick/archive/trash), attachments,
  *  and dotfiles are excluded. */
-async function countLooseRootContent(root: string): Promise<number> {
+async function countLooseRootContent(root: string, paths: SystemFolderPathsMap): Promise<number> {
   let entries: import('node:fs').Dirent[]
   try {
     entries = await fs.readdir(root, { withFileTypes: true })
   } catch {
     return 0
   }
+  const hidden = hiddenRootNamesWith(paths)
+  const inboxDir = resolvedFolderDirName('inbox', paths)
   let count = 0
   for (const entry of entries) {
     if (entry.name.startsWith('.')) continue
-    if (HIDDEN_PRIMARY_ROOT_NAMES.has(entry.name)) continue
-    if (entry.name === 'inbox') continue
+    if (hidden.has(entry.name)) continue
+    if (entry.name === 'inbox' || entry.name === inboxDir) continue
     if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) count += 1
     else if (entry.isDirectory()) count += 1
   }
@@ -122,9 +199,10 @@ async function countMdFilesRecursively(dir: string): Promise<number> {
  *    that succeeded.
  */
 export async function readPrimaryNotesLocation(root: string): Promise<PrimaryNotesLocation> {
+  const paths = await readSystemFolderPaths(root)
   const [rootContent, inboxNotes, explicit] = await Promise.all([
-    countLooseRootContent(root),
-    countMdFilesRecursively(path.join(root, 'inbox')),
+    countLooseRootContent(root, paths),
+    countMdFilesRecursively(path.join(root, resolvedFolderDirName('inbox', paths))),
     readExplicitPrimaryNotesLocation(root)
   ])
 
@@ -144,9 +222,10 @@ export async function readPrimaryNotesLocation(root: string): Promise<PrimaryNot
 /** The absolute directory that holds notes for a given top-level
  *  folder, taking the vault's primaryNotesLocation into account. */
 async function folderRoot(root: string, folder: NoteFolder): Promise<string> {
-  if (folder !== 'inbox') return path.join(root, folder)
+  const paths = await readSystemFolderPaths(root)
+  if (folder !== 'inbox') return path.join(root, resolvedFolderDirName(folder, paths))
   const primary = await readPrimaryNotesLocation(root)
-  return primary === 'root' ? root : path.join(root, 'inbox')
+  return primary === 'root' ? root : path.join(root, resolvedFolderDirName('inbox', paths))
 }
 
 const FENCE_LINE_RE = /^(\s{0,3})(`{3,}|~{3,})/
@@ -419,15 +498,20 @@ function resolveSafe(root: string, rel: string): string {
   return abs
 }
 
-function folderOf(root: string, abs: string): NoteFolder | null {
+async function folderOf(root: string, abs: string): Promise<NoteFolder | null> {
   const rel = toPosix(path.relative(root, abs))
   if (!rel || rel.startsWith('..')) return null
   const top = rel.split('/')[0]
   if (FOLDERS.includes(top as NoteFolder)) return top as NoteFolder
+  const paths = await readSystemFolderPaths(root)
+  for (const folder of FOLDERS) {
+    const custom = paths[folder]
+    if (custom && custom.toLowerCase() === top.toLowerCase()) return folder
+  }
   // Root-level files belong to inbox in `primaryNotesLocation: 'root'`
   // mode. Hidden names (.zennotes, attachments, system folders) are
   // not notes — return null so they're rejected.
-  if (!top || top.startsWith('.') || HIDDEN_PRIMARY_ROOT_NAMES.has(top)) return null
+  if (!top || top.startsWith('.') || hiddenRootNamesWith(paths).has(top)) return null
   return 'inbox'
 }
 
@@ -543,6 +627,7 @@ async function readMeta(root: string, abs: string, folder: NoteFolder): Promise<
 /* ---------- Listing --------------------------------------------------- */
 
 export async function listNotes(root: string): Promise<NoteMeta[]> {
+  const hiddenRootNames = hiddenRootNamesWith(await readSystemFolderPaths(root))
   const out: NoteMeta[] = []
   const walk = async (
     folder: NoteFolder,
@@ -565,7 +650,7 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
         // subdirectories (quick/, archive/, trash/, attachments) are
         // not part of inbox — they're walked separately as their own
         // top-level folder.
-        if (isPrimaryRoot && dirAbs === topAbs && HIDDEN_PRIMARY_ROOT_NAMES.has(entry.name)) {
+        if (isPrimaryRoot && dirAbs === topAbs && hiddenRootNames.has(entry.name)) {
           continue
         }
         await walk(folder, full, topAbs, isPrimaryRoot)
@@ -585,6 +670,7 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
 }
 
 export async function listFolders(root: string): Promise<{ folder: NoteFolder; subpath: string }[]> {
+  const hiddenRootNames = hiddenRootNamesWith(await readSystemFolderPaths(root))
   const out: { folder: NoteFolder; subpath: string }[] = []
   for (const folder of FOLDERS) {
     const topAbs = await folderRoot(root, folder)
@@ -599,7 +685,7 @@ export async function listFolders(root: string): Promise<{ folder: NoteFolder; s
       for (const e of entries) {
         if (!e.isDirectory() || e.name.startsWith('.')) continue
         if (isFormDirName(e.name)) continue // database folder — not a user folder
-        if (isPrimaryRoot && dirAbs === topAbs && HIDDEN_PRIMARY_ROOT_NAMES.has(e.name)) {
+        if (isPrimaryRoot && dirAbs === topAbs && hiddenRootNames.has(e.name)) {
           continue
         }
         const nextSub = subpath ? `${subpath}/${e.name}` : e.name
@@ -657,7 +743,7 @@ export async function listAssets(root: string): Promise<
 
 export async function readNote(root: string, rel: string): Promise<NoteContent> {
   const abs = resolveSafe(root, rel)
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   const body = await fs.readFile(abs, 'utf8')
   const meta = await readMeta(root, abs, folder)
@@ -668,7 +754,7 @@ export async function writeNote(root: string, rel: string, body: string): Promis
   const abs = resolveSafe(root, rel)
   await fs.mkdir(path.dirname(abs), { recursive: true })
   await fs.writeFile(abs, body, 'utf8')
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
 }
@@ -721,7 +807,7 @@ export async function createNote(
 
 export async function renameNote(root: string, rel: string, nextTitle: string): Promise<NoteMeta> {
   const abs = resolveSafe(root, rel)
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   const dir = path.dirname(abs)
   const trimmed = sanitizeTitle(nextTitle)
@@ -753,7 +839,7 @@ export async function renameNote(root: string, rel: string, nextTitle: string): 
  * moves carry the subfolder along so the reverse move restores it.
  */
 async function folderSubpathOf(root: string, abs: string): Promise<string> {
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) return ''
   const sourceRoot = await folderRoot(root, folder)
   const relDir = path.relative(sourceRoot, path.dirname(abs))
@@ -798,7 +884,7 @@ export async function moveNote(
   const folderAbs = await folderRoot(root, targetFolder)
   const destDir = cleanSub ? resolveSafe(folderAbs, cleanSub) : folderAbs
   if (path.dirname(oldAbs) === destDir) {
-    const folder = folderOf(root, oldAbs)
+    const folder = await folderOf(root, oldAbs)
     if (!folder) throw new Error(`Note not in a known folder: ${oldRel}`)
     return await readMeta(root, oldAbs, folder)
   }
@@ -813,7 +899,7 @@ export async function moveNote(
 
 export async function duplicateNote(root: string, rel: string): Promise<NoteMeta> {
   const abs = resolveSafe(root, rel)
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   const dir = path.dirname(abs)
   const ext = path.extname(abs)
@@ -905,6 +991,7 @@ export async function searchText(
   const trimmed = query.trim()
   if (!trimmed) return []
   const needle = trimmed.toLowerCase()
+  const hiddenRootNames = hiddenRootNamesWith(await readSystemFolderPaths(root))
   const out: VaultTextSearchMatch[] = []
   const walk = async (
     folder: NoteFolder,
@@ -924,7 +1011,7 @@ export async function searchText(
       const full = path.join(dirAbs, entry.name)
       if (entry.isDirectory()) {
         if (entry.name.startsWith('.')) continue
-        if (isPrimaryRoot && dirAbs === topAbs && HIDDEN_PRIMARY_ROOT_NAMES.has(entry.name)) {
+        if (isPrimaryRoot && dirAbs === topAbs && hiddenRootNames.has(entry.name)) {
           continue
         }
         await walk(folder, full, topAbs, isPrimaryRoot)
@@ -1299,7 +1386,7 @@ export async function toggleTask(root: string, taskId: string): Promise<VaultTas
   if (indexStr === 'task') {
     const abs = resolveSafe(root, rel)
     const body = await fs.readFile(abs, 'utf8')
-    const folder = folderOf(root, abs)
+    const folder = await folderOf(root, abs)
     if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
     const ctx = {
       path: toPosix(path.relative(root, abs)),
@@ -1319,7 +1406,7 @@ export async function toggleTask(root: string, taskId: string): Promise<VaultTas
   const newBody = toggleTaskInBody(body, targetIndex)
   if (newBody == null) return null
   await fs.writeFile(abs, newBody, 'utf8')
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   const parsed = parseTasksFromBody(newBody, {
     path: toPosix(path.relative(root, abs)),
@@ -1436,7 +1523,7 @@ export async function appendToNote(root: string, rel: string, text: string): Pro
   const abs = resolveSafe(root, rel)
   const body = await fs.readFile(abs, 'utf8')
   await fs.writeFile(abs, appendToBody(body, text), 'utf8')
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
 }
@@ -1454,7 +1541,7 @@ export async function prependToNote(root: string, rel: string, text: string): Pr
   const abs = resolveSafe(root, rel)
   const body = await fs.readFile(abs, 'utf8')
   await fs.writeFile(abs, prependToBody(body, text), 'utf8')
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
 }
@@ -1485,12 +1572,12 @@ export async function replaceInNote(
     }
   }
   if (replacements === 0) {
-    const folder = folderOf(root, abs)
+    const folder = await folderOf(root, abs)
     if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
     return { meta: await readMeta(root, abs, folder), replacements: 0 }
   }
   await fs.writeFile(abs, next, 'utf8')
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return { meta: await readMeta(root, abs, folder), replacements }
 }
@@ -1508,7 +1595,7 @@ export async function insertAtLine(
   const insertLines = text.split('\n')
   lines.splice(clamped, 0, ...insertLines)
   await fs.writeFile(abs, lines.join('\n'), 'utf8')
-  const folder = folderOf(root, abs)
+  const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
 }

@@ -1,8 +1,8 @@
 import path from 'node:path'
 import chokidar, { FSWatcher } from 'chokidar'
-import type { NoteFolder, VaultChangeEvent, VaultChangeKind } from '@shared/ipc'
+import type { NoteFolder, VaultChangeEvent, VaultChangeKind, VaultSettings } from '@shared/ipc'
 import { databaseCsvPathFor } from '@shared/databases'
-import { folderForRelativePath } from './vault'
+import { folderForRelativePath, getVaultSettings } from './vault'
 
 const ATTACHMENTS_DIRS = new Set(['assets', 'attachements', '_assets'])
 const INTERNAL_VAULT_DIR = '.zennotes'
@@ -14,9 +14,9 @@ function toPosix(p: string): string {
   return p.split(path.sep).join('/')
 }
 
-function folderOf(root: string, abs: string): NoteFolder | null {
+function folderOf(root: string, abs: string, settings: VaultSettings | null): NoteFolder | null {
   const rel = toPosix(path.relative(root, abs))
-  const folder = folderForRelativePath(rel)
+  const folder = folderForRelativePath(rel, settings)
   if (folder) return folder
   const top = rel.split('/')[0]
   return ATTACHMENTS_DIRS.has(top) ? 'inbox' : null
@@ -39,10 +39,24 @@ function commentsNotePath(root: string, abs: string): string | null {
 export class VaultWatcher {
   private watcher: FSWatcher | null = null
   private root: string | null = null
+  /** Settings snapshot for classification; refreshed when vault.json changes,
+   *  mirroring the Go watcher's reload. Null until the first load lands, when
+   *  classification falls back to the default folder names. */
+  private settings: VaultSettings | null = null
+
+  private refreshSettings(root: string): void {
+    void getVaultSettings(root)
+      .then((settings) => {
+        if (this.root === root) this.settings = settings
+      })
+      .catch(() => {})
+  }
 
   start(root: string, onEvent: (ev: VaultChangeEvent) => void): void {
     this.stop()
     this.root = root
+    this.settings = null
+    this.refreshSettings(root)
     this.watcher = chokidar.watch(root, {
       ignoreInitial: true,
       persistent: true,
@@ -62,6 +76,7 @@ export class VaultWatcher {
       const base = path.basename(absPath)
       if (!this.root) return
       if (isVaultSettingsPath(this.root, absPath)) {
+        this.refreshSettings(this.root)
         onEvent({
           kind,
           path: VAULT_SETTINGS_RELATIVE_PATH,
@@ -75,7 +90,7 @@ export class VaultWatcher {
         onEvent({
           kind,
           path: commentsPath,
-          folder: folderForRelativePath(commentsPath) ?? 'inbox',
+          folder: folderForRelativePath(commentsPath, this.settings) ?? 'inbox',
           scope: 'comments'
         })
         return
@@ -89,13 +104,13 @@ export class VaultWatcher {
         onEvent({
           kind,
           path: dbCsvPath,
-          folder: folderForRelativePath(dbCsvPath) ?? 'inbox',
+          folder: folderForRelativePath(dbCsvPath, this.settings) ?? 'inbox',
           scope: 'database'
         })
         return
       }
       if (base.startsWith('.')) return
-      const folder = folderOf(this.root, absPath)
+      const folder = folderOf(this.root, absPath, this.settings)
       if (!folder) return
       onEvent({
         kind,
@@ -111,7 +126,7 @@ export class VaultWatcher {
       if (!this.root) return
       if (path.basename(absPath).startsWith('.')) return
       const rel = toPosix(path.relative(this.root, absPath))
-      const folder = folderForRelativePath(rel)
+      const folder = folderForRelativePath(rel, this.settings)
       if (!folder) return
       onEvent({ kind, path: rel, folder, scope: 'folder' })
     }

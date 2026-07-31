@@ -71,7 +71,8 @@ import { DEMO_TOUR_ASSETS, DEMO_TOUR_NOTES } from './demo-tour-data'
 import {
   normalizeSystemFolderPaths,
   resolveFolderPath,
-  buildReverseFolderMap
+  buildReverseFolderMap,
+  type SystemFolderPaths
 } from '@shared/system-folder-paths'
 
 const CONFIG_FILE = 'zennotes.config.json'
@@ -1226,16 +1227,30 @@ function duplicateFolderIcons(
   return next
 }
 
-async function inferPrimaryNotesLocation(root: string): Promise<PrimaryNotesLocation> {
+async function inferPrimaryNotesLocation(
+  root: string,
+  systemFolderPaths?: SystemFolderPaths | null
+): Promise<PrimaryNotesLocation> {
   let entries: Dirent[]
   try {
     entries = await fs.readdir(root, { withFileTypes: true })
   } catch {
     return DEFAULT_VAULT_SETTINGS.primaryNotesLocation
   }
+  // Remapped system folders (vault.json `systemFolderPaths`) are system
+  // directories, not loose user content: without this, a vault whose inbox is
+  // `01 - Entry` reads as a flat root-mode vault and the "notes at your vault
+  // root aren't shown" banner fires on a perfectly configured vault.
+  const customDirs = new Set<string>()
+  if (systemFolderPaths) {
+    for (const value of Object.values(systemFolderPaths)) {
+      if (value) customDirs.add(value.toLowerCase())
+    }
+  }
   for (const entry of entries) {
     if (entry.name.startsWith('.')) continue
     if (RESERVED_ROOT_NAMES.has(entry.name)) continue
+    if (customDirs.has(entry.name.toLowerCase())) continue
     if (entry.isDirectory()) return 'root'
     if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) return 'root'
   }
@@ -1253,7 +1268,7 @@ async function inferPrimaryNotesLocation(root: string): Promise<PrimaryNotesLoca
 export async function rootContentHiddenByInboxMode(root: string): Promise<boolean> {
   const settings = await getVaultSettings(root)
   if (settings.primaryNotesLocation !== 'inbox') return false
-  return (await inferPrimaryNotesLocation(root)) === 'root'
+  return (await inferPrimaryNotesLocation(root, settings.systemFolderPaths)) === 'root'
 }
 
 async function vaultLooksEmpty(root: string): Promise<boolean> {

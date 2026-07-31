@@ -65,15 +65,33 @@ export function renameTarget(rel: string, pattern: string): string {
   return joinRel(relDirname(rel), `${name}${ext}`)
 }
 
+/** Resolved on-disk names for remapped system folders; see PlanContext. */
+export type SystemFolderDirs = Partial<Record<'inbox' | 'quick' | 'archive' | 'trash', string>>
+
 /**
  * Where `archive` and `trash` put a note: the destination folder, with the
  * source's subfolder mirrored, so `inbox/demo/X.md` lands at `archive/demo/X.md`
  * and moving it back returns it to `demo/`. This mirrors `moveBetweenFolders`
  * in `vault.ts` without depending on the vault's caches or settings.
+ *
+ * `dirs` carries the vault's remapped system-folder names (vault.json
+ * `systemFolderPaths`): the destination uses the remapped name so a workflow's
+ * `trash` files into the directory the app actually treats as Trash, and the
+ * remapped names also count as system roots when mirroring the subfolder.
  */
-export function folderTarget(folder: 'archive' | 'trash', rel: string): string {
+export function folderTarget(
+  folder: 'archive' | 'trash',
+  rel: string,
+  dirs?: SystemFolderDirs
+): string {
   const segments = normalizeRel(rel).split('/')
   const file = segments.pop() ?? ''
-  if (segments.length > 0 && FOLDER_ROOTS.has((segments[0] ?? '').toLowerCase())) segments.shift()
-  return [folder, ...segments, file].join('/')
+  const roots = new Set(FOLDER_ROOTS)
+  if (dirs) {
+    for (const dir of Object.values(dirs)) {
+      if (dir) roots.add(dir.toLowerCase())
+    }
+  }
+  if (segments.length > 0 && roots.has((segments[0] ?? '').toLowerCase())) segments.shift()
+  return [dirs?.[folder] ?? folder, ...segments, file].join('/')
 }

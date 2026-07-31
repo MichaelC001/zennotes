@@ -63,10 +63,11 @@ import {
   relBasename,
   relDirname,
   renameTarget,
-  stripNoteExtension
+  stripNoteExtension,
+  type SystemFolderDirs
 } from '@shared/workflows/paths'
 import { WORKFLOWS_REL_DIR } from '@shared/workflows-view'
-import { writeFileAtomic } from './vault'
+import { getVaultSettings, writeFileAtomic } from './vault'
 
 /* -------------------------------------------------------------------------- */
 /*  Where a run is recorded                                                   */
@@ -182,7 +183,7 @@ export function resolveVaultPath(root: string, rel: string): string {
 }
 
 /** Every vault path an op could touch, for the pre-flight containment check. */
-function opTargets(op: WorkflowOp): string[] {
+function opTargets(op: WorkflowOp, dirs?: SystemFolderDirs): string[] {
   switch (op.kind) {
     case 'notify':
     case 'clipboard':
@@ -192,9 +193,9 @@ function opTargets(op: WorkflowOp): string[] {
     case 'rename':
       return [op.path, renameTarget(op.path, op.to)]
     case 'archive':
-      return [op.path, folderTarget('archive', op.path)]
+      return [op.path, folderTarget('archive', op.path, dirs)]
     case 'trash':
-      return [op.path, folderTarget('trash', op.path)]
+      return [op.path, folderTarget('trash', op.path, dirs)]
     default:
       return [op.path]
   }
@@ -413,6 +414,10 @@ function resolveLedgerPath(root: string, runId: string): string {
 
 interface RunState {
   root: string
+  /** Resolved on-disk names for remapped system folders (vault.json
+   *  `systemFolderPaths`), so `archive`/`trash` ops file into the directory
+   *  the app actually treats as Archive/Trash. Empty on default vaults. */
+  systemFolderDirs: SystemFolderDirs
   /**
    * Vault-relative path to its pre-run bytes, in the order the run touched
    * them. Insertion-ordered and written only when absent, which is the
@@ -588,8 +593,8 @@ async function applyOp(state: RunState, op: WorkflowOp): Promise<void> {
         state,
         op.kind,
         from,
-        folderTarget('archive', from),
-        folderTarget('archive', normalizeRel(op.path))
+        folderTarget('archive', from, state.systemFolderDirs),
+        folderTarget('archive', normalizeRel(op.path), state.systemFolderDirs)
       )
     }
     case 'trash': {
@@ -598,8 +603,8 @@ async function applyOp(state: RunState, op: WorkflowOp): Promise<void> {
         state,
         op.kind,
         from,
-        folderTarget('trash', from),
-        folderTarget('trash', normalizeRel(op.path))
+        folderTarget('trash', from, state.systemFolderDirs),
+        folderTarget('trash', normalizeRel(op.path), state.systemFolderDirs)
       )
     }
     default:
@@ -768,13 +773,20 @@ async function applyWorkflowOpsNow(
   // Containment first, for every path in the plan including the destinations
   // this module computes. One traversal attempt aborts the run before a single
   // byte is written, so there is nothing to roll back.
+  const systemFolderDirs: SystemFolderDirs = (await getVaultSettings(root)).systemFolderPaths ?? {}
   for (const op of ops) {
-    for (const target of opTargets(op)) resolveVaultPath(root, target)
+    for (const target of opTargets(op, systemFolderDirs)) resolveVaultPath(root, target)
   }
 
   const runId = await allocateRunId(root, startedAt, workflowId, ops)
   const run: RunIdentity = { runId, workflowId, startedAt, irreversible, ops }
-  const state: RunState = { root, journal: new Map(), written: new Map(), redirects: new Map() }
+  const state: RunState = {
+    root,
+    systemFolderDirs,
+    journal: new Map(),
+    written: new Map(),
+    redirects: new Map()
+  }
   let applied = 0
 
   try {

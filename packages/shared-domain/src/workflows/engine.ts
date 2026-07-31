@@ -347,6 +347,10 @@ async function allNotes(state: RunState, line: number): Promise<WorkflowNote[]> 
  */
 function workingNotes(notes: WorkflowNote[]): WorkflowNote[] {
   return notes.filter((note) => {
+    // The reader's classification wins when present: with remapped system
+    // folders (vault.json `systemFolderPaths`) the directory name stops
+    // saying "trash", and this is the filter that keeps `all` honest.
+    if (note.system) return note.system !== 'trash' && note.system !== 'archive'
     const top = normalizeFolder(note.folder).split('/')[0]?.toLowerCase() ?? ''
     return top !== 'trash' && top !== 'archive'
   })
@@ -790,7 +794,19 @@ async function runStep(
     case 'folder': {
       const folder = argString(step, 'folder')
       if (folder === null) return missingArg(state, step, 'folder')
-      return keep((await allNotes(state, step.line)).filter((note) => inFolder(note, folder)))
+      // `folder trash` / `folder archive` mean THE Trash / THE Archive, not a
+      // directory that happens to carry that name, so on a vault with remapped
+      // system folders they match by the reader's classification too.
+      const bucket = folder.trim().toLowerCase()
+      const matchesBucket =
+        bucket === 'trash' || bucket === 'archive'
+          ? (note: WorkflowNote): boolean => note.system === bucket
+          : (): boolean => false
+      return keep(
+        (await allNotes(state, step.line)).filter(
+          (note) => inFolder(note, folder) || matchesBucket(note)
+        )
+      )
     }
 
     case 'tag': {
@@ -1032,7 +1048,7 @@ async function runStep(
       const filed: NoteSet = []
       for (const note of current) {
         if (!pushOp(state, { kind, path: note.path }, step.line)) return keep(current)
-        filed.push(relocated(note, folderTarget(kind, note.path)))
+        filed.push(relocated(note, folderTarget(kind, note.path, state.ctx.systemFolderDirs)))
       }
       return keep(filed)
     }

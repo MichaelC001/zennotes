@@ -57,3 +57,38 @@ describe('mcp note links (#509)', () => {
     expect(parseOpenNoteDeepLink(meta.link)).toEqual({ target: 'tab', path: meta.path })
   })
 })
+
+describe('remapped system folders (#398)', () => {
+  it('classifies a remapped trash directory as trash and keeps its tasks out', async () => {
+    await mkdir(path.join(root, '.zennotes'), { recursive: true })
+    await writeFile(
+      path.join(root, '.zennotes', 'vault.json'),
+      JSON.stringify({ systemFolderPaths: { trash: '99 - Deleted' } })
+    )
+    await mkdir(path.join(root, '99 - Deleted'), { recursive: true })
+    await writeFile(
+      path.join(root, '99 - Deleted', 'Gone.md'),
+      '# Gone\n\n- [ ] should never surface as a live task\n'
+    )
+
+    const notes = await listNotes(root)
+    const gone = notes.find((n) => n.path.startsWith('99 - Deleted/'))
+    expect(gone?.folder).toBe('trash')
+
+    const tasks = await scanAllTasks(root)
+    expect(tasks.some((t) => t.sourcePath.startsWith('99 - Deleted/'))).toBe(false)
+    expect(tasks.some((t) => t.sourcePath.includes('Rename'))).toBe(true)
+  })
+
+  it('rejects traversal and colliding overrides like the shared normalizer', async () => {
+    await mkdir(path.join(root, '.zennotes'), { recursive: true })
+    await writeFile(
+      path.join(root, '.zennotes', 'vault.json'),
+      JSON.stringify({ systemFolderPaths: { trash: '../outside', inbox: 'archive' } })
+    )
+    const notes = await listNotes(root)
+    // Both overrides are invalid, so the defaults hold: the seeded inbox note
+    // still classifies as inbox.
+    expect(notes.some((n) => n.folder === 'inbox')).toBe(true)
+  })
+})

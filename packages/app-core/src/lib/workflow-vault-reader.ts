@@ -45,6 +45,10 @@ export function toWorkflowNote(meta: NoteMeta, body?: string): WorkflowNote {
     path: meta.path,
     title: meta.title,
     folder: directoryOfPath(meta.path),
+    // The system bucket rides along separately from the directory: with
+    // remapped system folders the directory name no longer says "trash", and
+    // this is what keeps `all` off the Trash on such vaults.
+    system: meta.folder,
     // Copied: the engine hands these objects to user-authored steps, and the
     // array on `NoteMeta` belongs to the store.
     tags: [...meta.tags],

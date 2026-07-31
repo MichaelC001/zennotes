@@ -37,6 +37,12 @@ export interface WorkflowNote {
   title: string
   /** Vault-relative folder, e.g. `inbox` or `inbox/projects`. */
   folder: string
+  /** The note's SYSTEM bucket (inbox/quick/archive/trash) as the vault
+   *  classified it, when the reader knows it. `folder` is the on-disk
+   *  directory, which stops naming the bucket once system folders are
+   *  remapped (vault.json `systemFolderPaths`), so the working-set filter
+   *  and `folder trash`/`folder archive` trust this field first. */
+  system?: 'inbox' | 'quick' | 'archive' | 'trash'
   tags: string[]
   /** Flat scalar frontmatter, matching `parseFrontmatter` in template-files. */
   frontmatter: Record<string, string>
@@ -266,6 +272,11 @@ export interface PlanContext {
   reader: VaultReader
   /** Absent means `call` steps report an error rather than silently no-oping. */
   resolve?: WorkflowResolver
+  /** Resolved on-disk directory names for remapped system folders (vault.json
+   *  `systemFolderPaths`). Absent or empty means the defaults (`archive/`,
+   *  `trash/`, …). The `archive`/`trash` steps use this to project and file
+   *  notes into the folder the app actually treats as archive/trash. */
+  systemFolderDirs?: Partial<Record<'inbox' | 'quick' | 'archive' | 'trash', string>>
   /** Fixed clock so `since 7d` and `{{date}}` are deterministic in tests. */
   now: number
   /**

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { planWorkflow } from './engine'
 import { bindParams, nodeDef } from './nodes'
+import { folderTarget } from './paths'
 import type {
   NoteSet,
   PlanContext,
@@ -1017,5 +1018,58 @@ describe('invariants', () => {
       step('add-tag', ['#x'])
     ])
     expect(JSON.stringify(NOTES)).toBe(snapshot)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Remapped system folders (#398)                                            */
+/* -------------------------------------------------------------------------- */
+
+// With vault.json `systemFolderPaths` the on-disk directory stops naming the
+// bucket, so the reader stamps `system` on each note and the plan context
+// carries the resolved directory names. These pin the three places that must
+// respect a remap: the working-set filter, `folder trash`, and where the
+// `trash`/`archive` steps file notes.
+describe('remapped system folders', () => {
+  const dirs = { inbox: '01 - Entry', archive: 'Shelf', trash: '99 - Deleted' } as const
+  const remapNotes: WorkflowNote[] = [
+    { ...note('01 - Entry/Idea.md', 'Idea', '01 - Entry', ['book'], { rating: '5' }, DAY), system: 'inbox' },
+    { ...note('99 - Deleted/Gone.md', 'Gone', '99 - Deleted', ['book'], {}, DAY), system: 'trash' },
+    { ...note('Shelf/Old.md', 'Old', 'Shelf', [], {}, DAY), system: 'archive' }
+  ]
+  const remapReader: VaultReader = {
+    listNotes: async () => remapNotes,
+    readBody: async () => ''
+  }
+
+  it('keeps `all` off a remapped Trash and Archive', async () => {
+    const plan = await planWorkflow(
+      workflow([stmt('out', null, [step('all')])]),
+      makeCtx(remapReader, { systemFolderDirs: dirs })
+    )
+    expect(plan.wires.out.map((n) => n.title)).toEqual(['Idea'])
+  })
+
+  it('`folder trash` still means THE trash after a remap', async () => {
+    const plan = await planWorkflow(
+      workflow([stmt('out', null, [step('folder', ['trash'])])]),
+      makeCtx(remapReader, { systemFolderDirs: dirs })
+    )
+    expect(plan.wires.out.map((n) => n.title)).toEqual(['Gone'])
+  })
+
+  it('the `trash` step projects into the remapped directory', async () => {
+    const plan = await planWorkflow(
+      workflow([stmt('out', null, [step('all'), step('trash')])]),
+      makeCtx(remapReader, { systemFolderDirs: dirs })
+    )
+    expect(plan.ops).toEqual([{ kind: 'trash', path: '01 - Entry/Idea.md' }])
+    expect(plan.wires.out.map((n) => n.path)).toEqual(['99 - Deleted/Idea.md'])
+  })
+
+  it('folderTarget resolves destinations and strips remapped source roots', () => {
+    expect(folderTarget('trash', 'inbox/demo/X.md', dirs)).toBe('99 - Deleted/demo/X.md')
+    expect(folderTarget('archive', '01 - Entry/X.md', dirs)).toBe('Shelf/X.md')
+    expect(folderTarget('trash', 'inbox/demo/X.md')).toBe('trash/demo/X.md')
   })
 })
