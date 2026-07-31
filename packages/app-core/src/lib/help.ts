@@ -212,7 +212,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'System folders are workflow buckets',
     body:
-      'Inbox, Quick Notes, Archive, and Trash are built-in top-level buckets with specific jobs. You can rename how they appear in the UI without renaming the actual folders on disk, which keeps your workflow flexible without breaking the file layout.'
+      'Inbox, Quick Notes, Archive, and Trash are built-in top-level buckets with specific jobs. You can rename how they appear in the UI without renaming the actual folders on disk, which keeps your workflow flexible without breaking the file layout. Or go the other way: **Settings → Vault → Folder Paths** points any of the four at a directory of your choosing (say `01 - Entry` as your Inbox, Obsidian-style), so an existing vault keeps its layout and ZenNotes adapts to it. The mapping is stored in the vault itself and every surface follows it: counts, tasks, search, workflows, the web app, and the MCP server. Single directory names only, no collisions, reserved names refused.'
   },
   {
     title: 'Primary notes can live at the vault root',
@@ -373,6 +373,11 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
     title: 'Workflows plan first and write second',
     body:
       'A workflow is a plain `.md` file under `.zennotes/workflows/`: frontmatter plus one pipeline per line, like `good = books | where rating >= 4`. Wires carry sets of notes, so every wire on the canvas shows the live count flowing through it, and the canvas and the text are lossless projections of the same file (layout is computed, so no coordinates ever land in your vault). The engine can only propose changes: running shows the full dry-run diff before anything is applied, applying journals every file\'s pre-run bytes so Undo restores them exactly, and a run that fails midway rolls the whole thing back on its own. There are no code steps, no shell, and no network, which is why a workflow you did not write is safe to read and run. The feature is off by default; enable it under Settings → Workflows.'
+  },
+  {
+    title: 'The workflow grammar in one card',
+    body:
+      'Six sources open a set: `all`, `folder inbox`, `tag #book`, `search reading list`, `current`, `selection` (the Trash and Archive stay out unless you name them, like `folder trash`). Twelve steps filter and shape it: `where rating >= 4`, `tagged` / `not-tagged #x`, `in inbox/projects`, `matching inbox/**/*.md`, `contains TODO`, `since 7d`, `sort finished desc`, `limit 25`, `dedupe`, and `union` / `subtract <wire>` to combine named wires. Mutating steps change every note on the wire, always behind the dry-run confirmation: `set status done`, `add-tag` / `remove-tag`, `move`, `rename {{date}}-{{title}}`, `append` / `prepend`, `apply-template`, `archive`, `trash`. Outputs turn the wire into text: `render table title, rating` feeds `write "Log.md"`, `write-section "Log.md" "Finished"`, `create-each "inbox/{{title}}.md"`, `notify`, or `clipboard`, and `call <workflow>` folds another workflow into the same run. `{{title}}`, `{{date}}`, `{{count}}` and any frontmatter field expand per note. Press `?` in the Workflows view for the live reference, with a one-line description and a real example for every step.'
   }
 ]
 
