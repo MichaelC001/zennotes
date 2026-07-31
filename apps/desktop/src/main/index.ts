@@ -69,6 +69,7 @@ import {
   importPastedImage,
   invalidateNoteMetaCache,
   invalidateVaultSettingsCache,
+  vaultChangeAffectsSettings,
   invalidateVaultTextSearchCache,
   listAssets,
   listFolders,
@@ -292,7 +293,10 @@ const windowVaults = new WindowVaultRegistry({
   invalidateVault: (root, ev) => {
     invalidateNoteMetaCache(root, ev.scope === 'vault-settings' ? undefined : ev.path)
     invalidateVaultTextSearchCache(root)
-    invalidateVaultSettingsCache(root)
+    // Only for events that can actually change the settings: this cache backs
+    // a whole-root readdir that every note read and write already awaits, so
+    // dropping it per event made a save burst pay for one listing per file.
+    if (vaultChangeAffectsSettings(ev)) invalidateVaultSettingsCache(root)
   },
   sendVaultChange: (windowId, ev) => {
     const win = BrowserWindow.fromId(windowId)
@@ -2693,18 +2697,15 @@ function registerIpc(): void {
         try {
           return (await client.readNote(relPath)).body
         } catch (err) {
-          // "Absent" may only come from a server that ANSWERED. 404 is the
-          // 2.20+ server saying not-found; 500 is what older servers return
-          // for a missing file (they map ENOENT to a bare internal error).
-          // A connection failure or an auth rejection must propagate: the
-          // file may exist perfectly well, and swallowing the error here is
-          // how a dead server used to silently forget databases.
-          if (
-            err instanceof RemoteRequestError &&
-            (err.status === 404 || err.status === 500)
-          ) {
-            return null
-          }
+          // "Absent" means 404 and nothing else. `openDatabase` reads an
+          // absent sidecar as "bare CSV, adopt it" and writes an inferred
+          // schema.json over whatever was there, so every error swallowed
+          // here is a schema the user loses. A 500, a dropped connection, an
+          // auth rejection all mean the file may exist perfectly well.
+          // Servers old enough to answer 500 for a missing file are no longer
+          // humored: an unopenable database is recoverable, an overwritten
+          // one is not.
+          if (err instanceof RemoteRequestError && err.status === 404) return null
           throw err
         }
       },
@@ -2715,11 +2716,14 @@ function registerIpc(): void {
       renameFolder: (folder, oldSubpath, newSubpath) =>
         client.renameFolder(folder, oldSubpath, newSubpath),
       listFolders: () => client.listFolders(),
-      primaryNotesAtRoot: async () => {
-        try {
-          return (await client.getVaultSettings()).primaryNotesLocation === 'root'
-        } catch {
-          return false
+      // Errors propagate: answering "defaults" for an unreachable server sends
+      // every database path composition to a literal `inbox/`, writing
+      // sidecars where nothing will ever look for them.
+      vaultLayout: async () => {
+        const settings = await client.getVaultSettings()
+        return {
+          primaryNotesAtRoot: settings.primaryNotesLocation === 'root',
+          systemFolderPaths: settings.systemFolderPaths
         }
       }
     })

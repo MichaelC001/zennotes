@@ -44,9 +44,16 @@ export function normalizeSystemFolderPaths(
   const next: SystemFolderPaths = {}
   for (const key of FOLDER_IDS) {
     const p = normalizeSystemFolderPath(raw[key])
-    if (p && p !== DEFAULT_FOLDER_PATHS[key]) {
-      next[key] = p
+    if (!p || p === DEFAULT_FOLDER_PATHS[key]) continue
+    // Never let a folder claim ANOTHER folder's default name, even when that
+    // other folder has moved out of the way: `{inbox:'archive',
+    // archive:'inbox'}` resolves without collision, and the swap it describes
+    // reads backwards on every surface that classifies a path by its top
+    // segment (and in every other app looking at the same directory).
+    if (FOLDER_IDS.some((other) => other !== key && p.toLowerCase() === DEFAULT_FOLDER_PATHS[other])) {
+      continue
     }
+    next[key] = p
   }
   let changed = true
   while (changed) {
@@ -79,6 +86,32 @@ export function resolveFolderPath(
   overrides?: SystemFolderPaths | null
 ): string {
   return overrides?.[folder] ?? DEFAULT_FOLDER_PATHS[folder]
+}
+
+/**
+ * The system folder that owns a top-level directory name, or null when the
+ * name belongs to no system folder (an ordinary user folder, an assets dir,
+ * anything else).
+ *
+ * This is THE classification rule for a path's first segment: every surface
+ * that asks "is this inbox/quick/archive/trash?" must go through it, because
+ * only the RESOLVED name of each folder counts. With `inbox` remapped to
+ * `01 - Entry`, `01 - Entry/` is the inbox and a directory literally named
+ * `inbox/` is just a user folder. Treating the default name as the system
+ * folder anyway is how listings (which walk the remapped directory) and
+ * classification (which read the literal one) came to disagree about the same
+ * vault. Case-insensitive, since macOS and Windows preserve whatever case the
+ * directory was created with.
+ */
+export function systemFolderForDirName(
+  name: string,
+  overrides?: SystemFolderPaths | null
+): NoteFolder | null {
+  const lower = name.toLowerCase()
+  for (const folder of FOLDER_IDS) {
+    if (resolveFolderPath(folder, overrides).toLowerCase() === lower) return folder
+  }
+  return null
 }
 
 export function buildReverseFolderMap(

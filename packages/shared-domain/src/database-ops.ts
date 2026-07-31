@@ -33,19 +33,37 @@ import {
   type DbView
 } from './databases'
 import { buildDefaultViews, inferFields, parseCsv, parseRows, serializeRows } from './database-csv'
+import {
+  resolveFolderPath,
+  systemFolderForDirName,
+  type SystemFolderPaths
+} from './system-folder-paths'
+
+/** Where the vault keeps its system folders on disk. Both halves matter to
+ *  path composition, and the server honors both, so getting either wrong
+ *  writes a `.base` folder somewhere nothing will ever look for it. */
+export interface DatabaseVaultLayout {
+  /** True when the vault keeps inbox notes at the root (`primaryNotesLocation: 'root'`). */
+  primaryNotesAtRoot: boolean
+  /** Custom on-disk directory names for the system folders (vault.json
+   *  `systemFolderPaths`, #398), or null when they all sit at their defaults. */
+  systemFolderPaths?: SystemFolderPaths | null
+}
 
 /** The generic vault-file IO a transport must provide. `readFileTextOrNull`
  *  and `writeFile` must accept ANY vault-relative path, including `.base/`
  *  internals like `data.csv` and `schema.json`, not just `.md` notes. */
 export interface DatabaseFileOps {
-  /** A file's text, or null when missing/unreadable (ENOENT-as-absent). */
+  /** A file's text, or null when the transport says it is ABSENT. Anything
+   *  else (an unreachable server, a permission error) must throw: `null`
+   *  here is read as "no schema yet", and a schema is then inferred and
+   *  written over the one that could not be read. */
   readFileTextOrNull(relPath: string): Promise<string | null>
   writeFile(relPath: string, text: string): Promise<void>
   createFolder(folder: NoteFolder, subpath: string): Promise<void>
   renameFolder(folder: NoteFolder, oldSubpath: string, newSubpath: string): Promise<string>
   listFolders(): Promise<{ folder: NoteFolder; subpath: string }[]>
-  /** True when the vault keeps inbox notes at the root (`primaryNotesLocation: 'root'`). */
-  primaryNotesAtRoot(): Promise<boolean>
+  vaultLayout(): Promise<DatabaseVaultLayout>
 }
 
 export interface DatabaseOps {
@@ -153,22 +171,25 @@ function dbHydrate(
   }
 }
 
-/** Vault-relative directory for a (folder, subpath) — mirrors the server folderRoot. */
-function vaultRelDir(folder: NoteFolder, subpath: string, atRoot: boolean): string {
+/** Vault-relative directory for a (folder, subpath). Mirrors the server
+ *  folderRoot, remap included: a vault whose archive lives in `99 - Archive/`
+ *  must get its sidecars there, not under a literal `archive/` the server
+ *  never lists. */
+function vaultRelDir(folder: NoteFolder, subpath: string, layout: DatabaseVaultLayout): string {
   const sub = (subpath ?? '').replace(/^\/+|\/+$/g, '')
-  if (folder === 'inbox') return atRoot ? sub : joinSub('inbox', sub)
-  return joinSub(folder, sub)
+  if (folder === 'inbox' && layout.primaryNotesAtRoot) return sub
+  return joinSub(resolveFolderPath(folder, layout.systemFolderPaths), sub)
 }
 
 /** Split a vault-relative folder path into (folder, subpath) — inverse of vaultRelDir. */
-function splitVaultPath(rel: string, atRoot: boolean): { folder: NoteFolder; subpath: string } {
+function splitVaultPath(
+  rel: string,
+  layout: DatabaseVaultLayout
+): { folder: NoteFolder; subpath: string } {
   const parts = dbToPosix(rel).split('/').filter(Boolean)
-  const top = parts[0]
-  if (top === 'quick' || top === 'archive' || top === 'trash') {
-    return { folder: top as NoteFolder, subpath: parts.slice(1).join('/') }
-  }
-  if (top === 'inbox' && !atRoot) {
-    return { folder: 'inbox', subpath: parts.slice(1).join('/') }
+  const system = systemFolderForDirName(parts[0] ?? '', layout.systemFolderPaths)
+  if (system && (system !== 'inbox' || !layout.primaryNotesAtRoot)) {
+    return { folder: system, subpath: parts.slice(1).join('/') }
   }
   return { folder: 'inbox', subpath: parts.join('/') }
 }
@@ -262,10 +283,10 @@ export function createDatabaseOps(io: DatabaseFileOps): DatabaseOps {
     subpath: string,
     title?: string
   ): Promise<DatabaseDoc> {
-    const atRoot = await io.primaryNotesAtRoot()
+    const layout = await io.vaultLayout()
     const baseTitle = (title ?? 'Untitled Database').trim() || 'Untitled Database'
     const baseName = baseTitle.replace(DB_TITLE_BAD, '-')
-    const dirRel = vaultRelDir(folder, subpath, atRoot)
+    const dirRel = vaultRelDir(folder, subpath, layout)
     const csvFor = (name: string): string =>
       csvPathForFormDir(joinSub(dirRel, `${name}${FORM_DIR_SUFFIX}`))
     // Resolve a non-colliding <Name>.base under the directory.
@@ -322,20 +343,20 @@ export function createDatabaseOps(io: DatabaseFileOps): DatabaseOps {
     while ((await io.readFileTextOrNull(csvPathForFormDir(targetFormDir))) !== null) {
       targetFormDir = makeFormDir(`${safeName} ${n++}`)
     }
-    const atRoot = await io.primaryNotesAtRoot()
-    const { folder, subpath: oldSub } = splitVaultPath(oldFormDir, atRoot)
-    const { subpath: newSub } = splitVaultPath(targetFormDir, atRoot)
+    const layout = await io.vaultLayout()
+    const { folder, subpath: oldSub } = splitVaultPath(oldFormDir, layout)
+    const { subpath: newSub } = splitVaultPath(targetFormDir, layout)
     await io.renameFolder(folder, oldSub, newSub)
     return csvPathForFormDir(targetFormDir)
   }
 
   async function listDatabases(): Promise<DatabaseSummary[]> {
-    const [folders, atRoot] = await Promise.all([io.listFolders(), io.primaryNotesAtRoot()])
+    const [folders, layout] = await Promise.all([io.listFolders(), io.vaultLayout()])
     const out: DatabaseSummary[] = []
     for (const f of folders) {
       if (!isFormDirName(f.subpath)) continue
       // The folder subpath is folder-relative; reconstruct the vault-relative path.
-      const csv = csvPathForFormDir(vaultRelDir(f.folder, f.subpath, atRoot))
+      const csv = csvPathForFormDir(vaultRelDir(f.folder, f.subpath, layout))
       out.push({ path: csv, title: dbTitleFromPath(csv) })
     }
     return out.sort((a, b) => a.title.localeCompare(b.title))

@@ -68,7 +68,8 @@ import type {
   VaultTextSearchToolPaths
 } from '@shared/ipc'
 import type { VaultTask } from '@shared/tasks'
-import { createDatabaseOps } from '@shared/database-ops'
+import { createDatabaseOps, type DatabaseVaultLayout } from '@shared/database-ops'
+import { isUnknownRouteResponse, parseServerErrorBody } from '@shared/server-error-shape'
 import type {
   McpClientId,
   McpClientStatus,
@@ -131,19 +132,29 @@ type JsonRequestInit = Omit<RequestInit, 'body'> & { body?: JsonBody }
 class HttpRequestError extends Error {
   status: number
   path: string
+  /** The response body verbatim, so callers can read the server's structured
+   *  error shape (see `parseServerErrorBody`) without re-reading the stream. */
+  body: string
 
-  constructor(status: number, path: string, message: string) {
+  constructor(status: number, path: string, message: string, body = '') {
     super(message)
     this.name = 'HttpRequestError'
     this.status = status
     this.path = path
+    this.body = body
   }
 }
 
 function wrapRouteUpgradeError(path: string, err: unknown): never {
+  // A 404 that carries the server's structured body came from the route
+  // itself: the directory is gone, or the path is outside the allowed browse
+  // roots. Only a BARE 404 (the router's own, on a server that has no such
+  // route) means the server predates the vault picker, and claiming otherwise
+  // replaced every real error on the first-run screen with a bogus "upgrade
+  // your server".
   if (
     err instanceof HttpRequestError &&
-    err.status === 404 &&
+    isUnknownRouteResponse(err.status, err.body) &&
     (path.startsWith('/fs/browse') || path === '/vault/select')
   ) {
     throw new Error(
@@ -180,7 +191,8 @@ async function jsonRequest<T>(
     throw new HttpRequestError(
       res.status,
       path,
-      `HTTP ${res.status} ${res.statusText} for ${path}${text ? `: ${text}` : ''}`
+      `HTTP ${res.status} ${res.statusText} for ${path}${text ? `: ${parseServerErrorBody(text)?.message || text}` : ''}`,
+      text
     )
   }
   if (res.status === 204) return undefined as unknown as T
@@ -642,27 +654,32 @@ function scanTasksForPath(relPath: string): Promise<VaultTask[]> {
 // so the on-disk format is identical everywhere by construction.
 // --------------------------------------------------------------------
 
-/** Read a vault file's text, or null when the SERVER says it is absent.
- *  404 is the 2.20+ server's not-found; 500 is what older servers return
- *  for a missing file. A network failure or auth rejection propagates
- *  instead — the file may exist, and mapping "can't reach the server" to
- *  "absent" is how a dropped connection used to silently forget databases. */
+/** Read a vault file's text, or null when the server says it is ABSENT.
+ *
+ *  404 and nothing else. `openDatabase` reads "absent sidecar" as "this is a
+ *  bare CSV, adopt it" and then writes an inferred schema.json over whatever
+ *  was there, so every error this swallows is a schema the user loses: a 500,
+ *  a dropped connection, an auth rejection all mean the file may exist
+ *  perfectly well. Older servers answered 500 for a missing file and are
+ *  deliberately no longer humored: an unopenable database is recoverable,
+ *  an overwritten one is not. */
 async function readFileTextOrNull(relPath: string): Promise<string | null> {
   try {
     return (await readNote(relPath)).body
   } catch (err) {
-    if (err instanceof HttpRequestError && (err.status === 404 || err.status === 500)) {
-      return null
-    }
+    if (err instanceof HttpRequestError && err.status === 404) return null
     throw err
   }
 }
 
-async function primaryNotesAtRoot(): Promise<boolean> {
-  try {
-    return (await getVaultSettings()).primaryNotesLocation === 'root'
-  } catch {
-    return false
+/** Errors propagate: answering "defaults" for an unreachable server sends
+ *  every database path composition to a literal `inbox/`, writing sidecars
+ *  where nothing will ever look for them. */
+async function vaultLayout(): Promise<DatabaseVaultLayout> {
+  const settings = await getVaultSettings()
+  return {
+    primaryNotesAtRoot: settings.primaryNotesLocation === 'root',
+    systemFolderPaths: settings.systemFolderPaths
   }
 }
 
@@ -674,7 +691,7 @@ const dbOps = createDatabaseOps({
   createFolder,
   renameFolder,
   listFolders,
-  primaryNotesAtRoot
+  vaultLayout
 })
 
 const {

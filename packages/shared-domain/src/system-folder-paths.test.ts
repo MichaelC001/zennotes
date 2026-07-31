@@ -99,6 +99,30 @@ describe('normalizeSystemFolderPaths', () => {
     })
   })
 
+  // A swap resolves without any collision, so the collision loop let it
+  // through. It still reads backwards everywhere a path is classified by its
+  // top segment, in this app and in every other one pointed at the vault.
+  it('rejects a full swap of two folders', () => {
+    expect(normalizeSystemFolderPaths({ inbox: 'archive', archive: 'inbox' })).toEqual({})
+    expect(normalizeSystemFolderPaths({ quick: 'trash', trash: 'quick' })).toEqual({})
+  })
+
+  it('rejects a three-way rotation', () => {
+    expect(
+      normalizeSystemFolderPaths({ inbox: 'quick', quick: 'archive', archive: 'inbox' })
+    ).toEqual({})
+  })
+
+  it('keeps a valid override alongside a rejected swap partner', () => {
+    expect(
+      normalizeSystemFolderPaths({ inbox: 'archive', archive: 'inbox', trash: 'deleted' })
+    ).toEqual({ trash: 'deleted' })
+  })
+
+  it('rejects another folder default regardless of case', () => {
+    expect(normalizeSystemFolderPaths({ inbox: 'Archive' })).toEqual({})
+  })
+
   it('rejects multi-segment paths', () => {
     expect(normalizeSystemFolderPaths({ trash: 'sys/trash' })).toEqual({})
     expect(normalizeSystemFolderPaths({ inbox: 'Notes/Inbox' })).toEqual({})

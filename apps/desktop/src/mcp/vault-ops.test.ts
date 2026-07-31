@@ -1,9 +1,9 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseOpenNoteDeepLink } from '../main/deep-links'
-import { createNote, listNotes, scanAllTasks, searchText } from './vault-ops'
+import { createNote, listNotes, renameNote, scanAllTasks, searchText } from './vault-ops'
 
 // Every note-shaped MCP result carries `link`, the zennotes:// deep link a
 // model renders as a markdown link so the user can click from chat straight
@@ -90,5 +90,99 @@ describe('remapped system folders (#398)', () => {
     // Both overrides are invalid, so the defaults hold: the seeded inbox note
     // still classifies as inbox.
     expect(notes.some((n) => n.folder === 'inbox')).toBe(true)
+  })
+
+  // A swap resolves without any collision, so the collision loop let it
+  // through and every folder then read as its opposite.
+  it('rejects a full inbox/archive swap', async () => {
+    await mkdir(path.join(root, '.zennotes'), { recursive: true })
+    await writeFile(
+      path.join(root, '.zennotes', 'vault.json'),
+      JSON.stringify({ systemFolderPaths: { inbox: 'archive', archive: 'inbox' } })
+    )
+    const notes = await listNotes(root)
+    expect(notes.find((n) => n.title.startsWith('Rename'))?.folder).toBe('inbox')
+  })
+
+  // The literal default name is no longer the system folder once that folder
+  // has moved: `trash/` is then an ordinary user folder inside the inbox.
+  it('treats a leftover literal trash/ as a user folder when trash is remapped', async () => {
+    await mkdir(path.join(root, '.zennotes'), { recursive: true })
+    await writeFile(
+      path.join(root, '.zennotes', 'vault.json'),
+      JSON.stringify({ systemFolderPaths: { trash: '99 - Deleted' } })
+    )
+    await mkdir(path.join(root, 'trash'), { recursive: true })
+    await writeFile(path.join(root, 'trash', 'Kept.md'), '# Kept\n')
+
+    const notes = await listNotes(root)
+    expect(notes.find((n) => n.path === 'trash/Kept.md')?.folder).toBe('inbox')
+  })
+})
+
+// The renderer syncs a note's leading `# Heading` to its filename on rename
+// (#455). A rename through MCP writes the same file, so the setting has to
+// mean the same thing there, or half the rename paths quietly ignore it.
+describe('rename_note heading sync (#455)', () => {
+  let configDir: string
+  const previousConfigDir = process.env.ZENNOTES_CONFIG_DIR
+
+  beforeEach(async () => {
+    configDir = await mkdtemp(path.join(os.tmpdir(), 'zennotes-mcp-config-'))
+    process.env.ZENNOTES_CONFIG_DIR = configDir
+  })
+
+  afterEach(async () => {
+    if (previousConfigDir === undefined) delete process.env.ZENNOTES_CONFIG_DIR
+    else process.env.ZENNOTES_CONFIG_DIR = previousConfigDir
+    await rm(configDir, { recursive: true, force: true })
+  })
+
+  const writeConfig = async (on: boolean): Promise<void> => {
+    await writeFile(
+      path.join(configDir, 'config.toml'),
+      `[editor]\nsync_title_heading_on_rename = ${on}\n`
+    )
+  }
+
+  it('rewrites the leading heading when the setting is on', async () => {
+    await writeConfig(true)
+    const meta = await renameNote(root, 'inbox/GitHub/Rename -master- branch (howto).md', 'Branches')
+    expect(meta.path).toBe('inbox/GitHub/Branches.md')
+    expect(await readFile(path.join(root, meta.path), 'utf8')).toContain('# Branches\n')
+  })
+
+  it('leaves the body byte-identical when the setting is off', async () => {
+    await writeConfig(false)
+    const meta = await renameNote(root, 'inbox/GitHub/Rename -master- branch (howto).md', 'Branches')
+    expect(await readFile(path.join(root, meta.path), 'utf8')).toContain('# Rename\n')
+  })
+
+  it('defaults to on when no portable config file exists', async () => {
+    const meta = await renameNote(root, 'inbox/GitHub/Rename -master- branch (howto).md', 'Branches')
+    expect(await readFile(path.join(root, meta.path), 'utf8')).toContain('# Branches\n')
+  })
+
+  it('never invents a heading for a note that has none', async () => {
+    await writeConfig(true)
+    await writeFile(path.join(root, 'inbox', 'Plain.md'), 'just prose, no heading\n')
+    const meta = await renameNote(root, 'inbox/Plain.md', 'Renamed')
+    expect(await readFile(path.join(root, meta.path), 'utf8')).toBe('just prose, no heading\n')
+  })
+
+  it('leaves an Obsidian drawing alone (its H1 is structure, not a title)', async () => {
+    await writeConfig(true)
+    const body = '# Excalidraw Data\n\n## Text Elements\n'
+    await writeFile(path.join(root, 'inbox', 'Sketch.excalidraw.md'), body)
+    const meta = await renameNote(root, 'inbox/Sketch.excalidraw.md', 'Diagram')
+    expect(await readFile(path.join(root, meta.path), 'utf8')).toBe(body)
+  })
+
+  it('leaves a drawing saved as a plain .md alone too', async () => {
+    await writeConfig(true)
+    const body = '---\nexcalidraw-plugin: parsed\n---\n\n# Excalidraw Data\n'
+    await writeFile(path.join(root, 'inbox', 'Board.md'), body)
+    const meta = await renameNote(root, 'inbox/Board.md', 'Canvas')
+    expect(await readFile(path.join(root, meta.path), 'utf8')).toBe(body)
   })
 })

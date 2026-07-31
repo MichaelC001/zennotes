@@ -46,6 +46,7 @@ import {
   VaultTextSearchBackendResolved,
   VaultTextSearchToolPaths,
   VaultTextSearchMatch,
+  VaultChangeEvent,
   VaultInfo
 } from '@shared/ipc'
 import { DEMO_TOUR_DIR } from '@shared/demo-tour'
@@ -71,7 +72,7 @@ import { DEMO_TOUR_ASSETS, DEMO_TOUR_NOTES } from './demo-tour-data'
 import {
   normalizeSystemFolderPaths,
   resolveFolderPath,
-  buildReverseFolderMap,
+  systemFolderForDirName,
   type SystemFolderPaths
 } from '@shared/system-folder-paths'
 
@@ -96,10 +97,11 @@ const NOTE_META_CACHE_VERSION = 3
 const NOTE_COMMENTS_DIR = 'comments'
 const NOTE_COMMENTS_SUFFIX = '.comments.json'
 const RESERVED_ROOT_NAMES = new Set<string>([...FOLDERS, ...ATTACHMENTS_DIRS, INTERNAL_VAULT_DIR])
-const HIDDEN_PRIMARY_ROOT_NAMES = new Set<string>([
-  'quick',
-  'archive',
-  'trash',
+// The subset that stays reserved however the system folders are remapped:
+// asset dirs and our own internal dir are never user note folders, while
+// `inbox`/`archive`/… are reserved only while a system folder actually
+// resolves there (see systemFolderForDirName).
+const RESERVED_NON_SYSTEM_ROOT_NAMES = new Set<string>([
   ...ATTACHMENTS_DIRS,
   INTERNAL_VAULT_DIR
 ])
@@ -263,6 +265,9 @@ const noteMetaCache = new Map<
 const loadedPersistedNoteMetaCacheRoots = new Set<string>()
 const noteMetaCachePersistTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const vaultSettingsCache = new Map<string, { settings: VaultSettings; mtimeMs: number }>()
+// Keyed by root, not by vault.json's mtime: what it answers depends on the
+// vault's ROOT ENTRIES, which vault.json's mtime says nothing about.
+const inferredPrimaryCache = new Map<string, PrimaryNotesLocation>()
 
 export interface PersistedWindowState {
   x: number
@@ -1286,6 +1291,40 @@ async function vaultLooksEmpty(root: string): Promise<boolean> {
   return true
 }
 
+/** True when vault.json answers the primary-notes question itself, so nothing
+ *  has to be inferred from the vault's layout. */
+function statesPrimaryNotesLocation(parsed: unknown): boolean {
+  if (!parsed || typeof parsed !== 'object') return false
+  return (parsed as { primaryNotesLocation?: unknown }).primaryNotesLocation != null
+}
+
+/** The remap stated by a parsed (or caller-supplied) settings object, for the
+ *  inference (a remapped system dir is not loose root content). */
+function statedSystemFolderPaths(parsed: unknown): SystemFolderPaths {
+  if (!parsed || typeof parsed !== 'object') return {}
+  return normalizeSystemFolderPaths((parsed as { systemFolderPaths?: unknown }).systemFolderPaths)
+}
+
+/**
+ * `inferPrimaryNotesLocation` memoized per root.
+ *
+ * The inference is a whole-root `readdir`, and `folderOf()` awaits
+ * `getVaultSettings` on every note read and write, so an un-memoized inference
+ * turned a save burst into one directory listing per file. The answer only
+ * changes when the root's own entries do, which is what
+ * `vaultChangeAffectsSettings` watches for.
+ */
+async function inferredPrimaryNotesLocation(
+  root: string,
+  systemFolderPaths?: SystemFolderPaths | null
+): Promise<PrimaryNotesLocation> {
+  const cached = inferredPrimaryCache.get(root)
+  if (cached) return cached
+  const inferred = await inferPrimaryNotesLocation(root, systemFolderPaths)
+  inferredPrimaryCache.set(root, inferred)
+  return inferred
+}
+
 export async function getVaultSettings(root: string): Promise<VaultSettings> {
   const settingsFile = vaultSettingsPath(root)
   // One handle serves both the mtime check and the read, so the mtime that
@@ -1301,8 +1340,7 @@ export async function getVaultSettings(root: string): Promise<VaultSettings> {
     if (cached) {
       vaultSettingsCache.delete(root)
     }
-    const fallbackPrimary = await inferPrimaryNotesLocation(root)
-    return normalizeVaultSettings(null, fallbackPrimary)
+    return normalizeVaultSettings(null, await inferredPrimaryNotesLocation(root))
   }
   try {
     const stat = await handle.stat()
@@ -1310,16 +1348,22 @@ export async function getVaultSettings(root: string): Promise<VaultSettings> {
     if (cached && sameMtimeMs(cached.mtimeMs, stat.mtimeMs)) {
       return cached.settings
     }
-    let fallbackPrimary = DEFAULT_VAULT_SETTINGS.primaryNotesLocation
+    let parsed: unknown
     try {
-      fallbackPrimary = await inferPrimaryNotesLocation(root)
-      const raw = await handle.readFile({ encoding: 'utf8' })
-      const settings = normalizeVaultSettings(JSON.parse(raw), fallbackPrimary)
-      vaultSettingsCache.set(root, { settings, mtimeMs: stat.mtimeMs })
-      return settings
+      parsed = JSON.parse(await handle.readFile({ encoding: 'utf8' }))
     } catch {
-      return normalizeVaultSettings(null, fallbackPrimary)
+      return normalizeVaultSettings(null, await inferredPrimaryNotesLocation(root))
     }
+    // The layout is only consulted for a question vault.json left unanswered.
+    // A file that states its primaryNotesLocation therefore costs no readdir at
+    // all, and the remap it also states keeps the inference honest when it is
+    // needed (a remapped inbox is a system dir, not loose root content).
+    const fallbackPrimary = statesPrimaryNotesLocation(parsed)
+      ? DEFAULT_VAULT_SETTINGS.primaryNotesLocation
+      : await inferredPrimaryNotesLocation(root, statedSystemFolderPaths(parsed))
+    const settings = normalizeVaultSettings(parsed, fallbackPrimary)
+    vaultSettingsCache.set(root, { settings, mtimeMs: stat.mtimeMs })
+    return settings
   } finally {
     await handle.close().catch(() => {})
   }
@@ -1329,7 +1373,9 @@ export async function setVaultSettings(
   root: string,
   next: VaultSettings
 ): Promise<VaultSettings> {
-  const fallbackPrimary = await inferPrimaryNotesLocation(root)
+  const fallbackPrimary = statesPrimaryNotesLocation(next)
+    ? DEFAULT_VAULT_SETTINGS.primaryNotesLocation
+    : await inferredPrimaryNotesLocation(root, statedSystemFolderPaths(next))
   const normalized = normalizeVaultSettings(next, fallbackPrimary)
   // Temporary folder session (#): never write .zennotes/vault.json into a
   // folder the user only dropped in to read. Keep the change in memory.
@@ -1339,30 +1385,60 @@ export async function setVaultSettings(
   const writeStat = await fs.stat(vaultSettingsPath(root))
   vaultSettingsCache.set(root, { settings: normalized, mtimeMs: writeStat.mtimeMs })
   if (normalized.primaryNotesLocation === 'inbox') {
-    await fs.mkdir(path.join(root, 'inbox'), { recursive: true })
+    // The RESOLVED inbox, not the literal one: creating `<root>/inbox` while
+    // the settings point the inbox at `01 - Entry/` left a stray directory
+    // that every classifier then read as the system inbox, and the remap did
+    // nothing at all.
+    await fs.mkdir(
+      path.join(root, resolveFolderPath('inbox', normalized.systemFolderPaths)),
+      { recursive: true }
+    )
+    // A new root-level directory is exactly what the inference reads.
+    inferredPrimaryCache.delete(root)
   }
   return cloneVaultSettings(normalized)
 }
 
 export function invalidateVaultSettingsCache(root: string): void {
   vaultSettingsCache.delete(root)
+  inferredPrimaryCache.delete(root)
 }
 
+/**
+ * Whether a watcher event can change what `getVaultSettings` answers.
+ *
+ * Two things can: `.zennotes/vault.json` itself, and, only for a vault whose
+ * vault.json leaves `primaryNotesLocation` unstated, the root's own entries,
+ * which `inferPrimaryNotesLocation` reads. Everything else (a note saved three
+ * folders deep, a comment, a database row) cannot, and dropping the cache for
+ * those turned every write burst into a re-read plus a whole-root readdir on
+ * the path `folderOf()` awaits for each file.
+ */
+export function vaultChangeAffectsSettings(ev: VaultChangeEvent): boolean {
+  if (ev.scope === 'vault-settings') return true
+  if (ev.scope === 'comments' || ev.scope === 'database') return false
+  // A root-level entry (`Notes.md`, or a directory named `Notes`) is what the
+  // inference looks at; anything nested carries a separator.
+  return !ev.path.includes('/')
+}
+
+/** Where a note with no folder of its own belongs: the same directory
+ *  `folderRoot(root, 'inbox')` resolves to, remap included. */
 async function primaryNotesRoot(root: string): Promise<string> {
-  const settings = await getVaultSettings(root)
-  return settings.primaryNotesLocation === 'root' ? root : path.join(root, 'inbox')
+  return await folderRoot(root, 'inbox')
 }
 
-function shouldHidePrimaryRootEntry(name: string, extra?: Set<string>): boolean {
-  return HIDDEN_PRIMARY_ROOT_NAMES.has(name) || (extra?.has(name) ?? false)
-}
-
-function customHiddenPrimaryRootNames(settings: VaultSettings): Set<string> {
-  const names = new Set<string>()
-  if (!settings.systemFolderPaths) return names
+/**
+ * Directory names skipped while walking the vault root in `root` primary mode,
+ * where the root itself is the inbox: the asset dirs, our internal dir, and
+ * the RESOLVED directory of every other system folder. A default name whose
+ * folder has been remapped away (`quick/` once quick lives in `Fast/`) is an
+ * ordinary user folder and must not be hidden.
+ */
+function hiddenPrimaryRootNames(settings: VaultSettings): Set<string> {
+  const names = new Set<string>([...ATTACHMENTS_DIRS, INTERNAL_VAULT_DIR])
   for (const f of ['quick', 'archive', 'trash'] as NoteFolder[]) {
-    const custom = settings.systemFolderPaths[f]
-    if (custom && custom !== f) names.add(custom)
+    names.add(resolveFolderPath(f, settings.systemFolderPaths))
   }
   return names
 }
@@ -1384,14 +1460,12 @@ export function folderForRelativePath(
   const normalized = normalizeVaultRelativePath(rel)
   const top = normalized.split('/')[0]
   if (!top || top.startsWith('.')) return null
-  const lower = top.toLowerCase()
-  if (SYSTEM_FOLDERS.has(lower as NoteFolder)) return lower as NoteFolder
-  if (settings?.systemFolderPaths) {
-    const reverseMap = buildReverseFolderMap(settings.systemFolderPaths)
-    const mapped = reverseMap.get(lower)
-    if (mapped) return mapped
-  }
-  if (RESERVED_ROOT_NAMES.has(top)) return null
+  const system = systemFolderForDirName(top, settings?.systemFolderPaths)
+  if (system) return system
+  // Only the dirs that are reserved no matter where the system folders live.
+  // A default name whose folder has moved (`inbox/` once inbox is `01 - Entry`)
+  // is an ordinary user folder and must classify as one.
+  if (RESERVED_NON_SYSTEM_ROOT_NAMES.has(top)) return null
   return 'inbox'
 }
 
@@ -2291,7 +2365,7 @@ async function resolveDirDescent(
 async function collectBuiltinSearchCandidates(root: string): Promise<VaultTextSearchCandidate[]> {
   const files: Array<{ full: string; folder: NoteFolder }> = []
   const settings = await getVaultSettings(root)
-  const extraHidden = customHiddenPrimaryRootNames(settings)
+  const hiddenRootNames = hiddenPrimaryRootNames(settings)
   const walkFolder = async (
     folder: NoteFolder,
     dirAbs: string,
@@ -2312,7 +2386,7 @@ async function collectBuiltinSearchCandidates(root: string): Promise<VaultTextSe
       const childReal = await resolveDirDescent(full, entry, dirReal, ancestors)
       if (childReal !== null) {
         if (entry.name.startsWith('.')) continue
-        if (isPrimaryRoot && dirAbs === topAbs && shouldHidePrimaryRootEntry(entry.name, extraHidden)) continue
+        if (isPrimaryRoot && dirAbs === topAbs && hiddenRootNames.has(entry.name)) continue
         ancestors.add(childReal)
         await walkFolder(folder, full, childReal, topAbs, isPrimaryRoot, ancestors)
         ancestors.delete(childReal)
@@ -2716,7 +2790,7 @@ async function mapLimit<T, U>(
 export async function listFolders(root: string): Promise<FolderEntry[]> {
   const out: FolderEntry[] = []
   const settings = await getVaultSettings(root)
-  const extraHidden = customHiddenPrimaryRootNames(settings)
+  const hiddenRootNames = hiddenPrimaryRootNames(settings)
   for (const folder of FOLDERS) {
     const topAbs = await folderRoot(root, folder)
     const isPrimaryRoot = folder === 'inbox' && path.resolve(topAbs) === path.resolve(root)
@@ -2734,7 +2808,7 @@ export async function listFolders(root: string): Promise<FolderEntry[]> {
         const childReal = await resolveDirDescent(full, e, dirReal, ancestors)
         if (childReal === null) continue
         if (e.name.startsWith('.')) continue
-        if (isPrimaryRoot && dirAbs === topAbs && shouldHidePrimaryRootEntry(e.name, extraHidden)) continue
+        if (isPrimaryRoot && dirAbs === topAbs && hiddenRootNames.has(e.name)) continue
         const nextSub = subpath ? `${subpath}/${e.name}` : e.name
         out.push({ folder, subpath: nextSub, siblingOrder: index, isSymlink: e.isSymbolicLink() })
         // A `<Name>.base` database folder is listed (the renderer shows it as a
@@ -2755,7 +2829,7 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
   const startedAt = performance.now()
   await hydratePersistedNoteMetaCache(root)
   const settings = await getVaultSettings(root)
-  const extraHidden = customHiddenPrimaryRootNames(settings)
+  const hiddenRootNames = hiddenPrimaryRootNames(settings)
   const noteFiles: Array<{
     full: string
     folder: NoteFolder
@@ -2781,7 +2855,7 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
       const childReal = await resolveDirDescent(full, entry, dirReal, ancestors)
       if (childReal !== null) {
         if (entry.name.startsWith('.')) continue
-        if (isPrimaryRoot && dirAbs === topAbs && shouldHidePrimaryRootEntry(entry.name, extraHidden)) continue
+        if (isPrimaryRoot && dirAbs === topAbs && hiddenRootNames.has(entry.name)) continue
         ancestors.add(childReal)
         await walkFolder(folder, full, childReal, topAbs, isPrimaryRoot, ancestors)
         ancestors.delete(childReal)

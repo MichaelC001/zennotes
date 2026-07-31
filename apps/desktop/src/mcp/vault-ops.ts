@@ -11,6 +11,12 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { parse as parseToml } from 'smol-toml'
+import { retitleLeadingHeading } from '@shared/note-heading-sync'
+import {
+  isObsidianExcalidrawMarkdown,
+  isObsidianExcalidrawPath
+} from '@shared/excalidraw'
 import { normalizeBaseUrl } from '../main/remote/connection'
 import { buildOpenNoteDeepLink } from '../main/deep-links'
 
@@ -27,19 +33,6 @@ const LEGACY_ATTACHMENTS_DIRS = [PRIMARY_ATTACHMENTS_DIR, '_assets']
 const ATTACHMENTS_DIRS = [ASSETS_DIR, ...LEGACY_ATTACHMENTS_DIRS]
 const INTERNAL_VAULT_DIR = '.zennotes'
 const VAULT_SETTINGS_FILE = 'vault.json'
-
-/** When the user has chosen `primaryNotesLocation: 'root'`, notes for
- *  the inbox folder live at the vault root. Skip these directory
- *  names while walking the root so we don't double-count quick/archive
- *  notes as inbox notes. Mirrors HIDDEN_PRIMARY_ROOT_NAMES in the
- *  desktop main process's vault.ts. */
-const HIDDEN_PRIMARY_ROOT_NAMES = new Set<string>([
-  'quick',
-  'archive',
-  'trash',
-  ...ATTACHMENTS_DIRS,
-  INTERNAL_VAULT_DIR
-])
 
 export type PrimaryNotesLocation = 'inbox' | 'root'
 
@@ -83,7 +76,11 @@ async function readSystemFolderPaths(root: string): Promise<SystemFolderPathsMap
   const next: SystemFolderPathsMap = {}
   for (const folder of FOLDERS) {
     const p = validFolderPathName(candidate[folder])
-    if (p && p !== folder) next[folder] = p
+    if (!p || p === folder) continue
+    // Never let a folder claim ANOTHER folder's default name: a swap resolves
+    // without collision but reads backwards everywhere.
+    if (FOLDERS.some((other) => other !== folder && p.toLowerCase() === other)) continue
+    next[folder] = p
   }
   // Drop entries whose resolved name collides with another folder's resolved
   // name (defaults included), matching the shared normalizer.
@@ -110,10 +107,29 @@ function resolvedFolderDirName(folder: NoteFolder, paths: SystemFolderPathsMap):
   return paths[folder] ?? folder
 }
 
+/** The system folder that owns a top-level directory name, or null. Matches on
+ *  RESOLVED names only, so with `inbox` remapped to `01 - Entry` a directory
+ *  literally named `inbox/` is an ordinary user folder. Synced copy of
+ *  `systemFolderForDirName` in `@shared/system-folder-paths`. */
+function systemFolderForDirName(name: string, paths: SystemFolderPathsMap): NoteFolder | null {
+  const lower = name.toLowerCase()
+  for (const folder of FOLDERS) {
+    if (resolvedFolderDirName(folder, paths).toLowerCase() === lower) return folder
+  }
+  return null
+}
+
+/** When the user has chosen `primaryNotesLocation: 'root'`, notes for the inbox
+ *  folder live at the vault root. Skip these directory names while walking the
+ *  root so we don't double-count quick/archive notes as inbox notes. Mirrors
+ *  HIDDEN_PRIMARY_ROOT_NAMES in the desktop main process's vault.ts. */
 function hiddenRootNamesWith(paths: SystemFolderPathsMap): Set<string> {
-  const names = new Set(HIDDEN_PRIMARY_ROOT_NAMES)
-  for (const value of Object.values(paths)) {
-    if (value) names.add(value)
+  const names = new Set<string>([...ATTACHMENTS_DIRS, INTERNAL_VAULT_DIR])
+  // The RESOLVED directory of each non-primary system folder, not its default
+  // name: once `quick` lives in `Fast/`, a leftover `quick/` is an ordinary
+  // user folder and hiding it would swallow whatever the user put there.
+  for (const folder of ['quick', 'archive', 'trash'] as NoteFolder[]) {
+    names.add(resolvedFolderDirName(folder, paths))
   }
   return names
 }
@@ -318,6 +334,41 @@ export async function readVaultRootFromConfig(): Promise<string | null> {
   return typeof vaultRoot === 'string' && vaultRoot.trim() ? vaultRoot : null
 }
 
+/** Directory of the portable TOML preferences (#203). Mirrors `getConfigDir`
+ *  in main/app-config.ts, which reaches it through Electron's `app`; this
+ *  process has none. Note this is NOT `userDataDir()` above; the portable
+ *  prefs live beside it, in an XDG-style location the user can sync. */
+function portableConfigDir(): string {
+  const explicit = process.env.ZENNOTES_CONFIG_DIR?.trim()
+  if (explicit) return explicit
+  const xdg = process.env.XDG_CONFIG_HOME?.trim()
+  if (xdg) return path.join(xdg, 'zennotes')
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA?.trim()
+    return path.join(appData || path.join(os.homedir(), 'AppData', 'Roaming'), 'zennotes')
+  }
+  return path.join(os.homedir(), '.config', 'zennotes')
+}
+
+/**
+ * The user's "Sync title heading on rename" preference (#455).
+ *
+ * The portable config file is the source of truth for this pref, and a vault
+ * renamed through MCP is the same vault the app renames, so both must obey it.
+ * Defaults to on, matching PORTABLE_DEFAULTS, when the file is missing (a
+ * fresh install, or a user who never changed the setting).
+ */
+async function readSyncTitleHeadingOnRename(): Promise<boolean> {
+  try {
+    const raw = await fs.readFile(path.join(portableConfigDir(), 'config.toml'), 'utf8')
+    const parsed = parseToml(raw) as { editor?: { sync_title_heading_on_rename?: unknown } }
+    const value = parsed.editor?.sync_title_heading_on_rename
+    return typeof value === 'boolean' ? value : true
+  } catch {
+    return true
+  }
+}
+
 export interface KnownVault {
   root: string
   name: string
@@ -502,12 +553,9 @@ async function folderOf(root: string, abs: string): Promise<NoteFolder | null> {
   const rel = toPosix(path.relative(root, abs))
   if (!rel || rel.startsWith('..')) return null
   const top = rel.split('/')[0]
-  if (FOLDERS.includes(top as NoteFolder)) return top as NoteFolder
   const paths = await readSystemFolderPaths(root)
-  for (const folder of FOLDERS) {
-    const custom = paths[folder]
-    if (custom && custom.toLowerCase() === top.toLowerCase()) return folder
-  }
+  const system = systemFolderForDirName(top, paths)
+  if (system) return system
   // Root-level files belong to inbox in `primaryNotesLocation: 'root'`
   // mode. Hidden names (.zennotes, attachments, system folders) are
   // not notes — return null so they're rejected.
@@ -830,7 +878,35 @@ export async function renameNote(root: string, rel: string, nextTitle: string): 
       await fs.rename(abs, target)
     }
   }
+  await syncTitleHeading(abs, target, trimmed)
   return await readMeta(root, target, folder)
+}
+
+/**
+ * Rewrite the note's leading `# Heading` to match its new filename, when the
+ * user has that setting on. The app does this on its own rename paths (#455);
+ * a rename through MCP touches the same file and must not leave the heading
+ * saying something the filename no longer does.
+ *
+ * Mirrors the renderer's guards: never an Obsidian drawing (those `.md` files
+ * open with `# Excalidraw Data`, which is structure and not a title), and a
+ * failure here never undoes the rename that already succeeded.
+ */
+async function syncTitleHeading(
+  sourceAbs: string,
+  targetAbs: string,
+  title: string
+): Promise<void> {
+  if (isObsidianExcalidrawPath(sourceAbs) || isObsidianExcalidrawPath(targetAbs)) return
+  if (!(await readSyncTitleHeadingOnRename())) return
+  try {
+    const body = await fs.readFile(targetAbs, 'utf8')
+    if (isObsidianExcalidrawMarkdown(body)) return
+    const next = retitleLeadingHeading(body, title)
+    if (next !== body) await fs.writeFile(targetAbs, next, 'utf8')
+  } catch {
+    /* the rename stands; the heading just stays as it was */
+  }
 }
 
 /**
@@ -917,7 +993,7 @@ export async function deleteNote(root: string, rel: string): Promise<void> {
 }
 
 export async function emptyTrash(root: string): Promise<void> {
-  const trashDir = path.join(root, 'trash')
+  const trashDir = await folderRoot(root, 'trash')
   try {
     const entries = await fs.readdir(trashDir)
     await Promise.all(entries.map((e) => fs.rm(path.join(trashDir, e), { recursive: true, force: true })))
