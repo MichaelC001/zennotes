@@ -3,9 +3,12 @@
 // The engine plans and never writes (see `@shared/workflows/engine`); this
 // module is the only place a planned run reaches disk. Everything below exists
 // to keep one promise: after a run, the vault is either exactly what the plan
-// said it would be, or exactly what it was before. Never half of each.
+// said it would be, or exactly what it was before. Never half of each. A run
+// the process did not survive is the one case where the vault can be found
+// holding half of each, and even then the bytes to put it back are on disk and
+// the run is offered as an undo (decision 5).
 //
-// Four decisions carry that promise:
+// Five decisions carry that promise:
 //
 //   1. Undo restores RECORDED BYTES, it never replays a computed inverse. The
 //      journal holds `{ path, before }` for every file the run touched, where
@@ -25,12 +28,23 @@
 //   4. Containment is checked for every path in the plan BEFORE the first byte
 //      is written, so one traversal attempt aborts the run untouched rather
 //      than leaving a rolled-back mess behind.
+//   5. The journal reaches DISK before the write it protects, as a `.jsonl`
+//      beside the ledger. In memory it only survives a failure this module can
+//      catch; a killed process, a power cut or an OOM would otherwise leave a
+//      half-applied vault with no record of what it had been. The next run (or
+//      the next look at the history) finds that file, turns it into a ledger
+//      marked `interrupted` and offers it as an undo. It does NOT roll back on
+//      its own: minutes or days may have passed and the user may have edited
+//      since, so putting the vault back is their call, not a surprise on
+//      startup. Until they make it, the vault holds whatever the dead run got
+//      as far as, which is the one gap in the promise above.
 //
 // `notify` and `clipboard` are not applied here (the main process is not where
 // the user's clipboard and toasts live) and are not journalled. They are
 // counted into `receipt.irreversible` so the promise the UI makes about undo
 // stays true.
 import { promises as fs } from 'node:fs'
+import type { FileHandle } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import type {
@@ -91,8 +105,27 @@ const LEDGER_VERSION = 1
  */
 export const MAX_RETAINED_RUNS = 100
 
+/**
+ * How much disk the retained ledgers may take, all together.
+ *
+ * The count cap alone is not a size cap: one run over a whole vault stores a
+ * pre-image of every note it touched, so a hundred of those is a hundred copies
+ * of the vault sitting inside it. Fifty megabytes is far more history than the
+ * undo list reaches back through and small enough that nobody notices it in
+ * their sync client, which is the only place this would otherwise show up.
+ */
+export const MAX_RETAINED_RUN_BYTES = 50 * 1024 * 1024
+
 /** The internal directory a workflow must never write into. */
 const INTERNAL_DIR = '.zennotes'
+
+/**
+ * Suffix of the crash journal a run keeps while it is applying.
+ *
+ * Not `.json`, so the history readers (which take every `.json` in the runs
+ * directory for a ledger) cannot mistake one for a finished run.
+ */
+const RUN_JOURNAL_SUFFIX = '.journal.jsonl'
 
 /**
  * One applied run, exactly as it is persisted.
@@ -120,6 +153,13 @@ export interface WorkflowRunLedger {
   undoneAt?: number
   /** Present only for a run whose rollback could not finish. */
   rolledBack?: { reason: string }
+  /**
+   * Present only for a run rebuilt from a crash journal, which is the one kind
+   * of ledger that was written by a later process than the run it describes.
+   * Its `applied` count and `hashes` are unknowable, so they are not guessed:
+   * what it does carry is the journal, which is all undo needs.
+   */
+  interrupted?: { reason: string }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -142,10 +182,19 @@ function runsDir(root: string): string {
  *
  * Three separate refusals for three separate reasons:
  *
- *   - Escaping the vault is the obvious one, and it is checked on every single
- *     path (op targets, computed destinations, and again on every journal entry
- *     at undo time) because a ledger read back from disk must never become a
- *     write primitive pointed anywhere on the filesystem.
+ *   - Escaping the vault is the obvious one, and it is checked on every path
+ *     this module resolves (op targets, computed destinations, and again on
+ *     every journal entry at undo time) because a ledger read back from disk
+ *     must never become a write primitive pointed anywhere on the filesystem.
+ *     The check is TEXTUAL: `path.resolve` normalises `..` away and the result
+ *     is required to sit under the root, with no `realpath`. A symlinked
+ *     directory (or note) inside the vault therefore still leads a write to
+ *     wherever it points. That is deliberate: the rest of the app follows those
+ *     links too (`writeNote` is a plain `fs.writeFile`), a vault made of
+ *     symlinked folders is a supported setup, and resolving here would make
+ *     workflows the one feature that refuses to write notes the user can edit
+ *     by hand. What this boundary rules out is a path that NAMES somewhere
+ *     else, which is the part an op author or a synced ledger controls.
  *   - `.zennotes` holds this feature's own run ledgers, plus workflows,
  *     templates and settings. A workflow that could write there could rewrite
  *     the record of what it did.
@@ -221,6 +270,50 @@ async function exists(abs: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * The path a symlink finally names, or null when `abs` is not a symlink.
+ *
+ * A dangling link answers with the path its text names rather than failing:
+ * writing through such a link creates that target, which is what the rest of
+ * the app does, and undo has to be able to put a file back the same way the run
+ * took it away.
+ */
+async function linkTargetOf(abs: string): Promise<string | null> {
+  try {
+    if (!(await fs.lstat(abs)).isSymbolicLink()) return null
+  } catch (err) {
+    if (isMissing(err)) return null
+    throw err
+  }
+  try {
+    return await fs.realpath(abs)
+  } catch (err) {
+    if (!isMissing(err)) throw err
+    return path.resolve(path.dirname(abs), await fs.readlink(abs))
+  }
+}
+
+/**
+ * Write a note the way saving one does: through a symlink, not over it.
+ *
+ * `writeFileAtomic` is temp file plus rename, and a rename replaces the
+ * DIRECTORY ENTRY. Pointed straight at a symlinked note it would leave a
+ * regular file where the link was and detach the link from its target for good,
+ * so the note the user sees in two places would silently become two files, and
+ * an undo afterwards would write a plain file over the link as well. `vault.ts`
+ * saves with `fs.writeFile`, which follows the link, so a workflow editing a
+ * note must do the same. Resolving the link and doing the atomic dance at the
+ * target keeps both properties: the link survives and no reader ever sees a
+ * half-written file.
+ *
+ * The target may sit outside the vault. That is what following a link means,
+ * and it is the same reach every other save in the app has; see
+ * `resolveVaultPath` for why containment is textual.
+ */
+async function writeNoteThroughLinks(abs: string, data: string): Promise<void> {
+  await writeFileAtomic((await linkTargetOf(abs)) ?? abs, data)
 }
 
 /**
@@ -409,6 +502,244 @@ function resolveLedgerPath(root: string, runId: string): string {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  The crash journal                                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The run's journal as it is being written, one line at a time.
+ *
+ * A `.jsonl` rather than a rewritten `.json`: an append is a single write the
+ * kernel either has or has not taken, so a process that dies mid-append loses
+ * at most its last line, while rewriting a whole document per entry would put
+ * every earlier entry at risk on every op. The first line is the run's header
+ * (what the finished ledger would call `runId`, `workflowId`, `startedAt`,
+ * `irreversible` and `ops`); every line after it is one `WorkflowJournalEntry`,
+ * in the order the run touched the paths.
+ */
+interface RunJournalFile {
+  abs: string
+  header: string
+  handle: FileHandle | null
+  /** Whether the file was ever opened, so a run that journalled nothing does
+   *  not go looking for a file it never made. */
+  created: boolean
+}
+
+function journalPathFor(root: string, runId: string): string {
+  return path.join(runsDir(root), `${runId}${RUN_JOURNAL_SUFFIX}`)
+}
+
+function newRunJournalFile(root: string, run: RunIdentity): RunJournalFile {
+  return {
+    abs: journalPathFor(root, run.runId),
+    header: JSON.stringify({
+      version: LEDGER_VERSION,
+      runId: run.runId,
+      workflowId: run.workflowId,
+      startedAt: run.startedAt,
+      irreversible: run.irreversible,
+      ops: run.ops
+    }),
+    handle: null,
+    created: false
+  }
+}
+
+/**
+ * Append one line and put it on the device.
+ *
+ * The `sync` is the entire point of this file: bytes sitting in a page cache
+ * are exactly as lost as bytes never written when the process is killed, and
+ * this line has to outlive the write it is about to authorise.
+ */
+async function writeJournalLine(handle: FileHandle, line: string): Promise<void> {
+  await handle.write(`${line}\n`, null, 'utf8')
+  await handle.sync()
+}
+
+/**
+ * Record one journal entry on disk, opening the file on first use.
+ *
+ * Opened lazily so a run that touches nothing (a notify-only workflow, or one
+ * whose ops all turn out to be no-ops) leaves no file to recover. What matters
+ * is the ordering, and it holds either way: this returns only once the entry is
+ * durable, and the caller only then performs the write it describes.
+ */
+async function appendJournalEntry(file: RunJournalFile, entry: WorkflowJournalEntry): Promise<void> {
+  try {
+    if (!file.handle) {
+      await fs.mkdir(path.dirname(file.abs), { recursive: true })
+      file.handle = await fs.open(file.abs, 'a')
+      file.created = true
+      await writeJournalLine(file.handle, file.header)
+    }
+    await writeJournalLine(file.handle, JSON.stringify(entry))
+  } catch (err) {
+    // Same reasoning as a ledger that cannot be written: a change nothing can
+    // record is a change nothing can take back, so the run stops here and the
+    // rollback puts the vault back rather than proceeding uninsured.
+    throw new Error(`The run could not be recorded, so it was stopped (${messageOf(err)})`)
+  }
+}
+
+async function closeRunJournal(file: RunJournalFile): Promise<void> {
+  const handle = file.handle
+  file.handle = null
+  if (!handle) return
+  try {
+    await handle.close()
+  } catch (err) {
+    console.warn('[workflows] could not close the run journal:', err)
+  }
+}
+
+/**
+ * Drop the journal, for a run whose outcome is now recorded elsewhere (a
+ * ledger, or a vault the rollback put back). Anything left behind is by
+ * definition a run nobody wrote an ending for, which is what recovery looks
+ * for.
+ */
+async function discardRunJournal(file: RunJournalFile): Promise<void> {
+  await closeRunJournal(file)
+  if (!file.created) return
+  try {
+    await fs.rm(file.abs, { force: true })
+  } catch (err) {
+    console.warn('[workflows] could not remove the run journal:', err)
+  }
+}
+
+interface ParsedRunJournal {
+  workflowId: string
+  startedAt: number
+  irreversible: number
+  ops: WorkflowOp[]
+  journal: WorkflowJournalEntry[]
+}
+
+/**
+ * Read a journal back, skipping anything unparseable.
+ *
+ * The last line of a file a process died inside can be a fragment, and a
+ * fragment is not a reason to abandon the entries before it: those name real
+ * files holding real pre-run bytes. Tolerating it here is what makes the
+ * durability claim worth anything.
+ */
+async function readRunJournalFile(abs: string): Promise<ParsedRunJournal | null> {
+  const raw = await fs.readFile(abs, 'utf8')
+  const lines = raw.split('\n').filter((line) => line.trim().length > 0)
+  let header: Record<string, unknown> | null = null
+  const journal: WorkflowJournalEntry[] = []
+  for (const line of lines) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (!isRecord(parsed)) continue
+    if (!header) {
+      header = parsed
+      continue
+    }
+    const entryPath = parsed.path
+    const before = parsed.before
+    if (typeof entryPath !== 'string') continue
+    if (typeof before !== 'string' && before !== null) continue
+    journal.push({ path: entryPath, before })
+  }
+  if (!header) return null
+  const ops = Array.isArray(header.ops)
+    ? header.ops.map((op) => parseWorkflowOp(op)).filter((op): op is WorkflowOp => op !== null)
+    : []
+  return {
+    workflowId: typeof header.workflowId === 'string' ? header.workflowId : 'unknown',
+    startedAt: parseNumber(header.startedAt, 0),
+    irreversible: parseNumber(header.irreversible, 0),
+    ops,
+    journal
+  }
+}
+
+/**
+ * Turn every abandoned crash journal into a ledger the user can undo.
+ *
+ * Deliberately does NOT put the vault back on its own. The run may have died
+ * days ago; the notes it half-changed may have been read, edited and synced
+ * since, and silently reverting them on the next launch would be a bigger
+ * surprise than the interruption was. Surfacing the run in the history, marked
+ * and undoable, leaves the decision where it belongs.
+ *
+ * Serialized on the per-vault queue like everything else here, so it can never
+ * mistake a journal a live run is still appending to for an abandoned one.
+ */
+export async function recoverInterruptedRuns(root: string): Promise<string[]> {
+  return withVaultRunLock(root, () => recoverInterruptedRunsNow(root))
+}
+
+async function recoverInterruptedRunsNow(root: string): Promise<string[]> {
+  const dir = runsDir(root)
+  let names: string[]
+  try {
+    names = await fs.readdir(dir)
+  } catch {
+    return [] // no runs directory: nothing has ever run here
+  }
+  const recovered: string[] = []
+  for (const name of names) {
+    if (!name.toLowerCase().endsWith(RUN_JOURNAL_SUFFIX)) continue
+    const abs = path.join(dir, name)
+    const runId = name.slice(0, name.length - RUN_JOURNAL_SUFFIX.length)
+    try {
+      // A ledger means the run reached its own ending and said what happened;
+      // the journal simply outlived the delete that should have followed it,
+      // and re-recovering from it would fight the record that already exists.
+      if (await exists(ledgerPathFor(root, runId))) {
+        await fs.rm(abs, { force: true })
+        continue
+      }
+      const parsed = await readRunJournalFile(abs)
+      // Nothing journalled means the run died before its first write, so the
+      // vault is untouched and there is nothing to offer.
+      if (!parsed || parsed.journal.length === 0) {
+        await fs.rm(abs, { force: true })
+        continue
+      }
+      await writeLedger(root, {
+        version: LEDGER_VERSION,
+        runId,
+        workflowId: parsed.workflowId,
+        startedAt: parsed.startedAt,
+        finishedAt: Date.now(),
+        // Unknowable from here: the journal says which paths were AT RISK, not
+        // which writes landed. Zero and the empty hash map are the honest
+        // answers, and `interrupted` is what tells the reader why.
+        applied: 0,
+        irreversible: parsed.irreversible,
+        paths: parsed.journal.map((entry) => entry.path),
+        ops: parsed.ops,
+        journal: parsed.journal,
+        hashes: {},
+        undone: false,
+        interrupted: {
+          reason:
+            'ZenNotes stopped while this run was still applying, so part of it may have landed. ' +
+            'Undo restores every file it had recorded.'
+        }
+      })
+      await fs.rm(abs, { force: true })
+      recovered.push(runId)
+    } catch (err) {
+      // Left in place on purpose: an unreadable or unwritable recovery is worth
+      // retrying next time, and deleting it would throw away the only copy of
+      // those pre-run bytes.
+      console.warn(`[workflows] could not recover interrupted run ${runId}:`, err)
+    }
+  }
+  return recovered
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Applying                                                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -419,14 +750,21 @@ interface RunState {
    *  the app actually treats as Archive/Trash. Empty on default vaults. */
   systemFolderDirs: SystemFolderDirs
   /**
-   * Vault-relative path to its pre-run bytes, in the order the run touched
-   * them. Insertion-ordered and written only when absent, which is the
+   * Journal key (see `journalKey`) to the entry, in the order the run touched
+   * the paths. Insertion-ordered and written only when absent, which is the
    * first-touch-wins rule: the entry must describe the state before the run,
    * not before the latest op.
    */
-  journal: Map<string, string | null>
-  /** Path to the hash of what the run left there; null where it removed it. */
-  written: Map<string, string | null>
+  journal: Map<string, WorkflowJournalEntry>
+  /** The same entries on disk, so a killed process leaves them behind. */
+  journalFile: RunJournalFile
+  /**
+   * Journal key to the path as the run named it and the hash of what it left
+   * there (null where it removed the file). Keyed like the journal so the two
+   * agree about what counts as one file, which is what lets undo compare a
+   * journal entry against the hash recorded for it.
+   */
+  written: Map<string, { path: string; hash: string | null }>
   /**
    * Destination the plan promised to where the file actually landed, for the
    * one case where they differ: `uniqueRel` had to suffix around a collision.
@@ -437,8 +775,42 @@ interface RunState {
   redirects: Map<string, string>
 }
 
-function journalTouch(state: RunState, rel: string, before: string | null): void {
-  if (!state.journal.has(rel)) state.journal.set(rel, before)
+/**
+ * How the journal recognises two paths as the same file.
+ *
+ * On a case-insensitive filesystem `Inbox/A.md` and `inbox/a.md` ARE one file,
+ * and journalling them separately would break first-touch-wins: the second
+ * entry would record what the first op had just written, and undoing the run
+ * would restore that half-applied state as if it were the original. Folding the
+ * key (never the stored path, which stays exactly as the op named it) keeps one
+ * file to one entry. Linux is left alone, where those really are two files.
+ */
+function journalKey(rel: string): string {
+  return process.platform === 'darwin' || process.platform === 'win32' ? rel.toLowerCase() : rel
+}
+
+/**
+ * Record a path's pre-run bytes, on disk before it is recorded in memory.
+ *
+ * The order is the durability guarantee: every caller awaits this before the
+ * write it describes, so a process killed at any point leaves a journal that
+ * covers at least every file it had begun to change.
+ */
+async function journalTouch(state: RunState, rel: string, before: string | null): Promise<void> {
+  const key = journalKey(rel)
+  if (state.journal.has(key)) return
+  const entry: WorkflowJournalEntry = { path: rel, before }
+  await appendJournalEntry(state.journalFile, entry)
+  state.journal.set(key, entry)
+}
+
+/** Note what the run left at a path. The spelling of the first touch wins, so
+ *  the receipt and the hashes name the path the way the journal does. */
+function recordWritten(state: RunState, rel: string, hash: string | null): void {
+  const key = journalKey(rel)
+  const seen = state.written.get(key)
+  if (seen) seen.hash = hash
+  else state.written.set(key, { path: rel, hash })
 }
 
 /**
@@ -512,9 +884,9 @@ async function applyTextOpToVault(state: RunState, op: TextOp): Promise<void> {
   // for a change that did not happen. Only for a file that already exists;
   // creating an empty note is a real change even though '' equals ''.
   if (live !== null && next === live) return
-  journalTouch(state, rel, live)
-  await writeFileAtomic(abs, next)
-  state.written.set(rel, hashText(next))
+  await journalTouch(state, rel, live)
+  await writeNoteThroughLinks(abs, next)
+  recordWritten(state, rel, hashText(next))
 }
 
 /** One path change. Journals both ends, which is what makes undo need no inverse. */
@@ -539,15 +911,15 @@ async function movePathInVault(
 
   const to = await uniqueRel(state.root, nominal)
   const toAbs = resolveVaultPath(state.root, to)
-  journalTouch(state, from, live)
+  await journalTouch(state, from, live)
   // `uniqueRel` just said this path is free, but it is read rather than assumed
   // null: another process can create a file inside that window, and journalling
   // it as "did not exist" would turn undo into a delete of somebody's note.
-  journalTouch(state, to, await readIfExists(toAbs))
+  await journalTouch(state, to, await readIfExists(toAbs))
   await fs.mkdir(path.dirname(toAbs), { recursive: true })
   await fs.rename(fromAbs, toAbs)
-  state.written.set(from, null)
-  state.written.set(to, hashText(live))
+  recordWritten(state, from, null)
+  recordWritten(state, to, hashText(live))
   // Later ops in this plan name the destination the engine promised; when the
   // vault forced a different one, leave a forwarding address.
   const promised = normalizeRel(promisedRel)
@@ -622,11 +994,11 @@ async function applyOp(state: RunState, op: WorkflowOp): Promise<void> {
  */
 async function restoreEntries(
   root: string,
-  entries: Iterable<readonly [string, string | null]>
+  entries: Iterable<WorkflowJournalEntry>
 ): Promise<{ restored: number; failures: RestoreFailure[] }> {
   const failures: RestoreFailure[] = []
   let restored = 0
-  for (const [rel, before] of entries) {
+  for (const { path: rel, before } of entries) {
     try {
       // Re-validated on the way back out. At rollback time these paths came
       // from this run, but undo replays the same code over a file read off
@@ -645,10 +1017,14 @@ async function restoreEntries(
         continue
       }
       if (before === null) {
-        await fs.rm(abs, { force: true })
-        await pruneEmptyDirs(root, path.dirname(abs))
+        // Through a symlink, what the run created is the TARGET file: the link
+        // itself was there before the run and putting the vault back means
+        // leaving it there, pointing at nothing again.
+        const target = (await linkTargetOf(abs)) ?? abs
+        await fs.rm(target, { force: true })
+        await pruneEmptyDirs(root, path.dirname(target))
       } else {
-        await writeFileAtomic(abs, before)
+        await writeNoteThroughLinks(abs, before)
       }
       restored += 1
     } catch (err) {
@@ -700,12 +1076,49 @@ async function writeLedger(root: string, ledger: WorkflowRunLedger): Promise<voi
   await writeFileAtomic(ledgerPathFor(root, ledger.runId), `${JSON.stringify(ledger, null, 2)}\n`)
 }
 
-/** Drop the oldest ledgers past the cap. Filenames sort chronologically. */
-async function pruneOldRuns(root: string): Promise<void> {
+async function fileSize(abs: string): Promise<number> {
+  try {
+    return (await fs.stat(abs)).size
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Drop the oldest ledgers past either cap. Filenames sort chronologically.
+ *
+ * Two caps, because a ledger's weight has nothing to do with its age: a run
+ * over a whole vault stores a pre-image of every note it touched, so a handful
+ * of those outweigh a hundred single-note runs. Counting alone would let the
+ * run history quietly become the largest thing in `.zennotes`.
+ *
+ * The caps are parameters with the exported defaults so a test can drive this
+ * exact code at a size it can write, rather than proving something adjacent
+ * about a stand-in.
+ */
+export async function pruneRunLedgers(
+  root: string,
+  maxRuns = MAX_RETAINED_RUNS,
+  maxBytes = MAX_RETAINED_RUN_BYTES
+): Promise<void> {
   try {
     const dir = runsDir(root)
     const names = (await fs.readdir(dir)).filter((n) => n.toLowerCase().endsWith('.json')).sort()
-    const excess = names.slice(0, Math.max(0, names.length - MAX_RETAINED_RUNS))
+    const excess = new Set(names.slice(0, Math.max(0, names.length - maxRuns)))
+    const survivors = names.filter((name) => !excess.has(name))
+    // Newest backwards, keeping runs while they fit. The most recent is kept
+    // whatever it weighs: one whole-vault run can exceed the budget on its own,
+    // and deleting the ledger just written would take the undo away from the
+    // very run the user is being shown.
+    let used = 0
+    for (let i = survivors.length - 1; i >= 0; i -= 1) {
+      const name = survivors[i] as string
+      used += await fileSize(path.join(dir, name))
+      if (used > maxBytes && i < survivors.length - 1) {
+        for (let older = i; older >= 0; older -= 1) excess.add(survivors[older] as string)
+        break
+      }
+    }
     for (const name of excess) await fs.rm(path.join(dir, name), { force: true })
   } catch (err) {
     // Losing the prune is harmless; failing a completed run over it is not.
@@ -778,57 +1191,74 @@ async function applyWorkflowOpsNow(
     for (const target of opTargets(op, systemFolderDirs)) resolveVaultPath(root, target)
   }
 
+  // Before this run adds a journal of its own, so a run a previous process did
+  // not survive is in the history (and undoable) rather than being taken for
+  // this one's leftovers.
+  await recoverInterruptedRunsNow(root)
+
   const runId = await allocateRunId(root, startedAt, workflowId, ops)
   const run: RunIdentity = { runId, workflowId, startedAt, irreversible, ops }
   const state: RunState = {
     root,
     systemFolderDirs,
     journal: new Map(),
+    journalFile: newRunJournalFile(root, run),
     written: new Map(),
     redirects: new Map()
   }
   let applied = 0
 
   try {
-    for (const op of ops) {
-      await applyOp(state, op)
-      // `notify` and `clipboard` did not run here, so they are not counted as
-      // applied; they are already declared in `irreversible`.
-      if (!IRREVERSIBLE_OP_KINDS.has(op.kind)) applied += 1
-    }
-  } catch (err) {
-    return await rollBackRun(root, run, state, messageOf(err))
-  }
-
-  const paths = [...state.written.keys()]
-  // A run with no ops at all left no record worth keeping; anything that ran
-  // gets a ledger, even one whose journal is empty (a notify-only run), so the
-  // history shows it happened and shows it cannot be undone.
-  if (ops.length > 0) {
     try {
-      await writeLedger(root, {
-        ...ledgerBase(run, state),
-        finishedAt: Date.now(),
-        applied,
-        paths,
-        undone: false
-      })
+      for (const op of ops) {
+        await applyOp(state, op)
+        // `notify` and `clipboard` did not run here, so they are not counted as
+        // applied; they are already declared in `irreversible`.
+        if (!IRREVERSIBLE_OP_KINDS.has(op.kind)) applied += 1
+      }
     } catch (err) {
-      // A run that cannot be recorded is a run that cannot be undone, and every
-      // promise this feature makes rests on undo. So the journal, still in
-      // memory and still correct, is spent putting the vault back rather than
-      // left as the only copy of a guarantee nothing on disk can keep.
-      return await rollBackRun(
-        root,
-        run,
-        state,
-        `The run could not be recorded, so it was not kept (${messageOf(err)})`
-      )
+      return await rollBackRun(root, run, state, messageOf(err))
     }
-    await pruneOldRuns(root)
-  }
 
-  return { runId, workflowId, startedAt, applied, paths, irreversible }
+    const paths = [...state.written.values()].map((entry) => entry.path)
+    // A run with no ops at all left no record worth keeping; anything that ran
+    // gets a ledger, even one whose journal is empty (a notify-only run), so the
+    // history shows it happened and shows it cannot be undone.
+    if (ops.length > 0) {
+      try {
+        await writeLedger(root, {
+          ...ledgerBase(run, state),
+          finishedAt: Date.now(),
+          applied,
+          paths,
+          undone: false
+        })
+      } catch (err) {
+        // A run that cannot be recorded is a run that cannot be undone, and every
+        // promise this feature makes rests on undo. So the journal, still in
+        // memory and still correct, is spent putting the vault back rather than
+        // left as the only copy of a guarantee nothing on disk can keep.
+        return await rollBackRun(
+          root,
+          run,
+          state,
+          `The run could not be recorded, so it was not kept (${messageOf(err)})`
+        )
+      }
+      // The ledger now holds the same journal, so the crash copy has nothing
+      // left to protect.
+      await discardRunJournal(state.journalFile)
+      await pruneRunLedgers(root)
+    } else {
+      await discardRunJournal(state.journalFile)
+    }
+
+    return { runId, workflowId, startedAt, applied, paths, irreversible }
+  } finally {
+    // A handle left open would keep the file alive for the life of the process,
+    // and recovery would find a journal nobody is writing to.
+    await closeRunJournal(state.journalFile)
+  }
 }
 
 /** The parts of a run that are fixed before the first op executes. */
@@ -852,7 +1282,9 @@ function ledgerBase(
     irreversible: run.irreversible,
     ops: run.ops,
     journal: journalEntries(state),
-    hashes: Object.fromEntries(state.written)
+    hashes: Object.fromEntries(
+      [...state.written.values()].map((entry) => [entry.path, entry.hash] as const)
+    )
   }
 }
 
@@ -871,7 +1303,7 @@ async function rollBackRun(
   state: RunState,
   cause: string
 ): Promise<WorkflowRunReceipt> {
-  const { failures } = await restoreEntries(root, state.journal)
+  const { failures } = await restoreEntries(root, state.journal.values())
   const base = {
     runId: run.runId,
     workflowId: run.workflowId,
@@ -880,6 +1312,9 @@ async function rollBackRun(
     irreversible: run.irreversible
   }
   if (failures.length === 0) {
+    // The vault is back the way it was found, so the crash journal is
+    // describing a run there is nothing left to recover from.
+    await discardRunJournal(state.journalFile)
     return {
       ...base,
       paths: [],
@@ -902,15 +1337,23 @@ async function rollBackRun(
       undone: false,
       rolledBack: { reason }
     })
+    // The ledger carries the journal now, and it says more than a crash file
+    // could: which paths the rollback could not reach, and why.
+    await discardRunJournal(state.journalFile)
   } catch (err) {
     // Nothing left to fall back on, so the receipt has to carry the whole truth.
-    reason = `${reason} The run could not be recorded either (${messageOf(err)}), so there is no undo to retry.`
+    // The crash journal deliberately stays: it is now the only copy of the
+    // pre-run bytes for files still holding this run's writes, and the next run
+    // turns it into the undoable ledger this one could not write.
+    reason =
+      `${reason} The run could not be recorded either (${messageOf(err)}), ` +
+      `so undo is offered again only once ZenNotes can write to the vault's .zennotes folder.`
   }
   return { ...base, paths: unrestored, rolledBack: { reason } }
 }
 
 function journalEntries(state: RunState): WorkflowJournalEntry[] {
-  return [...state.journal].map(([entryPath, before]) => ({ path: entryPath, before }))
+  return [...state.journal.values()]
 }
 
 /* -------------------------------------------------------------------------- */
@@ -989,7 +1432,40 @@ async function readLedger(abs: string): Promise<WorkflowRunLedger> {
   if (isRecord(rolledBack) && typeof rolledBack.reason === 'string') {
     ledger.rolledBack = { reason: rolledBack.reason }
   }
+  const interrupted = parsed.interrupted
+  if (isRecord(interrupted) && typeof interrupted.reason === 'string') {
+    ledger.interrupted = { reason: interrupted.reason }
+  }
   return ledger
+}
+
+/**
+ * Paths that are no longer what the run left there.
+ *
+ * Undo restores recorded bytes over whatever is in the file now, on purpose:
+ * that is the only mechanism that is right by construction, and a note the run
+ * changed is a note the user may well have kept working in. Those two facts
+ * together mean an undo can take an edit with it that the run never made, so
+ * the result names those files rather than reverting them in silence. A path
+ * the ledger holds no post-run hash for makes no claim about how it was left
+ * (its write never landed), so it cannot have drifted.
+ */
+async function driftedPathsOf(root: string, ledger: WorkflowRunLedger): Promise<string[]> {
+  const drifted: string[] = []
+  for (const entry of ledger.journal) {
+    const after = ledger.hashes[entry.path]
+    if (after === undefined) continue
+    let live: string | null
+    try {
+      live = await readIfExists(resolveVaultPath(root, entry.path))
+    } catch {
+      // A path undo is about to refuse anyway; the failure it reports there is
+      // the useful one, not a drift report about a file it cannot read.
+      continue
+    }
+    if ((live === null ? null : hashText(live)) !== after) drifted.push(entry.path)
+  }
+  return drifted
 }
 
 /**
@@ -1002,6 +1478,9 @@ async function readLedger(abs: string): Promise<WorkflowRunLedger> {
  * A partial restore throws WITHOUT marking the run undone. Restoring recorded
  * bytes is idempotent, so leaving the run undoable means the honest recovery
  * (try again) is also the correct one.
+ *
+ * The result names any file that had changed since the run (`driftedPaths`),
+ * which is what an undo of an edited note takes with it.
  */
 export async function undoWorkflowRun(root: string, runId: string): Promise<WorkflowUndoResult> {
   return withVaultRunLock(root, () => undoWorkflowRunNow(root, runId))
@@ -1018,10 +1497,11 @@ async function undoWorkflowRunNow(root: string, runId: string): Promise<Workflow
   }
   if (ledger.undone) throw new Error(`Workflow run was already undone: ${runId}`)
 
-  const { restored, failures } = await restoreEntries(
-    root,
-    ledger.journal.map((entry) => [entry.path, entry.before] as const)
-  )
+  // Read before anything is restored, since afterwards every file matches the
+  // journal and nothing about the drift is recoverable.
+  const driftedPaths = await driftedPathsOf(root, ledger)
+
+  const { restored, failures } = await restoreEntries(root, ledger.journal)
   if (failures.length > 0) {
     throw new Error(
       `Undo of run ${runId} is incomplete: ${failures.length} of ${ledger.journal.length} ` +
@@ -1031,7 +1511,7 @@ async function undoWorkflowRunNow(root: string, runId: string): Promise<Workflow
   }
 
   await writeLedger(root, { ...ledger, undone: true, undoneAt: Date.now() })
-  return { runId, restored }
+  return { runId, restored, driftedPaths }
 }
 
 /**
@@ -1062,6 +1542,10 @@ async function deleteWorkflowRunsNow(root: string, workflowId: string): Promise<
       const ledger = await readLedger(path.join(dir, name))
       if (ledger.workflowId !== workflowId) continue
       await fs.rm(path.join(dir, name), { force: true })
+      // Its crash journal too, on the off chance one outlived the run: leaving
+      // it would let recovery rebuild the very ledger just deleted, and this
+      // exists so a workflow can leave no trace at all.
+      await fs.rm(journalPathFor(root, ledger.runId), { force: true })
       removed += 1
     } catch {
       /* unreadable: not provably this workflow's, so it stays */
@@ -1077,8 +1561,13 @@ async function deleteWorkflowRunsNow(root: string, workflowId: string): Promise<
  * A vault with no runs is the normal case, so a missing directory is an empty
  * list rather than an error. One unreadable ledger is skipped with a warning
  * instead of hiding the rest of the history.
+ *
+ * Recovery runs first, so a run the app was killed in the middle of appears
+ * here (marked, and undoable) the moment anyone looks at the history, rather
+ * than waiting for the next run to notice it.
  */
 export async function listWorkflowRuns(root: string): Promise<WorkflowRunSummary[]> {
+  await recoverInterruptedRuns(root)
   const dir = runsDir(root)
   let names: string[]
   try {
@@ -1099,7 +1588,10 @@ export async function listWorkflowRuns(root: string): Promise<WorkflowRunSummary
         paths: ledger.paths,
         // Nothing recorded means nothing to restore, so offering undo would be
         // a promise the journal cannot keep.
-        undoable: !ledger.undone && ledger.journal.length > 0
+        undoable: !ledger.undone && ledger.journal.length > 0,
+        // Only when true, so a normal run's summary is exactly the shape it has
+        // always been on the wire.
+        ...(ledger.interrupted ? { interrupted: true } : {})
       })
     } catch (err) {
       console.warn(`[workflows] skipping unreadable run ledger ${name}:`, err)

@@ -7,12 +7,12 @@
 // promise a rollback makes and a content comparison is the only thing that
 // checks it.
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { WorkflowRunReceipt } from '@zennotes/bridge-contract/workflows'
+import type { WorkflowRunReceipt, WorkflowRunSummary } from '@zennotes/bridge-contract/workflows'
 import type { WorkflowOp } from '@shared/workflows/types'
 import {
   applyWorkflowOps,
@@ -20,6 +20,8 @@ import {
   listWorkflowRuns,
   MAX_RETAINED_RUNS,
   parseWorkflowOp,
+  pruneRunLedgers,
+  recoverInterruptedRuns,
   undoWorkflowRun,
   type WorkflowRunLedger
 } from './workflow-apply'
@@ -37,7 +39,11 @@ const injected = vi.hoisted(() => ({
   // may fail. Failing every write to a path instead produces a file that was
   // never modified, which is a clean rollback, not an incomplete one.
   failAfterWrites: new Map<string, number>(),
-  writeCounts: new Map<string, number>()
+  writeCounts: new Map<string, number>(),
+  // Called just before each write lands, which is the only moment a test can
+  // observe the vault mid-run: it is where the crash journal has to already be
+  // on disk, and where a killed process would have left one.
+  beforeWrite: null as null | ((abs: string) => Promise<void> | void)
 }))
 
 vi.mock('./vault', async (importOriginal) => {
@@ -45,6 +51,7 @@ vi.mock('./vault', async (importOriginal) => {
   return {
     ...actual,
     writeFileAtomic: async (abs: string, data: string): Promise<void> => {
+      if (injected.beforeWrite) await injected.beforeWrite(abs)
       if (injected.failingWrites.has(abs)) throw new Error('simulated disk failure')
       const allowed = injected.failAfterWrites.get(abs)
       if (allowed !== undefined) {
@@ -125,10 +132,39 @@ function apply(
   return applyWorkflowOps(root, { workflowId, ops })
 }
 
+/** The crash journal a run keeps while it applies; see decision 5. */
+function journalPath(root: string, runId: string): string {
+  return path.join(runsDirOf(root), `${runId}.journal.jsonl`)
+}
+
+async function journalNames(root: string): Promise<string[]> {
+  return (await ledgerFiles(root)).filter((name) => name.endsWith('.journal.jsonl'))
+}
+
+/** The journal parsed the way recovery reads it: header line, then entries. */
+function journalLines(raw: string): Record<string, unknown>[] {
+  return raw
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+}
+
+async function isSymlink(abs: string): Promise<boolean> {
+  return (await lstat(abs)).isSymbolicLink()
+}
+
+/**
+ * Whether two paths differing only in case are one file here. macOS and Windows
+ * say yes, which is the whole reason the journal folds its keys; on Linux those
+ * are two files and the behaviour under test does not exist.
+ */
+const oneCaseFolder = process.platform === 'darwin' || process.platform === 'win32'
+
 afterEach(async () => {
   injected.failingWrites.clear()
   injected.failAfterWrites.clear()
   injected.writeCounts.clear()
+  injected.beforeWrite = null
   vi.restoreAllMocks()
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
@@ -233,6 +269,25 @@ describe('containment', () => {
     )
     expect(await snapshot(root)).toEqual(before)
   })
+
+  it('a pre-flight rejection leaves no record and does not wedge the vault', async () => {
+    // Every refusal above happens before the run has an id, a journal or a
+    // ledger, so what it must leave behind is nothing at all: no half-run to
+    // recover, and a queue the next run still gets through.
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    await expect(apply(root, [{ kind: 'rename', path: 'inbox/A.md', to: '  ' }])).rejects.toThrow(
+      /empty target/
+    )
+    expect(await ledgerFiles(root)).toEqual([])
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'ok' }])
+
+    expect(receipt.rolledBack).toBeUndefined()
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('a\nok\n')
+    expect((await listWorkflowRuns(root)).map((run) => run.runId)).toEqual([receipt.runId])
+  })
 })
 
 /* -------------------------------------------------------------------------- */
@@ -300,7 +355,7 @@ describe('applyWorkflowOps', () => {
 
     const undo = await undoWorkflowRun(root, receipt.runId)
 
-    expect(undo).toEqual({ runId: receipt.runId, restored: 1 })
+    expect(undo).toEqual({ runId: receipt.runId, restored: 1, driftedPaths: [] })
     expect(await readOrNull(root, 'inbox/New.md')).toBeNull()
   })
 
@@ -1038,6 +1093,415 @@ describe('one run at a time per vault', () => {
     // undo's read-compare-write lands inside the second run's read-write
     // window and 'two' vanishes while `second` still reports it applied.
     expect(await readOrNull(root, 'inbox/A.md')).toBe('a\n')
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Symlinked notes                                                           */
+/* -------------------------------------------------------------------------- */
+
+describe('symlinked notes', () => {
+  it('writes through the link instead of replacing it', async () => {
+    const root = await makeVault()
+    await seed(root, 'sources/Real.md', 'real\n')
+    await symlink(path.join(root, 'sources', 'Real.md'), path.join(root, 'inbox', 'Link.md'))
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/Link.md', text: 'added' }])
+
+    expect(receipt.rolledBack).toBeUndefined()
+    // The point of the fix: a temp-file rename would have left a regular file
+    // here and detached the note from the file it is a view of.
+    expect(await isSymlink(path.join(root, 'inbox', 'Link.md'))).toBe(true)
+    expect(await readOrNull(root, 'sources/Real.md')).toBe('real\nadded\n')
+  })
+
+  it('undo puts the bytes back through the link, which is still a link', async () => {
+    const root = await makeVault()
+    await seed(root, 'sources/Real.md', 'real\n')
+    await symlink(path.join(root, 'sources', 'Real.md'), path.join(root, 'inbox', 'Link.md'))
+
+    const receipt = await apply(root, [
+      { kind: 'write-note', path: 'inbox/Link.md', text: 'replaced\n' }
+    ])
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo.restored).toBe(1)
+    expect(await isSymlink(path.join(root, 'inbox', 'Link.md'))).toBe(true)
+    expect(await readOrNull(root, 'sources/Real.md')).toBe('real\n')
+  })
+
+  it('creates the target of a dangling link, and undo takes only that away', async () => {
+    const root = await makeVault()
+    await symlink(path.join(root, 'sources', 'Missing.md'), path.join(root, 'inbox', 'Link.md'))
+
+    const receipt = await apply(root, [
+      { kind: 'write-note', path: 'inbox/Link.md', text: 'fresh\n' }
+    ])
+    expect(await readOrNull(root, 'sources/Missing.md')).toBe('fresh\n')
+
+    await undoWorkflowRun(root, receipt.runId)
+
+    // Back to a link pointing at nothing, which is exactly how it was found.
+    expect(await readOrNull(root, 'sources/Missing.md')).toBeNull()
+    expect(await isSymlink(path.join(root, 'inbox', 'Link.md'))).toBe(true)
+  })
+
+  it('leaves a created note as a regular file', async () => {
+    const root = await makeVault()
+    await apply(root, [{ kind: 'create-note', path: 'inbox/New.md', body: 'hello' }])
+    expect(await isSymlink(path.join(root, 'inbox', 'New.md'))).toBe(false)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Surviving the process                                                     */
+/* -------------------------------------------------------------------------- */
+
+describe('crash journal', () => {
+  it('is on disk before the write it protects', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    let midRun: Record<string, unknown>[] = []
+    injected.beforeWrite = async (abs) => {
+      if (!abs.endsWith('A.md') || midRun.length > 0) return
+      const [name] = await journalNames(root)
+      if (name) midRun = journalLines(await readFile(path.join(runsDirOf(root), name), 'utf8'))
+    }
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+
+    expect(midRun[0]?.runId).toBe(receipt.runId)
+    expect(midRun[0]?.workflowId).toBe('test-flow')
+    expect(midRun[1]).toEqual({ path: 'inbox/A.md', before: 'a\n' })
+  })
+
+  it('a finished run leaves none behind', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+
+    expect(await ledgerFiles(root)).toEqual([`${receipt.runId}.json`])
+  })
+
+  it('a rolled-back run leaves none behind either', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'edit' },
+      { kind: 'trash', path: 'inbox/Missing.md' }
+    ])
+
+    expect(await ledgerFiles(root)).toEqual([])
+  })
+
+  it('turns the journal a dead process left into an undoable run', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    // Copy the journal exactly as it is while the run is applying: that file is
+    // what a killed process leaves behind.
+    let crashName = ''
+    let crashRaw = ''
+    injected.beforeWrite = async (abs) => {
+      if (!abs.endsWith('A.md') || crashName) return
+      const [name] = await journalNames(root)
+      if (name) {
+        crashName = name
+        crashRaw = await readFile(path.join(runsDirOf(root), name), 'utf8')
+      }
+    }
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+    injected.beforeWrite = null
+    // The process died here: the write is on disk, the ledger never was.
+    await rm(path.join(runsDirOf(root), `${receipt.runId}.json`))
+    await writeFile(path.join(runsDirOf(root), crashName), crashRaw, 'utf8')
+
+    const runs = await listWorkflowRuns(root)
+
+    expect(runs.map((run) => run.runId)).toEqual([receipt.runId])
+    expect(runs[0]?.interrupted).toBe(true)
+    expect(runs[0]?.undoable).toBe(true)
+    // The journal became the ledger, so recovery does not run twice.
+    expect(await ledgerFiles(root)).toEqual([`${receipt.runId}.json`])
+
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo.restored).toBe(1)
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('a\n')
+  })
+
+  it('recovers before a new run rather than waiting for someone to look', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'half applied\n')
+    const orphan = '1700000000000-001-aaaaaaaa'
+    await mkdir(runsDirOf(root), { recursive: true })
+    await writeFile(
+      journalPath(root, orphan),
+      `${JSON.stringify({ version: 1, runId: orphan, workflowId: 'dead', startedAt: 1700000000000 })}\n` +
+        `${JSON.stringify({ path: 'inbox/A.md', before: 'original\n' })}\n`,
+      'utf8'
+    )
+
+    const receipt = await apply(root, [{ kind: 'create-note', path: 'inbox/B.md', body: 'b' }])
+
+    expect(await ledgerFiles(root)).toEqual([`${orphan}.json`, `${receipt.runId}.json`].sort())
+    const recovered = (await listWorkflowRuns(root)).find((run) => run.runId === orphan)
+    expect(recovered?.interrupted).toBe(true)
+    await undoWorkflowRun(root, orphan)
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('original\n')
+  })
+
+  it('keeps the entries before a line the crash cut in half', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'changed by the dead run\n')
+    const orphan = '1700000000000-001-aaaaaaaa'
+    await mkdir(runsDirOf(root), { recursive: true })
+    await writeFile(
+      journalPath(root, orphan),
+      `${JSON.stringify({ version: 1, runId: orphan, workflowId: 'dead', startedAt: 1700000000000 })}\n` +
+        `${JSON.stringify({ path: 'inbox/A.md', before: 'original\n' })}\n` +
+        '{"path":"inbox/B.md","bef',
+      'utf8'
+    )
+
+    expect(await recoverInterruptedRuns(root)).toEqual([orphan])
+
+    const ledger = await readLedger(root, orphan)
+    expect(ledger.journal).toEqual([{ path: 'inbox/A.md', before: 'original\n' }])
+    await undoWorkflowRun(root, orphan)
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('original\n')
+  })
+
+  it('drops a journal with nothing in it, since that run never wrote', async () => {
+    const root = await makeVault()
+    const orphan = '1700000000000-001-aaaaaaaa'
+    await mkdir(runsDirOf(root), { recursive: true })
+    await writeFile(
+      journalPath(root, orphan),
+      `${JSON.stringify({ version: 1, runId: orphan, workflowId: 'dead', startedAt: 1 })}\n`,
+      'utf8'
+    )
+
+    expect(await recoverInterruptedRuns(root)).toEqual([])
+    expect(await ledgerFiles(root)).toEqual([])
+  })
+
+  it('never takes a live run for an interrupted one', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    // Reading the history WHILE the run is writing: the journal is on disk and
+    // has no ledger yet, which is exactly what an abandoned run looks like. The
+    // per-vault queue is what tells them apart, so this waits behind the run
+    // rather than recovering it out from under itself.
+    const pending: Promise<WorkflowRunSummary[]>[] = []
+    injected.beforeWrite = (abs) => {
+      if (abs.endsWith('A.md') && pending.length === 0) pending.push(listWorkflowRuns(root))
+    }
+
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+    const [runs] = await Promise.all(pending)
+
+    expect(runs?.map((run) => run.runId)).toEqual([receipt.runId])
+    expect(runs?.[0]?.interrupted).toBeUndefined()
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('a\nedit\n')
+  })
+
+  it('drops a journal whose run already has a ledger, without touching it', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+    await writeFile(
+      journalPath(root, receipt.runId),
+      `${JSON.stringify({ version: 1, runId: receipt.runId, workflowId: 'test-flow', startedAt: 1 })}\n` +
+        `${JSON.stringify({ path: 'inbox/A.md', before: 'not what really happened\n' })}\n`,
+      'utf8'
+    )
+
+    expect(await recoverInterruptedRuns(root)).toEqual([])
+
+    const ledger = await readLedger(root, receipt.runId)
+    expect(ledger.journal).toEqual([{ path: 'inbox/A.md', before: 'a\n' }])
+    expect(ledger.interrupted).toBeUndefined()
+    expect(await journalNames(root)).toEqual([])
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  One file, two spellings                                                   */
+/* -------------------------------------------------------------------------- */
+
+describe('journal keys on a case-insensitive filesystem', () => {
+  it.skipIf(!oneCaseFolder)(
+    'journals one entry when two ops name the same file in different cases',
+    async () => {
+      const root = await makeVault()
+      await seed(root, 'inbox/A.md', 'original\n')
+      const before = await snapshot(root)
+
+      const receipt = await apply(root, [
+        { kind: 'append', path: 'inbox/A.md', text: 'first' },
+        { kind: 'append', path: 'inbox/a.md', text: 'second' }
+      ])
+      const ledger = await readLedger(root, receipt.runId)
+
+      // Two entries would mean the second recorded what the first op had just
+      // written, and undo would restore a half-applied run.
+      expect(ledger.journal).toEqual([{ path: 'inbox/A.md', before: 'original\n' }])
+      await undoWorkflowRun(root, receipt.runId)
+      expect(await snapshot(root)).toEqual(before)
+    }
+  )
+
+  it.skipIf(!oneCaseFolder)('reports one path when two ops name one file in two cases', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'original\n')
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'first' },
+      { kind: 'append', path: 'inbox/a.md', text: 'second' }
+    ])
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(receipt.paths).toEqual(['inbox/A.md'])
+    // Two hashes would leave the journalled spelling holding the hash of the
+    // FIRST write, and undo would then report a file as drifted because of the
+    // run's own second op.
+    expect(Object.keys(ledger.hashes)).toEqual(['inbox/A.md'])
+    expect((await undoWorkflowRun(root, receipt.runId)).driftedPaths).toEqual([])
+  })
+
+  it.skipIf(!oneCaseFolder)('undoes a rename that only changes case', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/note.md', 'body\n')
+    const before = await snapshot(root)
+
+    const receipt = await apply(root, [{ kind: 'rename', path: 'inbox/note.md', to: 'Note' }])
+    // Destination and source are the same file here, so the collision suffix
+    // takes it rather than the note replacing itself.
+    expect(receipt.paths).toEqual(['inbox/note.md', 'inbox/Note 2.md'])
+
+    await undoWorkflowRun(root, receipt.runId)
+
+    expect(await snapshot(root)).toEqual(before)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  What undo overwrote                                                       */
+/* -------------------------------------------------------------------------- */
+
+describe('undo drift', () => {
+  it('reports nothing for a run nobody has touched since', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'edit' },
+      { kind: 'create-note', path: 'inbox/B.md', body: 'new' },
+      { kind: 'move', path: 'inbox/A.md', to: 'archive' }
+    ])
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo.driftedPaths).toEqual([])
+  })
+
+  it('names a note edited since the run, and restores it anyway', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await seed(root, 'inbox/B.md', 'b\n')
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'edit' },
+      { kind: 'append', path: 'inbox/B.md', text: 'edit' }
+    ])
+    await seed(root, 'inbox/B.md', 'typed by hand\n')
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo.driftedPaths).toEqual(['inbox/B.md'])
+    // The overwrite is the documented contract; the report is what makes it
+    // honest rather than silent.
+    expect(await readOrNull(root, 'inbox/B.md')).toBe('b\n')
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('a\n')
+  })
+
+  it('counts a note put back at a path the run had emptied', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Note.md', 'body\n')
+
+    const receipt = await apply(root, [{ kind: 'move', path: 'inbox/Note.md', to: 'archive' }])
+    await seed(root, 'inbox/Note.md', 'something new\n')
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo.driftedPaths).toEqual(['inbox/Note.md'])
+  })
+
+  it('says nothing about a recovered run, which never claimed how it left things', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'half applied\n')
+    const orphan = '1700000000000-001-aaaaaaaa'
+    await mkdir(runsDirOf(root), { recursive: true })
+    await writeFile(
+      journalPath(root, orphan),
+      `${JSON.stringify({ version: 1, runId: orphan, workflowId: 'dead', startedAt: 1 })}\n` +
+        `${JSON.stringify({ path: 'inbox/A.md', before: 'original\n' })}\n`,
+      'utf8'
+    )
+    await recoverInterruptedRuns(root)
+
+    expect((await undoWorkflowRun(root, orphan)).driftedPaths).toEqual([])
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Retention                                                                 */
+/* -------------------------------------------------------------------------- */
+
+describe('pruneRunLedgers', () => {
+  async function seedLedger(root: string, runId: string, bytes: number): Promise<void> {
+    await mkdir(runsDirOf(root), { recursive: true })
+    await writeFile(
+      path.join(runsDirOf(root), `${runId}.json`),
+      JSON.stringify({
+        version: 1,
+        runId,
+        journal: [{ path: 'inbox/A.md', before: 'x'.repeat(bytes) }]
+      }),
+      'utf8'
+    )
+  }
+
+  it('drops the oldest ledgers once the retained bytes exceed the cap', async () => {
+    const root = await makeVault()
+    const ids = ['1700000000001-001-aaaaaaaa', '1700000000002-001-bbbbbbbb', '1700000000003-001-cccccccc']
+    for (const runId of ids) await seedLedger(root, runId, 4000)
+
+    // Room for two of them: the third is what the byte cap is for, since a
+    // count cap alone would keep all three whatever they weigh.
+    await pruneRunLedgers(root, MAX_RETAINED_RUNS, 9 * 1024)
+
+    expect(await ledgerFiles(root)).toEqual([`${ids[1]}.json`, `${ids[2]}.json`])
+  })
+
+  it('keeps the most recent run even when it alone is over the cap', async () => {
+    const root = await makeVault()
+    await seedLedger(root, '1700000000001-001-aaaaaaaa', 4000)
+    await seedLedger(root, '1700000000002-001-bbbbbbbb', 4000)
+
+    await pruneRunLedgers(root, MAX_RETAINED_RUNS, 10)
+
+    // Dropping it would take the undo away from the run the user was just shown.
+    expect(await ledgerFiles(root)).toEqual(['1700000000002-001-bbbbbbbb.json'])
+  })
+
+  it('still drops by count, whatever the ledgers weigh', async () => {
+    const root = await makeVault()
+    await seedLedger(root, '1700000000001-001-aaaaaaaa', 10)
+    await seedLedger(root, '1700000000002-001-bbbbbbbb', 10)
+
+    await pruneRunLedgers(root, 1)
+
+    expect(await ledgerFiles(root)).toEqual(['1700000000002-001-bbbbbbbb.json'])
   })
 })
 

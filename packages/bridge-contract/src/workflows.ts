@@ -57,6 +57,17 @@ export interface WorkflowUndoResult {
   runId: string
   /** Files restored to their pre-run bytes. */
   restored: number
+  /**
+   * Files that had changed since the run, and were restored anyway.
+   *
+   * Undo writes the recorded pre-run bytes over whatever is in the file now,
+   * which is the only mechanism that cannot corrupt a vault (see
+   * `WorkflowJournalEntry`) and also the one that can carry off an edit the run
+   * never made. Naming those files is how the undo stays honest without giving
+   * up the guarantee. Optional because a workspace that cannot undo at all has
+   * nothing to say here.
+   */
+  driftedPaths?: string[]
 }
 
 export interface WorkflowRunSummary {
@@ -67,6 +78,13 @@ export interface WorkflowRunSummary {
   paths: string[]
   /** False once undone, so the UI never offers to undo the same run twice. */
   undoable: boolean
+  /**
+   * True for a run rebuilt from its crash journal, because the app stopped
+   * while it was applying. Part of it may have landed and part not, so its
+   * `applied` count is not a claim about the vault the way a normal run's is;
+   * undoing it restores every file the run had recorded.
+   */
+  interrupted?: boolean
 }
 
 /**
