@@ -190,6 +190,7 @@ import {
   createDatabaseOps as createSharedDatabaseOps,
   type DatabaseOps as SharedDatabaseOps
 } from '@shared/database-ops'
+import { createAbsenceAwareReader } from '@shared/remote-absence'
 import type { DatabaseSidecar, DbRow } from '@shared/databases'
 import { VaultWatcher } from './watcher'
 import { WindowVaultRegistry } from './window-vaults'
@@ -2693,22 +2694,18 @@ function registerIpc(): void {
     const client = requireRemoteWorkspaceClient()
     if (remoteDbOps?.client === client) return remoteDbOps.ops
     const ops = createSharedDatabaseOps({
-      readFileTextOrNull: async (relPath) => {
-        try {
-          return (await client.readNote(relPath)).body
-        } catch (err) {
-          // "Absent" means 404 and nothing else. `openDatabase` reads an
-          // absent sidecar as "bare CSV, adopt it" and writes an inferred
-          // schema.json over whatever was there, so every error swallowed
-          // here is a schema the user loses. A 500, a dropped connection, an
-          // auth rejection all mean the file may exist perfectly well.
-          // Servers old enough to answer 500 for a missing file are no longer
-          // humored: an unopenable database is recoverable, an overwritten
-          // one is not.
-          if (err instanceof RemoteRequestError && err.status === 404) return null
-          throw err
-        }
-      },
+      // 404 is absence; anything else is absence only if THIS server cannot
+      // say 404 for a missing file, which the reader settles by asking it
+      // once. See remote-absence.ts: a 2.20+ server distinguishes, so its
+      // 500s surface rather than overwriting a schema, while a pre-2.20
+      // server (which answers 500 for both) stays usable instead of failing
+      // every database read. Scoped to this client, so a reconnect re-asks.
+      readFileTextOrNull: createAbsenceAwareReader({
+        read: async (relPath) => (await client.readNote(relPath)).body,
+        statusOf: (err) => (err instanceof RemoteRequestError ? err.status : null),
+        serverReportsMissingAsNotFound: () =>
+          remoteServerCapabilities?.reportsMissingAsNotFound === true
+      }),
       writeFile: async (relPath, text) => {
         await client.writeNote(relPath, text)
       },
