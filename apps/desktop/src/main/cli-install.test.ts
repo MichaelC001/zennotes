@@ -44,16 +44,28 @@ const wrapperLoc = (): { wrapperPath: string; cliJsPath: string } => ({
   cliJsPath: path.join(userDataDir, 'cli.js')
 })
 
+let realPath: string | undefined
+
 beforeEach(async () => {
   userDataDir = await mkdtemp(path.join(os.tmpdir(), 'zn-cli-ud-'))
   home = await mkdtemp(path.join(os.tmpdir(), 'zn-cli-home-'))
   tempDirs.push(userDataDir, home)
   vi.spyOn(os, 'homedir').mockReturnValue(home)
+  // Candidate-directory discovery walks the REAL $PATH as well as the home
+  // dirs, so a developer who has actually installed the CLI (which every
+  // ZenNotes user now has, since the app heals the link on launch) would see
+  // `migrateLegacyCliLink` correctly decline against their own `zn` and this
+  // suite fail on their machine but not in CI. Point PATH at the temp home so
+  // the discovery can only find what a test put there.
+  realPath = process.env.PATH
+  process.env.PATH = path.join(home, '.local', 'bin')
   await writeFile(wrapperLoc().wrapperPath, '#!/bin/sh\n')
 })
 
 afterEach(async () => {
   vi.restoreAllMocks()
+  if (realPath === undefined) delete process.env.PATH
+  else process.env.PATH = realPath
   for (const d of tempDirs.splice(0)) await rm(d, { recursive: true, force: true })
 })
 
