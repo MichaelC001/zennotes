@@ -93,15 +93,19 @@ function readThemeColor(name: string, fallback = "#888888"): string {
   return `#${hex(parts[0])}${hex(parts[1])}${hex(parts[2])}`;
 }
 
+/** The stack `.prose-zen` falls back to when no text font is configured.
+ *  Kept byte-identical to the `--z-text-font` fallback in index.css: mermaid
+ *  measures against whatever this says, so a drift here reintroduces the
+ *  clipped labels this helper exists to prevent. */
+const PROSE_FONT_FALLBACK =
+  '"SF Mono", "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace';
+
 /** Read a `--z-*` CSS font variable as a concrete font-family string.
  *  Mermaid measures text in a temporary element appended to the document
  *  body, so `fontFamily: "inherit"` can resolve to a different font than the
  *  one used inside `.prose-zen`. Passing the resolved stack avoids clipped
  *  labels caused by mismatched text metrics. */
-function readThemeFont(
-  name: string,
-  fallback = '"SF Mono", "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace',
-): string {
+function readThemeFont(name: string, fallback = PROSE_FONT_FALLBACK): string {
   const raw = getComputedStyle(document.documentElement)
     .getPropertyValue(name)
     .trim();
@@ -134,10 +138,7 @@ function buildMermaidTheme(mode: "light" | "dark"): MermaidThemeConfig {
   const blue = readThemeColor("--z-blue", "#45707a");
   const purple = readThemeColor("--z-purple", "#945e80");
   const aqua = readThemeColor("--z-aqua", "#4c7a5d");
-  const fontFamily = readThemeFont(
-    "--z-text-font",
-    '"SF Mono", "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace',
-  );
+  const fontFamily = readThemeFont("--z-text-font");
 
   return {
     theme: "base",
