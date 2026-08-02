@@ -12,7 +12,20 @@ const INTERNAL_WORKSPACE_PACKAGES = [
   '@zennotes/shared-ui'
 ]
 
-export const PACKAGED_CLI_RUNTIME_PACKAGES = ['@modelcontextprotocol/sdk']
+// Everything the `zen` CLI reaches at runtime, bundled rather than externalized.
+//
+// `cli.js` and its chunks are copied to `resources/` as extraResources, which
+// puts them OUTSIDE the asar and therefore outside any node_modules: resolution
+// walks up from `resources/chunks/` and finds nothing until the filesystem root.
+// So an external here is not a layout that might be wrong, it is a require that
+// cannot succeed. 2.20.2 shipped `smol-toml` as one and the CLI died on its
+// first line for every user on every platform (#524).
+//
+// Anything new that main and the CLI share has to be added here. The check that
+// this list is complete is `tooling/scripts/verify-packaged-cli.mjs`, which runs
+// the built CLI from a directory with no node_modules above it, because that is
+// the only place the failure is visible.
+export const PACKAGED_CLI_RUNTIME_PACKAGES = ['@modelcontextprotocol/sdk', 'smol-toml']
 
 // The markdown stack `note-docx.ts` parses with, bundled into main rather than
 // left for Node to resolve at runtime.
