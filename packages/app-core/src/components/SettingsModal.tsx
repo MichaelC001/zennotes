@@ -21,6 +21,7 @@ import {
 import type {
   AppUpdateState,
   CliInstallStatus,
+  NoteFolder,
   RaycastExtensionStatus,
   RemoteWorkspaceProfile,
   RemoteWorkspaceProfileInput,
@@ -84,7 +85,11 @@ import {
   DEFAULT_SYSTEM_FOLDER_LABELS,
   getSystemFolderLabel,
 } from "../lib/system-folder-labels";
-import { DEFAULT_FOLDER_PATHS, resolveFolderPath } from "@shared/system-folder-paths";
+import {
+  DEFAULT_FOLDER_PATHS,
+  describeSystemFolderPathIssue,
+  resolveFolderPath,
+} from "@shared/system-folder-paths";
 import {
   normalizeDailyNoteLocale,
   normalizeDailyNotesDirectory,
@@ -656,6 +661,11 @@ export function SettingsModal(): JSX.Element {
   // Lazy-load the system font list on mount. Retried on every mount
   // when the list comes back empty (IPC failure / no fonts yet).
   const [systemFonts, setSystemFonts] = useState<string[]>([]);
+  // Why a folder-path edit was refused, per folder. Cleared as soon as the same
+  // row accepts a value (#533).
+  const [folderPathIssues, setFolderPathIssues] = useState<
+    Partial<Record<NoteFolder, string | null>>
+  >({});
   const [vaultTextSearchCapabilities, setVaultTextSearchCapabilities] =
     useState<VaultTextSearchCapabilities | null>(null);
   const searchToolPaths = useMemo<VaultTextSearchToolPaths>(
@@ -4085,7 +4095,7 @@ export function SettingsModal(): JSX.Element {
               </Section>
               <Section
                 title="Folder Paths"
-                description="Map each system folder to a directory in your vault. Leave empty for the default. Changing a path does not move existing notes."
+                description="Point each system folder at a directory in your vault: one folder name at the top level, not a nested path. Leave empty for the default. Changing a path does not move existing notes."
               >
                 <div className="space-y-6">
                   {(
@@ -4104,8 +4114,21 @@ export function SettingsModal(): JSX.Element {
                       placeholder={DEFAULT_FOLDER_PATHS[key]}
                       settingId={`${key}-path`}
                       commitOnBlur
+                      issue={folderPathIssues[key] ?? null}
                       onChange={(next) => {
                         const trimmed = (next ?? "").trim()
+                        // Say why, rather than saving nothing and letting the
+                        // field snap back to its old value. The normalizer on
+                        // the way in drops what it does not like, which is
+                        // right for a hand-edited file and silent for a person
+                        // typing (#533).
+                        const problem = describeSystemFolderPathIssue(
+                          key,
+                          trimmed,
+                          vaultSettings.systemFolderPaths,
+                        );
+                        setFolderPathIssues((current) => ({ ...current, [key]: problem }));
+                        if (problem) return;
                         void persistVaultSettings({
                           ...vaultSettings,
                           systemFolderPaths: {
@@ -5700,6 +5723,7 @@ function TextInputRow({
   placeholder,
   settingId,
   commitOnBlur = false,
+  issue,
   onChange,
 }: {
   label: string;
@@ -5708,6 +5732,9 @@ function TextInputRow({
   placeholder?: string;
   settingId?: string;
   commitOnBlur?: boolean;
+  /** Why the last value was refused. Shown under the description, in place of
+   *  the field quietly reverting and leaving the user to guess. */
+  issue?: string | null;
   onChange: (next: string | null) => void;
 }): JSX.Element {
   const [draft, setDraft] = useState(value);
@@ -5733,6 +5760,11 @@ function TextInputRow({
         {description && (
           <div className="mt-1 text-xs leading-5 text-ink-500">
             {description}
+          </div>
+        )}
+        {issue && (
+          <div className="mt-1 text-xs leading-5 text-[color:rgb(var(--z-red))]" role="alert">
+            {issue}
           </div>
         )}
       </div>

@@ -70,6 +70,8 @@ import {
 } from '@shared/excalidraw'
 import { DEMO_TOUR_ASSETS, DEMO_TOUR_NOTES } from './demo-tour-data'
 import {
+  DEFAULT_FOLDER_PATHS,
+  describeSystemFolderPathIssue,
   normalizeSystemFolderPaths,
   resolveFolderPath,
   systemFolderForDirName,
@@ -1362,10 +1364,48 @@ export async function getVaultSettings(root: string): Promise<VaultSettings> {
       ? DEFAULT_VAULT_SETTINGS.primaryNotesLocation
       : await inferredPrimaryNotesLocation(root, statedSystemFolderPaths(parsed))
     const settings = normalizeVaultSettings(parsed, fallbackPrimary)
+    warnAboutDiscardedFolderPaths(parsed, settings)
     vaultSettingsCache.set(root, { settings, mtimeMs: stat.mtimeMs })
     return settings
   } finally {
     await handle.close().catch(() => {})
+  }
+}
+
+
+/**
+ * Say something when a hand-written `systemFolderPaths` entry is thrown away.
+ *
+ * Normalization drops what it cannot use, which is the right way to read a file
+ * a person may have edited with any text editor, and it used to be completely
+ * silent: someone who wrote `"quick": "docs/zennotes/quick"` got the default
+ * `quick/` back with no hint that their line had been refused, and reasonably
+ * concluded the setting did not work (#533). The Settings screen explains a
+ * rejected value as it is typed; this is the same courtesy for the file.
+ *
+ * Runs only where vault.json is actually parsed, which the mtime cache above
+ * makes once per change rather than once per read.
+ */
+function warnAboutDiscardedFolderPaths(parsed: unknown, settings: VaultSettings): void {
+  // The RAW object, deliberately: `statedSystemFolderPaths` normalizes, which
+  // is exactly the step that throws the bad value away, so asking it what the
+  // file said reports only what survived.
+  if (!parsed || typeof parsed !== 'object') return
+  const stated = (parsed as { systemFolderPaths?: unknown }).systemFolderPaths
+  if (!stated || typeof stated !== 'object') return
+  for (const [folder, value] of Object.entries(stated as Record<string, unknown>)) {
+    if (!(folder in DEFAULT_FOLDER_PATHS)) continue
+    if (typeof value !== 'string' || value.trim() === '') continue
+    const kept = settings.systemFolderPaths?.[folder as NoteFolder]
+    if (kept === value.trim()) continue
+    // Its own default is not a rejection, just a redundant line.
+    if (value.trim() === DEFAULT_FOLDER_PATHS[folder as NoteFolder]) continue
+    const reason =
+      describeSystemFolderPathIssue(folder as NoteFolder, value, settings.systemFolderPaths) ??
+      'it could not be used'
+    console.warn(
+      `[zen] vault.json: systemFolderPaths.${folder} = ${JSON.stringify(value)} was ignored. ${reason}`
+    )
   }
 }
 
