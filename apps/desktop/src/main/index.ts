@@ -2241,8 +2241,7 @@ function registerIpc(): void {
   })
   handle(IPC.APP_ICON_DATA_URL, async () => {
     try {
-      const iconPath = path.join(__dirname, '../../build/icon.png')
-      const png = await fsp.readFile(iconPath)
+      const png = await fsp.readFile(windowIconPath())
       return `data:image/png;base64,${png.toString('base64')}`
     } catch {
       return null
@@ -4143,10 +4142,14 @@ app.whenReady().then(async () => {
   // macOS dock icon. `BrowserWindow.icon` has no effect on macOS — the
   // dock picks up whatever the running binary advertises. During
   // `npm run dev` that's Electron's default, so we force our own.
+  //
+  // The path has to come from windowIconPath(): build/ is not in the asar
+  // (`files` ships out/** only), the icon travels as an extraResource, and a
+  // packaged app resolving __dirname/../../build/icon.png just logged a failure
+  // on every launch.
   if (isMac() && app.dock) {
     try {
-      const iconPath = path.join(__dirname, '../../build/icon.png')
-      app.dock.setIcon(iconPath)
+      app.dock.setIcon(windowIconPath())
     } catch (err) {
       console.error('Failed to set dock icon', err)
     }
