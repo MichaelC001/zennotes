@@ -562,7 +562,9 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'd', action: 'Delete', detail: 'Delete the selected workflow file, after confirmation.' },
       { keys: 'm', action: 'Row menu', detail: 'Open the context menu for the selected workflow: duplicate, export, reveal, and the rest.' },
       { keys: '?', action: 'Syntax reference', detail: 'Every step the format knows, with a real example each.' },
-      { keys: 'r', action: 'Reload from disk', detail: 'Re-read the workflows directory, for files that arrived by sync or by hand.' }
+      { keys: 'r', action: 'Reload from disk', detail: 'Re-read the workflows directory, for files that arrived by sync or by hand.' },
+      { keys: 'Shift/⌘ + click', action: 'Select several steps', detail: 'On the canvas, hold Shift (or ⌘ on macOS, Ctrl elsewhere) and click to add a step to the selection, or drag a box across the canvas with Shift held. Dragging any member of the group moves the whole group together. The options panel edits one step at a time, so it steps aside while a group is selected; Esc clears the selection.' },
+      { keys: 'Mod+A', action: 'Select every step', detail: 'On the canvas, select all the steps in this workflow, ready to be moved as one. Inside a text box it still selects the text.' }
     ]
   },
   {
