@@ -93,6 +93,21 @@ function readThemeColor(name: string, fallback = "#888888"): string {
   return `#${hex(parts[0])}${hex(parts[1])}${hex(parts[2])}`;
 }
 
+/** Read a `--z-*` CSS font variable as a concrete font-family string.
+ *  Mermaid measures text in a temporary element appended to the document
+ *  body, so `fontFamily: "inherit"` can resolve to a different font than the
+ *  one used inside `.prose-zen`. Passing the resolved stack avoids clipped
+ *  labels caused by mismatched text metrics. */
+function readThemeFont(
+  name: string,
+  fallback = '"SF Mono", "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace',
+): string {
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  return raw || fallback;
+}
+
 interface MermaidThemeConfig {
   theme: "base";
   themeVariables: Record<string, string>;
@@ -119,13 +134,17 @@ function buildMermaidTheme(mode: "light" | "dark"): MermaidThemeConfig {
   const blue = readThemeColor("--z-blue", "#45707a");
   const purple = readThemeColor("--z-purple", "#945e80");
   const aqua = readThemeColor("--z-aqua", "#4c7a5d");
+  const fontFamily = readThemeFont(
+    "--z-text-font",
+    '"SF Mono", "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace',
+  );
 
   return {
     theme: "base",
     darkMode: mode === "dark",
     themeVariables: {
       // Typography
-      fontFamily: "inherit",
+      fontFamily,
       fontSize: "14px",
 
       // Core palette — mermaid derives most diagrams from these.
@@ -321,6 +340,17 @@ async function renderMermaidBlocks(
   if (blocks.length === 0) return;
   const mermaid = await loadMermaid();
   const cfg = buildMermaidTheme(mode);
+  // Mermaid measures text in a temporary element. If the active font is
+  // still loading, metrics are taken against a fallback and the rendered
+  // labels end up clipped once the real font applies. Wait for fonts first
+  // so the measured widths match the final painted text.
+  if (typeof document !== "undefined" && document.fonts) {
+    try {
+      await document.fonts.ready;
+    } catch {
+      /* ignore font-api failures and render anyway */
+    }
+  }
   try {
     mermaid.initialize({
       startOnLoad: false,
