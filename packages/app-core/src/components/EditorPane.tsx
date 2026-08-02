@@ -92,6 +92,8 @@ import { hashtagSource } from '../lib/cm-hashtag-complete'
 import { applyHighlight, HIGHLIGHT_COLORS, highlightExtension } from '../lib/cm-highlight'
 import { wikilinkRenderExtension } from '../lib/cm-wikilink-render'
 import { mathRenderExtension } from '../lib/cm-math-render'
+import { mermaidRenderExtension } from '../lib/cm-mermaid-render'
+import { documentDiagramMode, useDiagramThemeMode } from '../lib/use-diagram-theme-mode'
 import { embedRenderExtension } from '../lib/cm-embed-render'
 import { urlPasteMenuExtension } from '../lib/cm-url-paste-menu'
 import { mathBlockArrowKeymap } from '../lib/cm-math-nav'
@@ -371,7 +373,8 @@ function markdownSyntaxHighlightExtensions(): Extension[] {
 function wysiwygExtensions(
   renderTables: boolean,
   mathRenderer: MathRenderer,
-  typstPreamble: string
+  typstPreamble: string,
+  diagramMode: 'light' | 'dark'
 ): Extension[] {
   return [
     livePreviewPlugin,
@@ -385,6 +388,9 @@ function wysiwygExtensions(
     ...highlightExtension,
     ...wikilinkRenderExtension,
     mathRenderExtension(mathRenderer, typstPreamble),
+    // Diagrams bake their colours in, so the palette rides along and a theme
+    // switch redraws them (#530).
+    mermaidRenderExtension(diagramMode),
     embedRenderExtension,
     urlPasteMenuExtension
   ]
@@ -397,7 +403,8 @@ function currentWysiwygExtensions(notePath: string | null): Extension[] {
   return wysiwygExtensions(
     s.renderTablesInLivePreview,
     s.mathRenderer,
-    selectTypstPreambleFor(s, notePath)
+    selectTypstPreambleFor(s, notePath),
+    documentDiagramMode()
   )
 }
 
@@ -769,6 +776,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const vimYankToClipboard = useStore((s) => s.vimYankToClipboard)
   const livePreview = useStore((s) => s.livePreview)
   const renderTablesInLivePreview = useStore((s) => s.renderTablesInLivePreview)
+  // Diagrams carry their palette inside the SVG, so a theme switch has to
+  // reconfigure this pane and redraw them (#530).
+  const diagramMode = useDiagramThemeMode()
   const mathRenderer = useStore((s) => s.mathRenderer)
   const editorFontSize = useStore((s) => s.editorFontSize)
   const editorLineHeight = useStore((s) => s.editorLineHeight)
@@ -1616,7 +1626,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               ? wysiwygExtensions(
                   s0.renderTablesInLivePreview,
                   s0.mathRenderer,
-                  selectTypstPreambleFor(s0, initialPath)
+                  selectTypstPreambleFor(s0, initialPath),
+                  documentDiagramMode()
                 )
               : []
           ),
@@ -2033,7 +2044,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     // `typstPreamble` is in the deps so retagging a note — or editing the
     // preamble note it points at — reconfigures this pane and repaints its
     // formulas with the new definitions. (#486)
-  }, [livePreview, renderTablesInLivePreview, mathRenderer, typstPreamble])
+  }, [livePreview, renderTablesInLivePreview, mathRenderer, typstPreamble, diagramMode])
   useEffect(() => {
     const view = viewRef.current
     const comp = lineNumbersCompartmentRef.current

@@ -5165,6 +5165,38 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
 .cm-wysiwyg .cm-editor .cm-math-block .katex-display {
   margin: 0;
 }
+/* Mermaid live-preview widget (#530). Same rules as the math block for the same
+   reason: padding rather than margin, because CodeMirror measures block widgets
+   with getBoundingClientRect and a margin here makes the height map drift, so
+   clicks land further off the deeper you scroll. */
+.cm-wysiwyg .cm-editor .cm-mermaid-block {
+  display: block;
+  text-align: center;
+  margin: 0;
+  padding: 0.5em 0;
+  cursor: text;
+}
+.cm-wysiwyg .cm-editor .cm-mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+  /* Let the click through to CodeMirror so it can place the cursor in the block
+     and reveal the source, rather than the SVG swallowing it. */
+  pointer-events: none;
+}
+/* Nothing drawn yet. Holds a line of height so a note does not jump as diagrams
+   arrive one after another. */
+.cm-wysiwyg .cm-editor .cm-mermaid-pending {
+  min-height: 1.5em;
+}
+.cm-wysiwyg .cm-editor .cm-mermaid-error {
+  font-family: var(--z-font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  text-align: left;
+  color: rgb(var(--z-red));
+  opacity: 0.85;
+  white-space: pre-wrap;
+}
+
 .cm-wysiwyg .cm-editor .cm-math-error {
   font-family: var(--z-font-mono, ui-monospace, monospace);
   opacity: 0.75;
