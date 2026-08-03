@@ -1051,18 +1051,30 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
   )
 
   const finishPointerDrag = useCallback(
-    (drag: ActivePointerDrag): void => {
-      const columnId = drag.lastColumnId
-      if (!columnId || !dndEnabled) return
+    (drag: ActivePointerDrag, releaseX: number, releaseY: number): void => {
+      if (!dndEnabled) return
+      // The drop belongs to the column under the RELEASE point. `lastColumnId`
+      // trails the last delivered pointermove, and a fast flick can release a
+      // column past it: the hand says Today, the trailing state says Upcoming,
+      // and the "moved to Today" card comes back due tomorrow. Falling back to
+      // the last hovered column covers a release the board can't resolve (the
+      // gap between columns, the padding above them), where the indicator the
+      // user last saw is still the honest target.
+      const releaseTarget = columnAtPoint(releaseX, releaseY)
+      const columnId = releaseTarget?.id ?? drag.lastColumnId
+      if (!columnId) return
+      // The remembered insertion index was computed for the hovered column; a
+      // release that resolves elsewhere appends instead of importing it.
+      const insertionIndex = columnId === drag.lastColumnId ? drag.lastInsertionIndex : null
       const mutations =
         columnId === drag.sourceColumnId
           ? []
           : dropMutationsFor(groupBy, columnId, drag.task, today)
       if (mutations) {
-        moveTaskOnBoard(drag.task, mutations, columnId, drag.lastInsertionIndex)
+        moveTaskOnBoard(drag.task, mutations, columnId, insertionIndex)
       }
     },
-    [dndEnabled, groupBy, moveTaskOnBoard, today]
+    [columnAtPoint, dndEnabled, groupBy, moveTaskOnBoard, today]
   )
 
   const beginPointerDrag = useCallback(
@@ -1138,7 +1150,7 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
       if (drag.dragging) {
         e.preventDefault()
         setDraggingId(null)
-        finishPointerDrag(drag)
+        finishPointerDrag(drag, e.clientX, e.clientY)
         suppressCardClickUntilRef.current = Date.now() + 140
       } else {
         setDraggingId(null)
