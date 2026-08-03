@@ -21,21 +21,14 @@
  * blocks the rollup the same way the mdast tree does: that task belongs to
  * the bullet, not to the task above it.
  */
-import { TASK_LINE_RE } from '@shared/tasklists'
-
 export interface TaskRollup {
   done: number
   total: number
 }
 
-/** Any list item line (task or not): its indent prefix (list nesting, with
- *  blockquote markers folded in) and the bullet. Exported so the editor
- *  plugin can pre-filter which lines are worth a code-fence check. */
-export const LIST_ITEM_RE = /^(\s*(?:>\s*)*)(?:[-+*]|\d+[.)])\s/
-
 export type ChildTaskState = 'open' | 'done' | 'in-progress' | 'cancelled' | 'forwarded'
 
-function childStateForChar(ch: string): ChildTaskState {
+export function childTaskStateForChar(ch: string): ChildTaskState {
   if (ch === 'x' || ch === 'X') return 'done'
   if (ch === '/') return 'in-progress'
   if (ch === '-') return 'cancelled'
@@ -51,82 +44,4 @@ export function rollupCountsChild(state: ChildTaskState): boolean {
 
 export function rollupChildDone(state: ChildTaskState): boolean {
   return state === 'done'
-}
-
-interface StackEntry {
-  line: number
-  indent: number
-  isTask: boolean
-  rollup: TaskRollup
-}
-
-/**
- * One downward pass over the document, maintaining the stack of open list
- * items. Returns the rollup for every parent task line in
- * `[firstLine, lastLine]` that has at least one countable child. The walk
- * continues past `lastLine` while items are still open, so a parent at the
- * bottom of the viewport counts its whole subtree, and stops as soon as the
- * stack empties beyond the range.
- *
- * `lineTextAt` returns null for lines the caller wants ignored (past the end
- * of the document, or task-shaped lines inside code fences); a null line
- * leaves the stack untouched, like a blank one.
- */
-export function computeTaskRollups(
-  lineTextAt: (n: number) => string | null,
-  firstLine: number,
-  lastLine: number,
-  lineCount: number
-): Map<number, TaskRollup> {
-  const result = new Map<number, TaskRollup>()
-  const stack: StackEntry[] = []
-
-  const close = (entry: StackEntry): void => {
-    if (
-      entry.isTask &&
-      entry.rollup.total > 0 &&
-      entry.line >= firstLine &&
-      entry.line <= lastLine
-    ) {
-      result.set(entry.line, entry.rollup)
-    }
-  }
-
-  for (let n = firstLine; n <= lineCount; n++) {
-    if (n > lastLine && stack.length === 0) break
-    const text = lineTextAt(n)
-    if (text === null || text.trim() === '') continue
-
-    const item = LIST_ITEM_RE.exec(text)
-    if (!item) {
-      // Plain text at or left of an item's indent ends that item (a heading,
-      // a paragraph after the list); deeper text is the item's own body.
-      const indent = (/^(\s*(?:>\s*)*)/.exec(text) as RegExpExecArray)[1].length
-      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
-        close(stack.pop() as StackEntry)
-      }
-      continue
-    }
-
-    const indent = item[1].length
-    while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
-      close(stack.pop() as StackEntry)
-    }
-
-    const task = TASK_LINE_RE.exec(text)
-    if (task) {
-      const parent = stack[stack.length - 1]
-      if (parent && parent.isTask) {
-        const state = childStateForChar(task[2])
-        if (rollupCountsChild(state)) {
-          parent.rollup.total += 1
-          if (rollupChildDone(state)) parent.rollup.done += 1
-        }
-      }
-    }
-    stack.push({ line: n, indent, isTask: task !== null, rollup: { done: 0, total: 0 } })
-  }
-
-  while (stack.length > 0) close(stack.pop() as StackEntry)
-  return result
 }

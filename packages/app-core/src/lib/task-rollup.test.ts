@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
+import { ensureSyntaxTree } from '@codemirror/language'
+import { EditorState } from '@codemirror/state'
+import { markdown } from '@codemirror/lang-markdown'
 import { describe, expect, it } from 'vitest'
-import { computeTaskRollups, type TaskRollup } from './task-rollup'
+import { computeTaskRollups } from './cm-task-rollup'
+import type { TaskRollup } from './task-rollup'
 import { renderMarkdown } from './markdown'
 
-/** Run the walk over a whole document given as lines (1-indexed access). */
+/** Parse the same Markdown tree the editor uses, then compute visible rollups. */
 function rollups(lines: string[], first = 1, last = lines.length): Map<number, TaskRollup> {
-  const at = (n: number): string | null => (n >= 1 && n <= lines.length ? lines[n - 1] : null)
-  return computeTaskRollups(at, first, last, lines.length)
+  const source = lines.join('\n')
+  const state = EditorState.create({ doc: source, extensions: [markdown()] })
+  ensureSyntaxTree(state, source.length, 5_000)
+  return computeTaskRollups(state, first, last)
 }
 
 describe('computeTaskRollups (#512)', () => {
@@ -52,6 +58,24 @@ describe('computeTaskRollups (#512)', () => {
     expect(r.size).toBe(0)
   })
 
+  it('does not turn a one-space sibling into a child', () => {
+    const source = '- [ ] parent\n - [x] sibling'
+    expect(rollups(source.split('\n')).size).toBe(0)
+    expect(renderMarkdown(source)).not.toContain('zen-task-rollup')
+  })
+
+  it('honors the wider content indent of an ordered-list marker', () => {
+    const source = '10. [ ] parent\n  - [x] separate list'
+    expect(rollups(source.split('\n')).size).toBe(0)
+    expect(renderMarkdown(source)).not.toContain('zen-task-rollup')
+  })
+
+  it('does not count a task inside a nested blockquote as a direct child', () => {
+    const source = '- [ ] parent\n  > - [x] quoted task'
+    expect(rollups(source.split('\n')).size).toBe(0)
+    expect(renderMarkdown(source)).not.toContain('zen-task-rollup')
+  })
+
   it('a checked parent still reports its children', () => {
     const r = rollups(['- [x] parent', '  - [ ] leftover'])
     expect(r.get(1)).toEqual({ done: 0, total: 1 })
@@ -72,10 +96,18 @@ describe('computeTaskRollups (#512)', () => {
     expect(r.get(1)).toEqual({ done: 1, total: 1 })
   })
 
-  it('null lines (code-fence content) neither count nor close anything', () => {
-    const lines = ['- [ ] parent', '  - [x] a', null, '  - [ ] b'] as (string | null)[]
-    const at = (n: number): string | null => (n >= 1 && n <= lines.length ? lines[n - 1] : null)
-    const r = computeTaskRollups(at, 1, lines.length, lines.length)
+  it('task-shaped lines in a code fence neither count nor hide real children', () => {
+    const lines = [
+      '- [ ] parent',
+      '  - [x] a',
+      '',
+      '  ~~~',
+      '  - [x] example',
+      '  ~~~',
+      '',
+      '  - [ ] b'
+    ]
+    const r = rollups(lines)
     expect(r.get(1)).toEqual({ done: 1, total: 2 })
   })
 
