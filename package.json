@@ -28,6 +28,7 @@
     "perf:runtime-repeat": "node tooling/scripts/perf-runtime-repeat.mjs",
     "perf:web-runtime": "node tooling/scripts/perf-web-runtime.mjs",
     "test:sidebar-vim": "node tooling/scripts/sidebar-vim-smoke.mjs",
+    "test:vim-editor": "node tooling/scripts/vim-editor-smoke.mjs",
     "verify:channels": "node tooling/scripts/verify-release-channels.mjs",
     "pack": "npm run pack --workspace @zennotes/desktop",
     "dist:mac": "npm run dist:mac --workspace @zennotes/desktop",

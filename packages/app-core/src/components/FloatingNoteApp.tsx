@@ -32,6 +32,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { resolveCodeLanguage } from '../lib/cm-code-languages'
 import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languages'
 import { applyVimInsertEscape } from '../lib/vim-insert-escape'
+import { registerDisplayLineMotion } from '../lib/cm-vim-display-line'
 import { markdownListIndentPlugin } from '../lib/cm-markdown-list-indent'
 import { appMarkdownSnippetExtension } from '../lib/markdown-snippets-config'
 import { syntaxHighlighting, HighlightStyle, defaultHighlightStyle } from '@codemirror/language'
@@ -518,6 +519,8 @@ function deferredClose(): void {
 function registerFloatingVimCommands(): void {
   if (floatingVimRegistered) return
   floatingVimRegistered = true
+
+  registerDisplayLineMotion()
 
   Vim.defineEx('write', 'w', () => {
     void floatingHandlers.persist?.()
