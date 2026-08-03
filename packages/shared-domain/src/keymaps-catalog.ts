@@ -69,7 +69,7 @@ export const KEYMAP_CATALOG: KeymapCatalogEntry[] = [
   { id: "global.zoomReset", group: "global", defaultBinding: "Mod+0", title: "Reset zoom" },
   { id: "global.historyBack", group: "global", defaultBinding: "Alt+ArrowLeft", title: "Go back in note history" },
   { id: "global.historyForward", group: "global", defaultBinding: "Alt+ArrowRight", title: "Go forward in note history" },
-  { id: "global.toggleRecentNote", group: "global", defaultBinding: "Ctrl+Tab", title: "Switch to previous note" },
+  { id: "global.toggleRecentNote", group: "global", defaultBinding: "Mod+Tab", defaultBindingMac: "Ctrl+Tab", title: "Switch to previous note" },
   { id: "vim.leaderPrefix", group: "vim", defaultBinding: "Space", title: "Leader key" },
   { id: "vim.leaderOpenBuffers", group: "vim", defaultBinding: "o", title: "Leader: open buffers" },
   { id: "vim.leaderWorkflows", group: "vim", defaultBinding: "a", title: "Leader: open workflows" },

@@ -157,6 +157,18 @@ describe('sequenceTokenFromEvent', () => {
 })
 
 describe('leader keymap definitions', () => {
+  it('keeps the recent-note toggle portable with a literal Ctrl+Tab Mac default', () => {
+    withPlatform('darwin', () => {
+      expect(getDefaultKeymapBinding('global.toggleRecentNote')).toBe('Ctrl+Tab')
+    })
+    withPlatform('linux', () => {
+      expect(getDefaultKeymapBinding('global.toggleRecentNote')).toBe('Mod+Tab')
+    })
+    withPlatform('win32', () => {
+      expect(getDefaultKeymapBinding('global.toggleRecentNote')).toBe('Mod+Tab')
+    })
+  })
+
   it('includes switch vault in leader bindings', () => {
     expect(getKeymapDefinition('vim.leaderSwitchVault')).toMatchObject({
       title: 'Leader: switch vault',

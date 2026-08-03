@@ -391,7 +391,8 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     title: "Switch to previous note",
     description:
       "Switch to the most recently used note. Press again to alternate between the last two notes.",
-    defaultBinding: "Ctrl+Tab",
+    defaultBinding: "Mod+Tab",
+    defaultBindingMac: "Ctrl+Tab",
   },
   {
     id: "vim.leaderPrefix",
