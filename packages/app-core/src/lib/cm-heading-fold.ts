@@ -399,5 +399,18 @@ export function headingFolding(options: HeadingFoldingOptions = {}): Extension {
   // for foldEffect / unfoldEffect and installs the replace-decorations
   // that hide folded ranges. Without it, our dispatches go through
   // with no visible effect.
-  return [codeFolding(), service, headingArrowPlugin(options.showLevelLabels ?? false)]
+  const showLevelLabels = options.showLevelLabels ?? false
+  return [
+    codeFolding(),
+    service,
+    headingArrowPlugin(showLevelLabels),
+    // The level chips sit LEFT of the arrow slot, wider than .cm-content's
+    // default 32px padding. The centered column's auto margin cannot host
+    // them: it is zero whenever the pane is narrower than the column cap,
+    // and anything positioned beyond the content box lands under the
+    // sidebar. This class makes the content box reserve the chip gutter.
+    ...(showLevelLabels
+      ? [EditorView.editorAttributes.of({ class: 'zen-heading-level-labels' })]
+      : [])
+  ]
 }

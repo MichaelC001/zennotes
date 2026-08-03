@@ -451,6 +451,32 @@ async function main() {
       JSON.stringify(labels)
     )
 
+    // DOM presence is not paint: at this window size the chips once rendered
+    // at real coordinates UNDER the opaque sidebar (the centered column's
+    // auto margin is 0 when the pane is narrower than the column cap, and the
+    // chip offset reached beyond the content box). Assert the chips paint
+    // inside the editor pane, where a user can actually see them.
+    const labelPaint = await evaluate(
+      client,
+      `(() => {
+        const editor = document.querySelector('.cm-editor')?.getBoundingClientRect()
+        const chips = Array.from(document.querySelectorAll('.cm-heading-level-label')).map((n) =>
+          n.getBoundingClientRect()
+        )
+        if (!editor || chips.length === 0) return null
+        return {
+          editorLeft: Math.round(editor.left),
+          leftmostChip: Math.round(Math.min(...chips.map((r) => r.left))),
+          inside: chips.every((r) => r.width > 0 && r.left >= editor.left)
+        }
+      })()`
+    )
+    check(
+      'heading level labels paint inside the editor pane, not under the sidebar',
+      !!labelPaint?.inside,
+      JSON.stringify(labelPaint)
+    )
+
     const tabSize = await evaluate(
       client,
       `getComputedStyle(document.querySelector('.cm-content')).tabSize`

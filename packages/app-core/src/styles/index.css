@@ -4576,6 +4576,16 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   color: rgb(var(--z-accent));
 }
 
+/* The chip gutter must fit inside .cm-content's own box. The fold arrow
+ * (≤28px + ≤10px gap) was sized to live inside the default 32px padding;
+ * the chip needs another 30px beyond it, which only exists as centered-
+ * column margin on panes wider than the column cap — on anything narrower
+ * the chip renders under the sidebar. When level labels are enabled the
+ * editor carries this class (see headingFolding) and the content box
+ * reserves the full gutter instead of borrowing margin that may be 0. */
+.cm-editor.zen-heading-level-labels .cm-content {
+  padding-left: 76px;
+}
 .cm-heading-level-label {
   position: absolute;
   left: calc(
