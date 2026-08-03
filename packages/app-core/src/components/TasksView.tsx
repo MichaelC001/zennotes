@@ -762,12 +762,23 @@ export function TasksView(): JSX.Element {
           />
         </form>
       ) : (
+        /* Each line names only keys that fire in the current mode. The list's
+           single keys are Vim-gated (arrows, Enter and the Shift+J/K chord
+           are the universal ones); the board and the calendar predate that
+           gating and keep single-key navigation with Vim off, so their lines
+           lose only i / c / :q, which are gated on every surface. */
         <div className="border-t border-paper-300/45 px-4 py-1.5 text-xs text-current/40">
           {viewMode === 'list'
-            ? 'j/k move · J/K reorder · Enter/o open · x toggle · i start · c cancel · right-click actions · :q close'
+            ? vimMode
+              ? 'j/k move · J/K reorder · Enter/o open · x toggle · i start · c cancel · right-click actions · :q close'
+              : '↑/↓ move · Shift+J/K reorder · Enter open · right-click actions'
             : viewMode === 'calendar'
-              ? 'h/j/k/l day · [ ] month · Tab pick · x toggle · i start · c cancel · drag to move · right-click actions · :q'
-              : 'h/l column · j/k card · x toggle · i start · c cancel · Enter open · right-click actions · :q close'}
+              ? vimMode
+                ? 'h/j/k/l day · [ ] month · Tab pick · x toggle · i start · c cancel · drag to move · right-click actions · :q'
+                : 'h/j/k/l day · [ ] month · Tab pick · x toggle · drag to move · right-click actions'
+              : vimMode
+                ? 'h/l column · j/k card · x toggle · i start · c cancel · Enter open · right-click actions · :q close'
+                : 'h/l column · j/k card · x toggle · Enter open · right-click actions'}
         </div>
       )}
 
