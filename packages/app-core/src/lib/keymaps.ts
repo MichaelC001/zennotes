@@ -1059,8 +1059,7 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     group: "view-actions",
     title: "Fold heading",
     description: "Fold the heading section containing the cursor.",
-    defaultBinding: "Ctrl+Alt+F",
-    defaultBindingMac: "Mod+Alt+F",
+    defaultBinding: "Mod+Alt+F",
   },
   {
     id: "editor.unfoldHeading",
@@ -1069,8 +1068,7 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     group: "view-actions",
     title: "Unfold heading",
     description: "Unfold the heading section containing the cursor.",
-    defaultBinding: "Ctrl+Alt+U",
-    defaultBindingMac: "Mod+Alt+U",
+    defaultBinding: "Mod+Alt+U",
   },
   {
     id: "editor.moveLineUp",

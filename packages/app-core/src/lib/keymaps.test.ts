@@ -3,7 +3,9 @@ import {
   findKeymapConflict,
   getDefaultKeymapBinding,
   getKeymapDefinition,
+  getKeymapDefinitions,
   normalizeKeymapOverrides,
+  normalizeShortcutBinding,
   shortcutBindingFromEvent,
   sequenceTokenFromEvent
 } from './keymaps'
@@ -167,6 +169,26 @@ describe('leader keymap definitions', () => {
     withPlatform('win32', () => {
       expect(getDefaultKeymapBinding('global.toggleRecentNote')).toBe('Mod+Tab')
     })
+  })
+
+  it('keeps every shortcut default in the portable Mod spelling', () => {
+    // The shortcut normalizer canonicalizes the platform-primary modifier to
+    // Mod (Ctrl on Windows/Linux, Meta on the Mac), so a default written as
+    // "Ctrl+..." reads back differently on Linux CI than on the Mac this
+    // suite usually runs on, and the shared-domain catalog can only mirror
+    // one of the two spellings. Every shortcut default must round-trip
+    // unchanged on every platform.
+    for (const def of getKeymapDefinitions()) {
+      if (def.kind !== 'shortcut') continue
+      for (const platform of ['darwin', 'linux', 'win32'] as const) {
+        const roundTripped = withPlatform(platform, () =>
+          normalizeShortcutBinding(def.defaultBinding)
+        )
+        expect(roundTripped, `${def.id} default is not portable on ${platform}`).toBe(
+          def.defaultBinding
+        )
+      }
+    }
   })
 
   it('includes switch vault in leader bindings', () => {
