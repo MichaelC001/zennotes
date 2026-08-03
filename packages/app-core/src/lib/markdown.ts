@@ -19,7 +19,7 @@ import { classifyLocalAssetHref } from './local-assets'
 import { parseEmbedSizeHint } from './excalidraw-preview'
 import { parseColWidthsComment } from './markdown-table'
 import { scanTaskMetadata, type TaskMetaToken } from './task-metadata-tokens'
-import { rollupChildDone, rollupCountsChild, type ChildTaskState } from './task-rollup'
+import { rollupChildDone, rollupCountsChild, rollupLabel, type ChildTaskState } from './task-rollup'
 import {
   customCodeLanguageRegistry,
   PREVIEW_TOKEN_CLASS
@@ -398,6 +398,7 @@ function remarkTaskRollup() {
 
       const para = item.children[0] as (AnyNode & { children?: AnyNode[] }) | undefined
       if (!para || para.type !== 'paragraph' || !Array.isArray(para.children)) return
+      const label = rollupLabel({ done, total })
       para.children.push({
         type: 'emphasis',
         data: {
@@ -406,7 +407,9 @@ function remarkTaskRollup() {
             className:
               done === total
                 ? ['zen-task-meta', 'zen-task-rollup', 'zen-task-rollup-complete']
-                : ['zen-task-meta', 'zen-task-rollup']
+                : ['zen-task-meta', 'zen-task-rollup'],
+            title: label,
+            'aria-label': label
           }
         },
         children: [{ type: 'text', value: `${done}/${total}` }]

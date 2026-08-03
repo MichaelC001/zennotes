@@ -58,6 +58,18 @@ describe('computeTaskRollups (#512)', () => {
     expect(r.size).toBe(0)
   })
 
+  it('a glued checkbox is prose on both surfaces, not a countable task', () => {
+    // GFM only recognizes `[x]` followed by whitespace; the reading view will
+    // not draw `- [x]glued` as a task, so the chip must not count it.
+    const child = '- [ ] parent\n  - [x]glued\n  - [ ] real'
+    expect(rollups(child.split('\n')).get(1)).toEqual({ done: 0, total: 1 })
+    expect(renderMarkdown(child)).toContain('0/1')
+
+    const parent = '- [ ]parent\n  - [x] a'
+    expect(rollups(parent.split('\n')).size).toBe(0)
+    expect(renderMarkdown(parent)).not.toContain('zen-task-rollup')
+  })
+
   it('does not turn a one-space sibling into a child', () => {
     const source = '- [ ] parent\n - [x] sibling'
     expect(rollups(source.split('\n')).size).toBe(0)
@@ -146,5 +158,13 @@ describe('task rollup chips in the reading preview (#512)', () => {
   it('puts nothing on a plain bullet or a childless task', () => {
     const html = renderMarkdown('- plain parent\n  - [x] a\n- [ ] childless')
     expect(html).not.toContain('zen-task-rollup')
+  })
+
+  it('labels the chip for hover and screen readers, singular and plural', () => {
+    const html = renderMarkdown('- [ ] parent\n  - [x] a\n  - [ ] b')
+    expect(html).toContain('title="1 of 2 subtasks done"')
+    expect(html).toContain('aria-label="1 of 2 subtasks done"')
+    const one = renderMarkdown('- [ ] parent\n  - [ ] only')
+    expect(one).toContain('title="0 of 1 subtask done"')
   })
 })

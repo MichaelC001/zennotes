@@ -16,11 +16,11 @@ import {
   type ViewUpdate,
   WidgetType
 } from '@codemirror/view'
-import { TASK_LINE_RE } from '@shared/tasklists'
 import {
-  childTaskStateForChar,
   rollupChildDone,
   rollupCountsChild,
+  rollupLabel,
+  rollupTaskLine,
   type ChildTaskState,
   type TaskRollup
 } from './task-rollup'
@@ -29,8 +29,7 @@ type MarkdownNode = ReturnType<typeof syntaxTree>['topNode']
 
 function taskStateForListItem(state: EditorState, item: MarkdownNode): ChildTaskState | null {
   const line = state.doc.lineAt(item.from)
-  const task = TASK_LINE_RE.exec(line.text)
-  return task ? childTaskStateForChar(task[2]) : null
+  return rollupTaskLine(line.text)?.state ?? null
 }
 
 function listItemForTaskLine(
@@ -39,13 +38,13 @@ function listItemForTaskLine(
   lineNumber: number
 ): MarkdownNode | null {
   const line = state.doc.line(lineNumber)
-  const task = TASK_LINE_RE.exec(line.text)
+  const task = rollupTaskLine(line.text)
   if (!task) return null
 
   // Resolve from the checkbox's opening bracket, then climb to the list item
   // that Markdown assigned it to. A task-shaped line in a fence or raw block
   // has no ListItem ancestor and is therefore not a task in the rendered tree.
-  const markerPos = line.from + task[1].length - 1
+  const markerPos = line.from + task.bracket
   let node: MarkdownNode | null = tree.resolveInner(markerPos, 1)
   while (node && node.name !== 'ListItem') node = node.parent
   if (!node || state.doc.lineAt(node.from).number !== lineNumber) return null
@@ -106,6 +105,9 @@ class RollupWidget extends WidgetType {
         ? 'cm-task-meta cm-task-rollup cm-task-rollup-complete'
         : 'cm-task-meta cm-task-rollup'
     span.textContent = `${this.done}/${this.total}`
+    const label = rollupLabel({ done: this.done, total: this.total })
+    span.title = label
+    span.setAttribute('aria-label', label)
     return span
   }
   override ignoreEvent(): boolean {
@@ -120,10 +122,10 @@ function buildDecorations(view: EditorView): DecorationSet {
   for (const { from, to } of view.visibleRanges) {
     const firstLine = doc.lineAt(from).number
     const lastLine = doc.lineAt(Math.max(from, to - 1)).number
+    // The line loop fills the map in ascending order, which is exactly what
+    // RangeSetBuilder needs.
     const rollups = computeTaskRollups(state, firstLine, lastLine)
-    for (const n of [...rollups.keys()].sort((a, b) => a - b)) {
-      const rollup = rollups.get(n)
-      if (!rollup) continue
+    for (const [n, rollup] of rollups) {
       const line = doc.line(n)
       builder.add(
         line.to,

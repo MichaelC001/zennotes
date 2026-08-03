@@ -21,6 +21,8 @@
  * blocks the rollup the same way the mdast tree does: that task belongs to
  * the bullet, not to the task above it.
  */
+import { TASK_LINE_RE } from '@shared/tasklists'
+
 export interface TaskRollup {
   done: number
   total: number
@@ -28,12 +30,37 @@ export interface TaskRollup {
 
 export type ChildTaskState = 'open' | 'done' | 'in-progress' | 'cancelled' | 'forwarded'
 
-export function childTaskStateForChar(ch: string): ChildTaskState {
+function childTaskStateForChar(ch: string): ChildTaskState {
   if (ch === 'x' || ch === 'X') return 'done'
   if (ch === '/') return 'in-progress'
   if (ch === '-') return 'cancelled'
   if (ch === '>') return 'forwarded'
   return 'open'
+}
+
+export interface RollupTaskLine {
+  state: ChildTaskState
+  /** Offset of the checkbox's `[` in the line, for syntax-tree resolution. */
+  bracket: number
+}
+
+/**
+ * The rollup's notion of a task line: {@link TASK_LINE_RE} plus the GFM rule
+ * that the checkbox is followed by whitespace or ends the line. The reading
+ * view will not draw `- [x]glued` as a task, so the chip must not count it
+ * either; the broader line grammar stays the vault-wide task model.
+ */
+export function rollupTaskLine(text: string): RollupTaskLine | null {
+  const task = TASK_LINE_RE.exec(text)
+  if (!task) return null
+  if (!/^\](?:[ \t]|$)/.test(task[3])) return null
+  return { state: childTaskStateForChar(task[2]), bracket: task[1].length - 1 }
+}
+
+/** One phrase for both renderers' tooltips, so hover and screen readers say
+ *  the same thing in the editor and the preview. */
+export function rollupLabel(rollup: TaskRollup): string {
+  return `${rollup.done} of ${rollup.total} subtask${rollup.total === 1 ? '' : 's'} done`
 }
 
 /** Cancelled and forwarded children are no longer this list's work, so they
