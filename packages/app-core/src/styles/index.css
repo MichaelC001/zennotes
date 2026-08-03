@@ -4576,6 +4576,30 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   color: rgb(var(--z-accent));
 }
 
+.cm-heading-level-label {
+  position: absolute;
+  left: calc(
+    -1 * (
+      var(--z-heading-fold-arrow-size) + var(--z-heading-fold-arrow-gap) + 30px
+    )
+  );
+  top: calc((var(--z-heading-fold-first-line) - 18px) / 2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 18px;
+  border-radius: 4px;
+  color: theme("colors.ink.400");
+  background: rgb(var(--z-bg-2) / 0.72);
+  font-family: var(--z-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
 /* --- Preview heading fold arrow ------------------------------------ */
 /* Counterpart to the CM live-preview fold arrow: sits in the left
  * margin of every rendered h1–h6 in the preview/prose surface and

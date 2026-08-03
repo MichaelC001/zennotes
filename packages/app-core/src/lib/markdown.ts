@@ -29,6 +29,7 @@ import {
   markdownMathRenderer,
   markdownSettingsRevision
 } from './markdown-settings'
+import { numberLatexEquationEnvironments } from './latex-equation-numbering'
 
 /**
  * Remark plugin: `[[target]]` and `[[target|label]]` → link nodes
@@ -80,7 +81,6 @@ function ensureSanitizerHooks(): void {
   })
   sanitizerHooksInstalled = true
 }
-
 function sanitizeRenderedHtml(html: string): string {
   ensureSanitizerHooks()
   return DOMPurify.sanitize(html, {
@@ -818,6 +818,28 @@ function remarkCurrencyGuard() {
   }
 }
 
+function remarkNumberLatexEquations() {
+  return (tree: MdRoot): void => {
+    let equationNumber = 0
+    visit(tree, 'math', (node) => {
+      const mathNode = node as AnyNode & { value?: string }
+      const numbered = numberLatexEquationEnvironments(
+        String(mathNode.value ?? ''),
+        equationNumber
+      )
+      mathNode.value = numbered.latex
+      const hChildren = (
+        mathNode.data as
+          | { hChildren?: Array<{ children?: Array<{ value?: string }> }> }
+          | undefined
+      )?.hChildren
+      const hastText = hChildren?.[0]?.children?.[0]
+      if (hastText) hastText.value = numbered.latex
+      equationNumber = numbered.nextNumber
+    })
+  }
+}
+
 /**
  * Remark plugin (Typst renderer only): rewrite `$…$` / `$$…$$` math nodes into
  * `.zen-typst-math` placeholders carrying the raw Typst source, instead of
@@ -861,7 +883,9 @@ function createProcessor(mathRenderer: 'katex' | 'typst') {
     .use(remarkCurrencyGuard)
 
   const withTypst =
-    mathRenderer === 'typst' ? base.use(remarkTypstMathPlaceholders) : base
+    mathRenderer === 'typst'
+      ? base.use(remarkTypstMathPlaceholders)
+      : base.use(remarkNumberLatexEquations)
 
   const rehyped = withTypst
     // Before the wikilink/hashtag splitters, so the state marker is still the

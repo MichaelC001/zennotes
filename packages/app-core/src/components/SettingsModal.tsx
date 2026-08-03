@@ -118,6 +118,7 @@ import { isImeComposing } from "../lib/ime";
 import { RemoteWorkspaceProfileModal } from "./RemoteWorkspaceProfileModal";
 import { Button } from "./ui/Button";
 import { CustomCodeLanguagesSettings } from "./CustomCodeLanguagesSettings";
+import { TextReplacementsSettings } from "./TextReplacementsSettings";
 
 type SettingsCategoryId =
   | "appearance"
@@ -467,6 +468,20 @@ export function SettingsModal(): JSX.Element {
   );
   const markdownSnippets = useStore((s) => s.markdownSnippets);
   const setMarkdownSnippets = useStore((s) => s.setMarkdownSnippets);
+  const showHeadingLevelLabels = useStore((s) => s.showHeadingLevelLabels);
+  const setShowHeadingLevelLabels = useStore(
+    (s) => s.setShowHeadingLevelLabels,
+  );
+  const editorTabSize = useStore((s) => s.editorTabSize);
+  const setEditorTabSize = useStore((s) => s.setEditorTabSize);
+  const textReplacementsEnabled = useStore(
+    (s) => s.textReplacementsEnabled,
+  );
+  const setTextReplacementsEnabled = useStore(
+    (s) => s.setTextReplacementsEnabled,
+  );
+  const textReplacements = useStore((s) => s.textReplacements);
+  const setTextReplacements = useStore((s) => s.setTextReplacements);
   const autoPairs = useStore((s) => s.autoPairs);
   const setAutoPairs = useStore((s) => s.setAutoPairs);
   const autoPairQuotesInProse = useStore((s) => s.autoPairQuotesInProse);
@@ -1874,7 +1889,7 @@ export function SettingsModal(): JSX.Element {
         },
         {
           id: "markdown-overrides",
-          title: "Markdown snippets",
+          title: "Auto-close Markdown",
           description:
             "Auto-close markdown delimiters as you type (** then Space, ``` then Enter).",
           keywords: [
@@ -1886,6 +1901,24 @@ export function SettingsModal(): JSX.Element {
             "markdown",
             "completion",
           ],
+        },
+        {
+          id: "heading-level-labels",
+          title: "Heading level labels",
+          description: "Show H1, H2, H3, and other level labels beside headings.",
+          keywords: ["heading", "header", "h1", "h2", "outline", "level"],
+        },
+        {
+          id: "editor-tab-size",
+          title: "Tab size",
+          description: "Choose how many spaces a tab occupies in the editor.",
+          keywords: ["tab", "indent", "spaces", "width"],
+        },
+        {
+          id: "text-replacements-enabled",
+          title: "Text replacements",
+          description: "Replace typed snippets such as -> with →.",
+          keywords: ["snippet", "replacement", "arrow", "autocorrect", "expand"],
         },
         {
           id: "auto-pairs",
@@ -2200,6 +2233,8 @@ export function SettingsModal(): JSX.Element {
             "render-tables",
             "sync-title-heading-on-rename",
             "markdown-overrides",
+            "heading-level-labels",
+            "editor-tab-size",
             "auto-pairs",
             "auto-pair-quotes-in-prose",
             "note-tabs",
@@ -2287,11 +2322,29 @@ export function SettingsModal(): JSX.Element {
                   onChange={setSyncTitleHeadingOnRename}
                 />
                 <ToggleRow
-                  label="Markdown snippets"
+                  label="Auto-close Markdown"
                   description="Auto-close markdown as you type: ** / __ / ~~ / ` / == / [[ / %% then Space wrap the cursor, and ``` / ~~~ / $$ then Enter expand a fenced block. In Vim mode this only applies in insert mode."
                   value={markdownSnippets}
                   settingId="markdown-overrides"
                   onChange={setMarkdownSnippets}
+                />
+                <ToggleRow
+                  label="Heading level labels"
+                  description="Show H1, H2, H3, and other level labels before headings. Heading fold arrows remain available either way."
+                  value={showHeadingLevelLabels}
+                  settingId="heading-level-labels"
+                  onChange={setShowHeadingLevelLabels}
+                />
+                <SliderRow
+                  label="Tab size"
+                  description="How many spaces a tab occupies in the editor and when indenting."
+                  value={editorTabSize}
+                  min={1}
+                  max={8}
+                  step={1}
+                  unit=" spaces"
+                  settingId="editor-tab-size"
+                  onChange={setEditorTabSize}
                 />
                 <ToggleRow
                   label="Auto-pair brackets and delimiters"
@@ -2380,6 +2433,32 @@ export function SettingsModal(): JSX.Element {
                   placeholder="Quick Note"
                   settingId="quick-note-prefix"
                   onChange={setQuickNoteTitlePrefix}
+                />
+              </Section>
+            </div>
+          ),
+        },
+        {
+          id: "text-replacements",
+          title: "Text replacements",
+          description: "Expand short triggers into symbols, words, or phrases as you type.",
+          searchIds: ["text-replacements-enabled"],
+          content: (
+            <div className="space-y-6">
+              <Section
+                title="Text replacements"
+                description="Create snippets that expand immediately in the note editor."
+              >
+                <ToggleRow
+                  label="Enable text replacements"
+                  description="Replace matching text as you type. The default rule turns -> into →. In Vim mode, replacements run only in insert mode."
+                  value={textReplacementsEnabled}
+                  settingId="text-replacements-enabled"
+                  onChange={setTextReplacementsEnabled}
+                />
+                <TextReplacementsSettings
+                  replacements={textReplacements}
+                  onChange={setTextReplacements}
                 />
               </Section>
             </div>

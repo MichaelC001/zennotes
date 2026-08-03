@@ -137,7 +137,6 @@ describe('renderMarkdown', () => {
     expect(html).toContain('green')
   })
 })
-
 describe('table column widths (#294)', () => {
   it('renders a <colgroup> from a trailing zen:cols comment', () => {
     const html = renderMarkdown('| A | B |\n| --- | --- |\n| 1 | 2 |\n<!-- zen:cols=120,200 -->\n')
@@ -218,6 +217,27 @@ describe('currency vs inline math (reading view matches the editor)', () => {
 
   it('still renders block math', () => {
     expect(renderMarkdown('$$\n\\int_0^1 x\\,dx\n$$')).toContain('katex')
+  })
+
+  it('numbers equation environments in document order', () => {
+    const html = renderMarkdown(
+      [
+        '$$',
+        '\\begin{equation}a=b\\end{equation}',
+        '$$',
+        '',
+        '$$',
+        '\\begin{equation}c=d\\end{equation}',
+        '$$'
+      ].join('\n')
+    )
+    const host = document.createElement('div')
+    host.innerHTML = html
+    expect(
+      Array.from(host.querySelectorAll('.katex-html .tag')).map((node) =>
+        node.textContent?.replace(/[\s\u200b]/g, '')
+      )
+    ).toEqual(['(1)', '(2)'])
   })
 })
 

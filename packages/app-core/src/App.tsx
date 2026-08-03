@@ -738,6 +738,11 @@ function App(): JSX.Element {
         void state.jumpToNextNote()
         return
       }
+      if (matchesShortcut(e, overrides, 'global.toggleRecentNote')) {
+        e.preventDefault()
+        void state.toggleRecentNote()
+        return
+      }
       if (matchesShortcut(e, overrides, 'global.searchNotes')) {
         // ⌘P — note search
         e.preventDefault()

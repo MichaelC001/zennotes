@@ -37,6 +37,7 @@ export type KeymapId =
   | "global.zoomReset"
   | "global.historyBack"
   | "global.historyForward"
+  | "global.toggleRecentNote"
   | "vim.leaderPrefix"
   | "vim.leaderOpenBuffers"
   | "vim.leaderWorkflows"
@@ -102,7 +103,9 @@ export type KeymapId =
   | "editor.moveLineUp"
   | "editor.moveLineDown"
   | "editor.hopMarkerForward"
-  | "editor.hopMarkerBackward";
+  | "editor.hopMarkerBackward"
+  | "editor.foldHeading"
+  | "editor.unfoldHeading";
 
 export type KeymapOverrides = Partial<Record<KeymapId, string>>;
 
@@ -125,7 +128,6 @@ export interface KeymapDefinition {
   nonVimOnly?: boolean;
   maxTokens?: number;
 }
-
 const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
   {
     id: "global.searchNotes",
@@ -380,6 +382,16 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     title: "Go forward in note history",
     description: "Jump forward in note history. Works in any mode.",
     defaultBinding: "Alt+ArrowRight",
+  },
+  {
+    id: "global.toggleRecentNote",
+    kind: "shortcut",
+    scope: "app",
+    group: "global",
+    title: "Switch to previous note",
+    description:
+      "Switch to the most recently used note. Press again to alternate between the last two notes.",
+    defaultBinding: "Ctrl+Tab",
   },
   {
     id: "vim.leaderPrefix",
@@ -1038,6 +1050,26 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
       "Move the cursor to the near side of the previous inline marker on the line — `**bold**|` becomes `**bold|**`, and again to land before the opening `**`. Works with Vim mode on or off.",
     defaultBinding: "Alt+[",
     defaultBindingMac: "Ctrl+,",
+  },
+  {
+    id: "editor.foldHeading",
+    kind: "shortcut",
+    scope: "vim-editor",
+    group: "view-actions",
+    title: "Fold heading",
+    description: "Fold the heading section containing the cursor.",
+    defaultBinding: "Ctrl+Alt+F",
+    defaultBindingMac: "Mod+Alt+F",
+  },
+  {
+    id: "editor.unfoldHeading",
+    kind: "shortcut",
+    scope: "vim-editor",
+    group: "view-actions",
+    title: "Unfold heading",
+    description: "Unfold the heading section containing the cursor.",
+    defaultBinding: "Ctrl+Alt+U",
+    defaultBindingMac: "Mod+Alt+U",
   },
   {
     id: "editor.moveLineUp",

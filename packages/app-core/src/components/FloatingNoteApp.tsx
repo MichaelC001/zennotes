@@ -51,6 +51,7 @@ import {
   type ThemeFamily,
   type ThemeMode
 } from '../lib/themes'
+import { editorTabSize, normalizeEditorTabSize } from '../lib/editor-tab-size'
 
 const PREFS_KEY = 'zen:prefs:v2'
 const SAVE_DEBOUNCE_MS = 350
@@ -101,6 +102,8 @@ export interface FloatingPrefs {
   themeMode: ThemeMode
   editorFontSize: number
   editorLineHeight: number
+  editorTabSize: number
+  showHeadingLevelLabels: boolean
   lineNumberMode: LineNumberMode
   wordWrap: boolean
   interfaceFont: string | null
@@ -118,6 +121,8 @@ export function loadFloatingPrefs(): FloatingPrefs {
     themeMode: 'dark',
     editorFontSize: 16,
     editorLineHeight: 1.7,
+    editorTabSize: 4,
+    showHeadingLevelLabels: false,
     lineNumberMode: 'off',
     wordWrap: true,
     interfaceFont: null,
@@ -139,7 +144,8 @@ export function loadFloatingPrefs(): FloatingPrefs {
       ...parsed,
       themeFamily: (parsed.themeFamily as ThemeFamily) ?? fallback.themeFamily,
       themeMode: (parsed.themeMode as ThemeMode) ?? fallback.themeMode,
-      lineNumberMode
+      lineNumberMode,
+      editorTabSize: normalizeEditorTabSize(parsed.editorTabSize)
     }
   } catch {
     return fallback
@@ -299,13 +305,14 @@ export function FloatingNoteApp({ notePath }: { notePath: string }): JSX.Element
           new Compartment().of(prefs.vimMode ? vim() : []),
           history(),
           drawSelection(),
+          editorTabSize(prefs.editorTabSize),
           highlightActiveLine(),
           prefs.wordWrap ? EditorView.lineWrapping : [],
           markdown({ base: markdownLanguage, codeLanguages: resolveCodeLanguage, addKeymap: false }),
           customCodeFenceHighlightExtension,
           vimAwareMarkdownKeymap,
           markdownListIndentPlugin,
-          headingFolding(),
+          headingFolding({ showLevelLabels: prefs.showHeadingLevelLabels }),
           syntaxHighlighting(paperHighlight),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           prefs.livePreview ? livePreviewPlugin : [],

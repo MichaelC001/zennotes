@@ -23,6 +23,8 @@ import { resolveCodeLanguage } from '../lib/cm-code-languages'
 import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languages'
 import { markdownListIndentPlugin } from '../lib/cm-markdown-list-indent'
 import { appMarkdownSnippetExtension } from '../lib/markdown-snippets-config'
+import { headingFolding } from '../lib/cm-heading-fold'
+import { editorTabSize } from '../lib/editor-tab-size'
 import { templateVariableSource, TEMPLATE_VARIABLES } from '../lib/cm-template-variables'
 import { templateSlashCommandSource, slashCommandRender } from '../lib/cm-slash-commands'
 import { calloutTypeSource } from '../lib/cm-callouts'
@@ -117,6 +119,7 @@ export function TemplateEditorModal({
         new Compartment().of(vimModeRef.current ? vim() : []),
         history(),
         drawSelection(),
+        editorTabSize(useStore.getState().editorTabSize),
         highlightActiveLine(),
         EditorView.lineWrapping,
         // Parse the leading `---…---` block as YAML frontmatter and the rest as
@@ -131,6 +134,9 @@ export function TemplateEditorModal({
         customCodeFenceHighlightExtension,
         vimAwareMarkdownKeymap,
         markdownListIndentPlugin,
+        headingFolding({
+          showLevelLabels: useStore.getState().showHeadingLevelLabels
+        }),
         syntaxHighlighting(templateHighlight),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         // Render autocomplete tooltips on <body> so the modal's overflow:hidden

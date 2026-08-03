@@ -49,6 +49,8 @@ import { completionKeymapForEditor, completionNavKeymap } from '../lib/cm-comple
 import { classifyLocalAssetHref, hrefFragment, type LocalAssetKind } from '../lib/local-assets'
 import { LazyPreview as Preview } from './LazyPreview'
 import { CloseIcon, PanelLeftIcon, PinIcon } from './icons'
+import { editorTabSize } from '../lib/editor-tab-size'
+import { appMarkdownSnippetExtension } from '../lib/markdown-snippets-config'
 
 const PINNED_REF_PANE_ID = 'pinned-ref'
 export const pinnedRefPaneId = PINNED_REF_PANE_ID
@@ -154,7 +156,9 @@ export function PinnedReferencePane(): JSX.Element | null {
   const persistNote = useStore((s) => s.persistNote)
   const vimMode = useStore((s) => s.vimMode)
   const livePreview = useStore((s) => s.livePreview)
+  const showHeadingLevelLabels = useStore((s) => s.showHeadingLevelLabels)
   const lineNumberMode = useStore((s) => s.lineNumberMode)
+  const editorTabSizeValue = useStore((s) => s.editorTabSize)
   const editorFontSize = useStore((s) => s.editorFontSize)
   const editorLineHeight = useStore((s) => s.editorLineHeight)
   const textFont = useStore((s) => s.textFont)
@@ -165,6 +169,8 @@ export function PinnedReferencePane(): JSX.Element | null {
   const vimCompartmentRef = useRef<Compartment | null>(null)
   const livePreviewCompartmentRef = useRef<Compartment | null>(null)
   const lineNumbersCompartmentRef = useRef<Compartment | null>(null)
+  const headingCompartmentRef = useRef<Compartment | null>(null)
+  const tabSizeCompartmentRef = useRef<Compartment | null>(null)
 
   const [resizing, setResizing] = useState(false)
 
@@ -181,25 +187,33 @@ export function PinnedReferencePane(): JSX.Element | null {
       const vimCompartment = new Compartment()
       const livePreviewCompartment = new Compartment()
       const lineNumbersCompartment = new Compartment()
+      const headingCompartment = new Compartment()
+      const tabSizeCompartment = new Compartment()
       vimCompartmentRef.current = vimCompartment
       livePreviewCompartmentRef.current = livePreviewCompartment
       lineNumbersCompartmentRef.current = lineNumbersCompartment
+      headingCompartmentRef.current = headingCompartment
+      tabSizeCompartmentRef.current = tabSizeCompartment
       const s0 = useStore.getState()
       const initialPath = s0.pinnedRefPath
       const initialContent = initialPath ? s0.noteContents[initialPath] ?? null : null
       const state = EditorState.create({
         doc: initialContent?.body ?? '',
         extensions: [
+          appMarkdownSnippetExtension(),
           vimCompartment.of(s0.vimMode ? vim() : []),
           history(),
           drawSelection(),
+          tabSizeCompartment.of(editorTabSize(s0.editorTabSize)),
           highlightActiveLine(),
           EditorView.lineWrapping,
           markdown({ base: markdownLanguage, codeLanguages: resolveCodeLanguage, addKeymap: false }),
           customCodeFenceHighlightExtension,
           vimAwareMarkdownKeymap,
           markdownListIndentPlugin,
-          headingFolding(),
+          headingCompartment.of(
+            headingFolding({ showLevelLabels: s0.showHeadingLevelLabels })
+          ),
           syntaxHighlighting(paperHighlight),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           livePreviewCompartment.of(s0.livePreview ? livePreviewPlugin : []),
@@ -298,6 +312,22 @@ export function PinnedReferencePane(): JSX.Element | null {
     if (!view || !comp) return
     view.dispatch({ effects: comp.reconfigure(lineNumberExtension(lineNumberMode)) })
   }, [lineNumberMode])
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = headingCompartmentRef.current
+    if (!view || !comp) return
+    view.dispatch({
+      effects: comp.reconfigure(
+        headingFolding({ showLevelLabels: showHeadingLevelLabels })
+      )
+    })
+  }, [showHeadingLevelLabels])
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = tabSizeCompartmentRef.current
+    if (!view || !comp) return
+    view.dispatch({ effects: comp.reconfigure(editorTabSize(editorTabSizeValue)) })
+  }, [editorTabSizeValue])
 
   /* -------- Re-measure on font changes -------- */
   useEffect(() => {
@@ -305,7 +335,15 @@ export function PinnedReferencePane(): JSX.Element | null {
     if (!view) return
     const raf = requestAnimationFrame(() => view.requestMeasure())
     return () => cancelAnimationFrame(raf)
-  }, [editorFontSize, editorLineHeight, lineNumberMode, textFont, pinnedRefWidth, pinnedRefMode])
+  }, [
+    editorFontSize,
+    editorLineHeight,
+    editorTabSizeValue,
+    lineNumberMode,
+    textFont,
+    pinnedRefWidth,
+    pinnedRefMode
+  ])
 
   /* -------- Flush pending save on unmount -------- */
   const pathRef = useRef<string | null>(pinnedRefPath)

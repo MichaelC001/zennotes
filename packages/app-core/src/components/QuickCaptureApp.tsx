@@ -77,6 +77,8 @@ import { applyVimInsertEscape } from '../lib/vim-insert-escape'
 import { isPaletteNextKey, isPalettePreviousKey } from '../lib/palette-nav'
 import { isImeComposing } from '../lib/ime'
 import { PinIcon } from './icons'
+import { headingFolding } from '../lib/cm-heading-fold'
+import { editorTabSize, normalizeEditorTabSize } from '../lib/editor-tab-size'
 
 const PREFS_KEY = 'zen:prefs:v2'
 
@@ -88,6 +90,8 @@ interface QuickCapturePrefs {
   themeMode: ThemeMode
   editorFontSize: number
   editorLineHeight: number
+  editorTabSize: number
+  showHeadingLevelLabels: boolean
   interfaceFont: string | null
   textFont: string | null
   monoFont: string | null
@@ -102,6 +106,8 @@ function loadPrefs(): QuickCapturePrefs {
     themeMode: 'dark',
     editorFontSize: 15,
     editorLineHeight: 1.6,
+    editorTabSize: 4,
+    showHeadingLevelLabels: false,
     interfaceFont: null,
     textFont: null,
     monoFont: null
@@ -114,7 +120,8 @@ function loadPrefs(): QuickCapturePrefs {
       ...fallback,
       ...parsed,
       themeFamily: (parsed.themeFamily as ThemeFamily) ?? fallback.themeFamily,
-      themeMode: (parsed.themeMode as ThemeMode) ?? fallback.themeMode
+      themeMode: (parsed.themeMode as ThemeMode) ?? fallback.themeMode,
+      editorTabSize: normalizeEditorTabSize(parsed.editorTabSize)
     }
   } catch {
     return fallback
@@ -449,12 +456,14 @@ export function QuickCaptureApp(): JSX.Element {
           ),
           history(),
           drawSelection(),
+          editorTabSize(prefs.editorTabSize),
           highlightActiveLine(),
           EditorView.lineWrapping,
           markdown({ base: markdownLanguage, codeLanguages: resolveCodeLanguage, addKeymap: false }),
           customCodeFenceHighlightExtension,
           vimAwareMarkdownKeymap,
           markdownListIndentPlugin,
+          headingFolding({ showLevelLabels: prefs.showHeadingLevelLabels }),
           syntaxHighlighting(captureHighlight),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           placeholder('Start writing…'),

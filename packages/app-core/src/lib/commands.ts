@@ -894,6 +894,14 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       shortcut: shortcut('vim.historyForward'),
       keywords: 'history next',
       run: () => getState().jumpToNextNote()
+    },
+    {
+      id: 'nav.toggle-recent',
+      title: 'Switch to Previous Note',
+      category: 'Tabs',
+      shortcut: shortcut('global.toggleRecentNote'),
+      keywords: 'recent last previous alternate toggle switch note',
+      run: () => getState().toggleRecentNote()
     }
   )
 

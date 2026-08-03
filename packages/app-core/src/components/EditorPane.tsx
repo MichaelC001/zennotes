@@ -73,8 +73,16 @@ import {
   orderedListRenumber,
   skipOrderedListRenumber
 } from '../lib/cm-ordered-list-renumber'
-import { syntaxHighlighting, HighlightStyle, defaultHighlightStyle } from '@codemirror/language'
-import { headingFolding } from '../lib/cm-heading-fold'
+import {
+  syntaxHighlighting,
+  HighlightStyle,
+  defaultHighlightStyle
+} from '@codemirror/language'
+import {
+  foldHeadingAtCursor,
+  headingFolding,
+  unfoldHeadingAtCursor
+} from '../lib/cm-heading-fold'
 import { tags as t } from '@lezer/highlight'
 import { searchKeymap } from '@codemirror/search'
 import { autocompletion } from '@codemirror/autocomplete'
@@ -258,6 +266,7 @@ import {
   type KeymapOverrides
 } from '../lib/keymaps'
 import { isTabStripOverflowing } from '../lib/tab-strip-overflow'
+import { editorTabSize } from '../lib/editor-tab-size'
 
 const MODE_OPTIONS: Array<{
   mode: PaneMode
@@ -315,6 +324,14 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
       key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.hopMarkerBackward')),
       run: hopMarkerBackward
     },
+    {
+      key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.foldHeading')),
+      run: foldHeadingAtCursor
+    },
+    {
+      key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.unfoldHeading')),
+      run: unfoldHeadingAtCursor
+    },
     // Inline-format shortcuts (bold/italic/code/strike/highlight/math/link). In
     // Vim mode VimNav owns these (its window handler also resolves the Ctrl+I
     // jumplist collision on Linux); in non-Vim mode that handler is disabled, so
@@ -343,7 +360,7 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
   ])
 }
 
-function markdownEditingExtensions(): Extension[] {
+function markdownEditingExtensions(showHeadingLevelLabels = false): Extension[] {
   return [
     markdown({ base: markdownLanguage, codeLanguages: resolveCodeLanguage, addKeymap: false }),
     customCodeFenceHighlightExtension,
@@ -352,7 +369,7 @@ function markdownEditingExtensions(): Extension[] {
     frontmatterStyle,
     orderedListRenumber,
     forwardOnCheckboxArrow,
-    headingFolding(),
+    headingFolding({ showLevelLabels: showHeadingLevelLabels }),
     codeBlockFontPlugin
   ]
 }
@@ -781,6 +798,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const vimMode = useStore((s) => s.vimMode)
   const vimYankToClipboard = useStore((s) => s.vimYankToClipboard)
   const livePreview = useStore((s) => s.livePreview)
+  const showHeadingLevelLabels = useStore((s) => s.showHeadingLevelLabels)
   const renderTablesInLivePreview = useStore((s) => s.renderTablesInLivePreview)
   // Diagrams carry their palette inside the SVG, so a theme switch has to
   // reconfigure this pane and redraw them (#530).
@@ -788,6 +806,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const mathRenderer = useStore((s) => s.mathRenderer)
   const editorFontSize = useStore((s) => s.editorFontSize)
   const editorLineHeight = useStore((s) => s.editorLineHeight)
+  const editorTabSizeValue = useStore((s) => s.editorTabSize)
   const editorScrollOff = useStore((s) => s.editorScrollOff)
   const lineNumberMode = useStore((s) => s.lineNumberMode)
   const textFont = useStore((s) => s.textFont)
@@ -891,6 +910,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const wordWrapCompartmentRef = useRef<Compartment | null>(null)
   const scrolloffCompartmentRef = useRef<Compartment | null>(null)
   const drawSelectionCompartmentRef = useRef<Compartment | null>(null)
+  const tabSizeCompartmentRef = useRef<Compartment | null>(null)
   // history() lives in a compartment so we can reset undo history on a note
   // switch — otherwise Cmd+Z crosses notes and overwrites the current one (#247).
   const historyCompartmentRef = useRef<Compartment | null>(null)
@@ -1588,6 +1608,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       const wordWrapCompartment = new Compartment()
       const scrolloffCompartment = new Compartment()
       const drawSelectionCompartment = new Compartment()
+      const tabSizeCompartment = new Compartment()
       const historyCompartment = new Compartment()
       vimCompartmentRef.current = vimCompartment
       editorKeymapCompartmentRef.current = editorKeymapCompartment
@@ -1598,6 +1619,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       wordWrapCompartmentRef.current = wordWrapCompartment
       scrolloffCompartmentRef.current = scrolloffCompartment
       drawSelectionCompartmentRef.current = drawSelectionCompartment
+      tabSizeCompartmentRef.current = tabSizeCompartment
       historyCompartmentRef.current = historyCompartment
       const s0 = useStore.getState()
       const initialPath = findLeaf(s0.paneLayout, paneId)?.activeTab ?? null
@@ -1616,6 +1638,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           drawSelectionCompartment.of(
             drawSelection({ cursorBlinkRate: s0.cursorBlink ? 1200 : 0 })
           ),
+          tabSizeCompartment.of(editorTabSize(s0.editorTabSize)),
           highlightActiveLine(),
           taskJumpHighlightField,
           yankHighlightExtension,
@@ -1623,7 +1646,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           commentDecorationField,
           wordWrapCompartment.of(s0.wordWrap ? EditorView.lineWrapping : []),
           scrolloffCompartment.of(scrollOff(s0.editorScrollOff)),
-          markdownCompartment.of(deferInitialRichMarkdown ? [] : markdownEditingExtensions()),
+          markdownCompartment.of(
+            deferInitialRichMarkdown
+              ? []
+              : markdownEditingExtensions(s0.showHeadingLevelLabels)
+          ),
           markdownSyntaxCompartment.of(
             deferInitialRichMarkdown ? [] : markdownSyntaxHighlightExtensions()
           ),
@@ -1817,7 +1844,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           if (viewPathRef.current !== initialPath) return
           richMarkdownDeferredRef.current = false
           const restoreEffects = [
-            markdownCompartment.reconfigure(markdownEditingExtensions()),
+            markdownCompartment.reconfigure(
+              markdownEditingExtensions(useStore.getState().showHeadingLevelLabels)
+            ),
             markdownSyntaxCompartment.reconfigure(markdownSyntaxHighlightExtensions())
           ]
           if (useStore.getState().livePreview) {
@@ -1912,7 +1941,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     ) {
       richMarkdownDeferredRef.current = false
       effects.push(
-        markdownCompartment.reconfigure(markdownEditingExtensions()),
+        markdownCompartment.reconfigure(
+          markdownEditingExtensions(useStore.getState().showHeadingLevelLabels)
+        ),
         markdownSyntaxCompartment.reconfigure(markdownSyntaxHighlightExtensions())
       )
       if (livePreviewEnabled && livePreviewCompartment) {
@@ -1976,7 +2007,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         if (viewPathRef.current !== nextPath) return
         richMarkdownDeferredRef.current = false
         const restoreEffects = [
-          markdownCompartment.reconfigure(markdownEditingExtensions()),
+          markdownCompartment.reconfigure(
+            markdownEditingExtensions(useStore.getState().showHeadingLevelLabels)
+          ),
           markdownSyntaxCompartment.reconfigure(markdownSyntaxHighlightExtensions())
         ]
         if (useStore.getState().livePreview && livePreviewCompartment) {
@@ -2030,7 +2063,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         const markdownCompartment = markdownCompartmentRef.current
         const markdownSyntaxCompartment = markdownSyntaxCompartmentRef.current
         if (markdownCompartment) {
-          effects.push(markdownCompartment.reconfigure(markdownEditingExtensions()))
+          effects.push(
+            markdownCompartment.reconfigure(
+              markdownEditingExtensions(useStore.getState().showHeadingLevelLabels)
+            )
+          )
         }
         if (markdownSyntaxCompartment) {
           effects.push(
@@ -2051,6 +2088,14 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     // preamble note it points at — reconfigures this pane and repaints its
     // formulas with the new definitions. (#486)
   }, [livePreview, renderTablesInLivePreview, mathRenderer, typstPreamble, diagramTheme.key])
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = markdownCompartmentRef.current
+    if (!view || !comp || richMarkdownDeferredRef.current) return
+    view.dispatch({
+      effects: comp.reconfigure(markdownEditingExtensions(showHeadingLevelLabels))
+    })
+  }, [showHeadingLevelLabels])
   useEffect(() => {
     const view = viewRef.current
     const comp = lineNumbersCompartmentRef.current
@@ -2083,6 +2128,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       )
     })
   }, [cursorBlink])
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = tabSizeCompartmentRef.current
+    if (!view || !comp) return
+    view.dispatch({ effects: comp.reconfigure(editorTabSize(editorTabSizeValue)) })
+  }, [editorTabSizeValue])
 
   // Re-measure CM on prefs that change line geometry.
   useEffect(() => {

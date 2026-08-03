@@ -191,6 +191,12 @@ import {
   type PaneLeaf
 } from './lib/pane-layout'
 import { paneModesWithPathMode, type PaneMode, type PaneModesByPath } from './lib/pane-mode'
+import {
+  normalizeTextReplacements,
+  type TextReplacements
+} from './lib/cm-text-replacements'
+import { normalizeEditorTabSize } from './lib/editor-tab-size'
+import { recentNoteToggleTarget } from './lib/recent-note-toggle'
 
 export type NoteSortOrder =
   | 'none'
@@ -461,6 +467,8 @@ interface Prefs {
   /** Optional explicit binary path for fzf. Blank uses PATH lookup. */
   fzfBinaryPath: string | null
   livePreview: boolean      // hide markdown syntax on inactive lines
+  /** Show an H1 through H6 badge before Markdown headings in the editor. */
+  showHeadingLevelLabels: boolean
   /** Render Markdown tables as interactive WYSIWYG widgets in live preview.
    *  Off keeps tables as plain editable markdown — full keyboard/Vim editing. */
   renderTablesInLivePreview: boolean
@@ -486,6 +494,10 @@ interface Prefs {
   /** Auto-close markdown delimiters while typing: `**`+Space → `**|**`,
    *  ```` ``` ````+Enter expands a fenced block. Off restores plain typing. */
   markdownSnippets: boolean
+  /** Expand user-defined text triggers while typing. */
+  textReplacementsEnabled: boolean
+  /** Trigger to replacement mappings, such as `->` to `→`. */
+  textReplacements: TextReplacements
   /** Auto-insert matching `[]`, `()`, and `{}` delimiters while typing. */
   autoPairs: boolean
   /** Also auto-insert matching quotes outside Markdown code spans and blocks. */
@@ -498,6 +510,7 @@ interface Prefs {
   themeMode: ThemeMode
   editorFontSize: number    // px — affects editor + preview
   editorLineHeight: number  // unitless multiplier
+  editorTabSize: number     // columns used to render and indent a tab
   editorScrollOff: number   // vim scrolloff — lines kept above/below the cursor (0 = off)
   timeFormat: TimeFormat    // clock format for the @time macro
   previewMaxWidth: number   // px — max reading width for preview surfaces
@@ -856,6 +869,7 @@ export const DEFAULT_PREFS: Prefs = {
   ripgrepBinaryPath: null,
   fzfBinaryPath: null,
   livePreview: true,
+  showHeadingLevelLabels: false,
   renderTablesInLivePreview: true,
   completedTaskStyle: 'none',
   mathRenderer: 'katex',
@@ -864,6 +878,8 @@ export const DEFAULT_PREFS: Prefs = {
   keepViewModeAcrossNotes: false,
   syncTitleHeadingOnRename: true,
   markdownSnippets: true,
+  textReplacementsEnabled: true,
+  textReplacements: { '->': '→' },
   autoPairs: true,
   autoPairQuotesInProse: false,
   hideBuiltinTemplates: false,
@@ -876,6 +892,7 @@ export const DEFAULT_PREFS: Prefs = {
   themeTweaks: {},
   editorFontSize: 16,
   editorLineHeight: 1.7,
+  editorTabSize: 4,
   editorScrollOff: 0,
   timeFormat: defaultTimeFormat(),
   previewMaxWidth: 920,
@@ -988,6 +1005,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
         : DEFAULT_PREFS.fzfBinaryPath,
     livePreview:
       typeof p.livePreview === 'boolean' ? p.livePreview : DEFAULT_PREFS.livePreview,
+    showHeadingLevelLabels:
+      typeof p.showHeadingLevelLabels === 'boolean'
+        ? p.showHeadingLevelLabels
+        : DEFAULT_PREFS.showHeadingLevelLabels,
     renderTablesInLivePreview:
       typeof p.renderTablesInLivePreview === 'boolean'
         ? p.renderTablesInLivePreview
@@ -1023,6 +1044,13 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.markdownSnippets === 'boolean'
         ? p.markdownSnippets
         : DEFAULT_PREFS.markdownSnippets,
+    textReplacementsEnabled:
+      typeof p.textReplacementsEnabled === 'boolean'
+        ? p.textReplacementsEnabled
+        : DEFAULT_PREFS.textReplacementsEnabled,
+    textReplacements: normalizeTextReplacements(
+      p.textReplacements ?? DEFAULT_PREFS.textReplacements
+    ),
     autoPairs: typeof p.autoPairs === 'boolean' ? p.autoPairs : DEFAULT_PREFS.autoPairs,
     autoPairQuotesInProse:
       typeof p.autoPairQuotesInProse === 'boolean'
@@ -1047,6 +1075,7 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.editorLineHeight === 'number'
         ? p.editorLineHeight
         : DEFAULT_PREFS.editorLineHeight,
+    editorTabSize: normalizeEditorTabSize(p.editorTabSize),
     editorScrollOff:
       typeof p.editorScrollOff === 'number' && p.editorScrollOff >= 0
         ? Math.floor(p.editorScrollOff)
@@ -1965,6 +1994,7 @@ function collectPrefs(s: {
   ripgrepBinaryPath: string | null
   fzfBinaryPath: string | null
   livePreview: boolean
+  showHeadingLevelLabels: boolean
   renderTablesInLivePreview: boolean
   completedTaskStyle: CompletedTaskStyle
   mathRenderer: MathRenderer
@@ -1973,6 +2003,8 @@ function collectPrefs(s: {
   keepViewModeAcrossNotes: boolean
   syncTitleHeadingOnRename: boolean
   markdownSnippets: boolean
+  textReplacementsEnabled: boolean
+  textReplacements: TextReplacements
   autoPairs: boolean
   autoPairQuotesInProse: boolean
   hideBuiltinTemplates: boolean
@@ -1983,6 +2015,7 @@ function collectPrefs(s: {
   themeMode: ThemeMode
   editorFontSize: number
   editorLineHeight: number
+  editorTabSize: number
   editorScrollOff: number
   timeFormat: TimeFormat
   previewMaxWidth: number
@@ -2048,6 +2081,7 @@ function collectPrefs(s: {
     ripgrepBinaryPath: s.ripgrepBinaryPath,
     fzfBinaryPath: s.fzfBinaryPath,
     livePreview: s.livePreview,
+    showHeadingLevelLabels: s.showHeadingLevelLabels,
     renderTablesInLivePreview: s.renderTablesInLivePreview,
     completedTaskStyle: s.completedTaskStyle,
     mathRenderer: s.mathRenderer,
@@ -2056,6 +2090,8 @@ function collectPrefs(s: {
     keepViewModeAcrossNotes: s.keepViewModeAcrossNotes,
     syncTitleHeadingOnRename: s.syncTitleHeadingOnRename,
     markdownSnippets: s.markdownSnippets,
+    textReplacementsEnabled: s.textReplacementsEnabled,
+    textReplacements: s.textReplacements,
     autoPairs: s.autoPairs,
     autoPairQuotesInProse: s.autoPairQuotesInProse,
     hideBuiltinTemplates: s.hideBuiltinTemplates,
@@ -2066,6 +2102,7 @@ function collectPrefs(s: {
     themeMode: s.themeMode,
     editorFontSize: s.editorFontSize,
     editorLineHeight: s.editorLineHeight,
+    editorTabSize: s.editorTabSize,
     editorScrollOff: s.editorScrollOff,
     timeFormat: s.timeFormat,
     previewMaxWidth: s.previewMaxWidth,
@@ -2528,6 +2565,7 @@ interface Store {
   ripgrepBinaryPath: string | null
   fzfBinaryPath: string | null
   livePreview: boolean
+  showHeadingLevelLabels: boolean
   renderTablesInLivePreview: boolean
   completedTaskStyle: CompletedTaskStyle
   mathRenderer: MathRenderer
@@ -2538,6 +2576,8 @@ interface Store {
   syncTitleHeadingOnRename: boolean
   /** Auto-close markdown delimiters while typing. Persisted. */
   markdownSnippets: boolean
+  textReplacementsEnabled: boolean
+  textReplacements: TextReplacements
   /** Auto-insert matching `[]`, `()`, and `{}` delimiters while typing. Persisted. */
   autoPairs: boolean
   /** Also auto-insert matching quotes outside Markdown code spans and blocks. Persisted. */
@@ -2569,6 +2609,7 @@ interface Store {
   themeMode: ThemeMode
   editorFontSize: number
   editorLineHeight: number
+  editorTabSize: number
   editorScrollOff: number
   timeFormat: TimeFormat
   previewMaxWidth: number
@@ -2900,6 +2941,7 @@ interface Store {
   refreshTypstPreambles: () => Promise<void>
   jumpToPreviousNote: () => Promise<void>
   jumpToNextNote: () => Promise<void>
+  toggleRecentNote: () => Promise<void>
   applyChange: (ev: VaultChangeEvent) => Promise<void>
   refreshNotes: () => Promise<void>
   refreshRootContentHidden: () => Promise<void>
@@ -2974,6 +3016,7 @@ interface Store {
   setRipgrepBinaryPath: (path: string | null) => void
   setFzfBinaryPath: (path: string | null) => void
   setLivePreview: (on: boolean) => void
+  setShowHeadingLevelLabels: (on: boolean) => void
   setRenderTablesInLivePreview: (on: boolean) => void
   setCompletedTaskStyle: (style: CompletedTaskStyle) => void
   setMathRenderer: (renderer: MathRenderer) => void
@@ -2982,6 +3025,8 @@ interface Store {
   setKeepViewModeAcrossNotes: (on: boolean) => void
   setSyncTitleHeadingOnRename: (on: boolean) => void
   setMarkdownSnippets: (on: boolean) => void
+  setTextReplacementsEnabled: (on: boolean) => void
+  setTextReplacements: (replacements: TextReplacements) => void
   setAutoPairs: (on: boolean) => void
   setAutoPairQuotesInProse: (on: boolean) => void
   setHideBuiltinTemplates: (hidden: boolean) => void
@@ -3004,6 +3049,7 @@ interface Store {
   setTheme: (next: { id: string; family: ThemeFamily; mode: ThemeMode }) => void
   setEditorFontSize: (px: number) => void
   setEditorLineHeight: (mult: number) => void
+  setEditorTabSize: (size: number) => void
   setEditorScrollOff: (lines: number) => void
   setTimeFormat: (format: TimeFormat) => void
   setPreviewMaxWidth: (px: number) => void
@@ -4201,6 +4247,7 @@ export const useStore = create<Store>((set, get) => {
   ripgrepBinaryPath: loadPrefs().ripgrepBinaryPath,
   fzfBinaryPath: loadPrefs().fzfBinaryPath,
   livePreview: loadPrefs().livePreview,
+  showHeadingLevelLabels: loadPrefs().showHeadingLevelLabels,
   renderTablesInLivePreview: loadPrefs().renderTablesInLivePreview,
   completedTaskStyle: loadPrefs().completedTaskStyle,
   mathRenderer: loadPrefs().mathRenderer,
@@ -4209,6 +4256,8 @@ export const useStore = create<Store>((set, get) => {
   keepViewModeAcrossNotes: loadPrefs().keepViewModeAcrossNotes,
   syncTitleHeadingOnRename: loadPrefs().syncTitleHeadingOnRename,
   markdownSnippets: loadPrefs().markdownSnippets,
+  textReplacementsEnabled: loadPrefs().textReplacementsEnabled,
+  textReplacements: loadPrefs().textReplacements,
   autoPairs: loadPrefs().autoPairs,
   autoPairQuotesInProse: loadPrefs().autoPairQuotesInProse,
   hideBuiltinTemplates: loadPrefs().hideBuiltinTemplates,
@@ -4222,6 +4271,7 @@ export const useStore = create<Store>((set, get) => {
   themeMode: loadPrefs().themeMode,
   editorFontSize: loadPrefs().editorFontSize,
   editorLineHeight: loadPrefs().editorLineHeight,
+  editorTabSize: loadPrefs().editorTabSize,
   editorScrollOff: loadPrefs().editorScrollOff,
   timeFormat: loadPrefs().timeFormat,
   previewMaxWidth: loadPrefs().previewMaxWidth,
@@ -5523,6 +5573,19 @@ export const useStore = create<Store>((set, get) => {
     await jumpThroughNoteHistory('forward')
   },
 
+  toggleRecentNote: async () => {
+    const state = get()
+    const available = new Set(
+      state.notes.filter((note) => note.folder !== 'trash').map((note) => note.path)
+    )
+    const target = recentNoteToggleTarget(
+      state.selectedPath,
+      state.noteBackstack,
+      available
+    )
+    if (target) await get().selectNote(target)
+  },
+
   refreshNotes: async () => {
     try {
       // Load this vault's manual note order once per vault (drives #224).
@@ -6542,6 +6605,10 @@ export const useStore = create<Store>((set, get) => {
     set({ livePreview: on })
     savePrefs(collectPrefs(get()))
   },
+  setShowHeadingLevelLabels: (on) => {
+    set({ showHeadingLevelLabels: on })
+    savePrefs(collectPrefs(get()))
+  },
   setRenderTablesInLivePreview: (on) => {
     set({ renderTablesInLivePreview: on })
     savePrefs(collectPrefs(get()))
@@ -6574,6 +6641,14 @@ export const useStore = create<Store>((set, get) => {
   },
   setMarkdownSnippets: (on) => {
     set({ markdownSnippets: on })
+    savePrefs(collectPrefs(get()))
+  },
+  setTextReplacementsEnabled: (on) => {
+    set({ textReplacementsEnabled: on })
+    savePrefs(collectPrefs(get()))
+  },
+  setTextReplacements: (replacements) => {
+    set({ textReplacements: normalizeTextReplacements(replacements) })
     savePrefs(collectPrefs(get()))
   },
   setAutoPairs: (on) => {
@@ -6668,6 +6743,10 @@ export const useStore = create<Store>((set, get) => {
   },
   setEditorLineHeight: (mult) => {
     set({ editorLineHeight: mult })
+    savePrefs(collectPrefs(get()))
+  },
+  setEditorTabSize: (size) => {
+    set({ editorTabSize: normalizeEditorTabSize(size) })
     savePrefs(collectPrefs(get()))
   },
   setEditorScrollOff: (lines) => {

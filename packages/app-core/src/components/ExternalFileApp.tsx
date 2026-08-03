@@ -35,6 +35,7 @@ import {
   loadFloatingPrefs,
   paperHighlight
 } from './FloatingNoteApp'
+import { editorTabSize } from '../lib/editor-tab-size'
 
 const SAVE_DEBOUNCE_MS = 350
 const programmatic = Annotation.define<boolean>()
@@ -115,13 +116,14 @@ export function ExternalFileApp(): JSX.Element {
           new Compartment().of(prefs.vimMode ? vim() : []),
           history(),
           drawSelection(),
+          editorTabSize(prefs.editorTabSize),
           highlightActiveLine(),
           prefs.wordWrap ? EditorView.lineWrapping : [],
           markdown({ base: markdownLanguage, codeLanguages: resolveCodeLanguage, addKeymap: false }),
           customCodeFenceHighlightExtension,
           vimAwareMarkdownKeymap,
           markdownListIndentPlugin,
-          headingFolding(),
+          headingFolding({ showLevelLabels: prefs.showHeadingLevelLabels }),
           syntaxHighlighting(paperHighlight),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           prefs.livePreview ? livePreviewPlugin : [],
