@@ -19,6 +19,7 @@ import { classifyLocalAssetHref } from './local-assets'
 import { parseEmbedSizeHint } from './excalidraw-preview'
 import { parseColWidthsComment } from './markdown-table'
 import { scanTaskMetadata, type TaskMetaToken } from './task-metadata-tokens'
+import { rollupChildDone, rollupCountsChild, type ChildTaskState } from './task-rollup'
 import {
   customCodeLanguageRegistry,
   PREVIEW_TOKEN_CLASS
@@ -347,6 +348,69 @@ function remarkTaskStates() {
         'task-list-item',
         `zen-task-${state}`
       ]
+    })
+  }
+}
+
+/**
+ * Remark plugin: a parent task with subtasks shows its children's progress as
+ * a `2/5` chip, derived at render time and never written into the markdown
+ * (#512: the vault stays the single source of truth no matter who edits it).
+ * Counts direct children only, one nesting level down; the state semantics
+ * (cancelled and forwarded children out of the denominator, in-progress not
+ * yet done) are shared with the editor widget via `task-rollup.ts`, so both
+ * renderers always show the same number. Runs after `remarkTaskStates` so the
+ * non-GFM child states are already on the nodes.
+ */
+function remarkTaskRollup() {
+  return (tree: MdRoot): void => {
+    visit(tree, 'listItem', (node) => {
+      const item = node as unknown as AnyParent & {
+        checked?: boolean | null
+        data?: { zenTaskState?: string }
+      }
+      const isTask = item.checked != null || item.data?.zenTaskState != null
+      if (!isTask) return
+
+      let done = 0
+      let total = 0
+      for (const child of item.children) {
+        if ((child as AnyNode).type !== 'list') continue
+        for (const li of (child as unknown as AnyParent).children) {
+          const sub = li as unknown as {
+            type: string
+            checked?: boolean | null
+            data?: { zenTaskState?: string }
+          }
+          if (sub.type !== 'listItem') continue
+          const state =
+            sub.checked === true
+              ? 'done'
+              : sub.checked === false
+                ? 'open'
+                : (sub.data?.zenTaskState as ChildTaskState | undefined)
+          if (!state || !rollupCountsChild(state)) continue
+          total += 1
+          if (rollupChildDone(state)) done += 1
+        }
+      }
+      if (total === 0) return
+
+      const para = item.children[0] as (AnyNode & { children?: AnyNode[] }) | undefined
+      if (!para || para.type !== 'paragraph' || !Array.isArray(para.children)) return
+      para.children.push({
+        type: 'emphasis',
+        data: {
+          hName: 'span',
+          hProperties: {
+            className:
+              done === total
+                ? ['zen-task-meta', 'zen-task-rollup', 'zen-task-rollup-complete']
+                : ['zen-task-meta', 'zen-task-rollup']
+          }
+        },
+        children: [{ type: 'text', value: `${done}/${total}` }]
+      } as AnyNode)
     })
   }
 }
@@ -800,6 +864,7 @@ function createProcessor(mathRenderer: 'katex' | 'typst') {
     // Before the wikilink/hashtag splitters, so the state marker is still the
     // head of one unsplit text node when it is matched.
     .use(remarkTaskStates)
+    .use(remarkTaskRollup)
     .use(remarkWikilinks)
     .use(remarkHashtags)
     .use(remarkTaskMetadata)

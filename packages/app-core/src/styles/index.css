@@ -5360,3 +5360,17 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   color: rgb(var(--z-purple));
   background-color: rgb(var(--z-purple) / 0.12);
 }
+/* #512: derived subtask progress on a parent task line. Neutral until every
+   child is done, then it borrows the green the done state already owns. */
+.cm-wysiwyg .cm-editor .cm-task-rollup,
+.prose-zen .zen-task-rollup {
+  margin-left: 0.45em;
+  color: rgb(var(--z-fg-2));
+  background-color: rgb(var(--z-fg-2) / 0.1);
+  font-variant-numeric: tabular-nums;
+}
+.cm-wysiwyg .cm-editor .cm-task-rollup-complete,
+.prose-zen .zen-task-rollup-complete {
+  color: rgb(var(--z-green));
+  background-color: rgb(var(--z-green) / 0.12);
+}
