@@ -230,9 +230,9 @@ export function buildMermaidTheme(mode: "light" | "dark"): MermaidThemeConfig {
 /* -------------------------------------------------------------------------- */
 
 /**
- * One entry per (source, theme mode). Keyed by the diagram text itself, so an
- * editor that re-renders on every keystroke pays for a diagram once and a
- * cursor moving in and out of a block costs nothing at all.
+ * One entry per (source, full theme identity). Keyed by the diagram text
+ * itself, so an editor that re-renders on every keystroke pays for a diagram
+ * once and a cursor moving in and out of a block costs nothing at all.
  */
 const svgCache = new Map<string, MermaidRenderResult>();
 const inFlight = new Map<string, Promise<MermaidRenderResult>>();
@@ -243,8 +243,8 @@ const SVG_CACHE_LIMIT = 60;
 
 export type MermaidRenderResult = { ok: true; svg: string } | { ok: false; error: string };
 
-function cacheKey(source: string, mode: "light" | "dark"): string {
-  return `${mode}\u0000${source}`;
+function cacheKey(source: string, mode: "light" | "dark", themeKey: string): string {
+  return `${mode}\u0000${themeKey}\u0000${source}`;
 }
 
 /** A finished render, or null when this diagram has not been drawn yet. Lets a
@@ -252,8 +252,9 @@ function cacheKey(source: string, mode: "light" | "dark"): string {
 export function peekMermaidSvg(
   source: string,
   mode: "light" | "dark",
+  themeKey: string = mode,
 ): MermaidRenderResult | null {
-  return svgCache.get(cacheKey(source, mode)) ?? null;
+  return svgCache.get(cacheKey(source, mode, themeKey)) ?? null;
 }
 
 /** Render to an SVG string, reusing an in-flight render of the same diagram.
@@ -261,9 +262,10 @@ export function peekMermaidSvg(
 export function renderMermaidSvg(
   source: string,
   mode: "light" | "dark",
+  themeKey: string = mode,
   idPrefix = "zen-mermaid-live",
 ): Promise<MermaidRenderResult> {
-  const key = cacheKey(source, mode);
+  const key = cacheKey(source, mode, themeKey);
   const cached = svgCache.get(key);
   if (cached) return Promise.resolve(cached);
   const running = inFlight.get(key);
@@ -300,11 +302,3 @@ export function renderMermaidSvg(
 }
 
 let renderSeq = 0;
-
-/** Drop every cached diagram. The theme decides the colours baked into the SVG,
- *  so a theme change has to invalidate them; the mode is part of the key, but a
- *  custom theme can move the `--z-*` variables under a mode that did not
- *  change. */
-export function clearMermaidSvgCache(): void {
-  svgCache.clear();
-}

@@ -1615,23 +1615,58 @@ function writeManualOrder(root: string, order: ManualNoteOrder): void {
 // Which vault root the in-memory manual order was loaded for; reloaded on switch.
 let manualOrderLoadedForRoot: string | null = null
 
+type InlineTaskMarker = 'open' | 'done' | 'forwarded' | 'cancelled' | 'in-progress'
+
+/** A checkbox line has exactly one state character. Mirror that exclusivity in
+ * the optimistic task object so grouping and styling cannot observe both the
+ * old and new state while the watcher catches up. `waiting` is an independent
+ * inline metadata token and intentionally survives marker changes. */
+function withInlineTaskMarker(task: VaultTask, marker: InlineTaskMarker): VaultTask {
+  return {
+    ...task,
+    checked: marker === 'done',
+    forwarded: marker === 'forwarded',
+    cancelled: marker === 'cancelled',
+    inProgress: marker === 'in-progress'
+  }
+}
+
+type FileTaskStatus = 'open' | 'done' | 'cancelled' | 'in-progress' | 'waiting'
+
+/** Whole-note tasks encode their one workflow state in frontmatter `status`.
+ * Keep all derived booleans and the Kanban field in sync in one operation. */
+function withFileTaskStatus(task: VaultTask, status: FileTaskStatus): VaultTask {
+  return {
+    ...task,
+    checked: status === 'done',
+    forwarded: false,
+    cancelled: status === 'cancelled',
+    inProgress: status === 'in-progress',
+    waiting: status === 'waiting',
+    status,
+    fields: { ...task.fields, status }
+  }
+}
+
 function applyTaskMutationsToTask(task: VaultTask, mutations: TaskMutation[]): VaultTask {
   let next = task
   for (const m of mutations) {
     switch (m.kind) {
       case 'set-checked':
         if (next.checked !== m.checked) {
-          next = { ...next, checked: m.checked }
-          // A file-task's completion lives in its `status`, so keep that (and the
-          // Kanban-grouping field) in sync optimistically too.
-          if (next.kind === 'file') {
-            const status = m.checked ? 'done' : 'open'
-            next = { ...next, status, fields: { ...next.fields, status } }
-          }
+          next =
+            next.kind === 'file'
+              ? withFileTaskStatus(next, m.checked ? 'done' : 'open')
+              : withInlineTaskMarker(next, m.checked ? 'done' : 'open')
         }
         break
       case 'set-waiting':
-        if (next.waiting !== m.waiting) next = { ...next, waiting: m.waiting }
+        if (next.waiting !== m.waiting) {
+          next =
+            next.kind === 'file'
+              ? withFileTaskStatus(next, m.waiting ? 'waiting' : 'open')
+              : { ...next, waiting: m.waiting }
+        }
         break
       case 'set-priority': {
         const priority = m.priority ?? undefined
@@ -4925,8 +4960,8 @@ export const useStore = create<Store>((set, get) => {
       vaultTasks: s.vaultTasks.map((t) =>
         t.sourcePath === path && t.taskIndex === task.taskIndex
           ? task.kind === 'file'
-            ? { ...t, checked: nextChecked, status: nextStatus, fields: { ...t.fields, status: nextStatus } }
-            : { ...t, checked: nextChecked }
+            ? withFileTaskStatus(t, nextStatus)
+            : withInlineTaskMarker(t, nextChecked ? 'done' : 'open')
           : t
       )
     }))
@@ -4959,8 +4994,8 @@ export const useStore = create<Store>((set, get) => {
       vaultTasks: s.vaultTasks.map((t) =>
         t.sourcePath === path && t.taskIndex === task.taskIndex
           ? task.kind === 'file'
-            ? { ...t, cancelled: nextCancelled, status: nextStatus, fields: { ...t.fields, status: nextStatus } }
-            : { ...t, cancelled: nextCancelled }
+            ? withFileTaskStatus(t, nextStatus)
+            : withInlineTaskMarker(t, nextCancelled ? 'cancelled' : 'open')
           : t
       )
     }))
@@ -4993,17 +5028,8 @@ export const useStore = create<Store>((set, get) => {
       vaultTasks: s.vaultTasks.map((t) =>
         t.sourcePath === path && t.taskIndex === task.taskIndex
           ? task.kind === 'file'
-            ? {
-                ...t,
-                inProgress: nextInProgress,
-                status: nextStatus,
-                fields: { ...t.fields, status: nextStatus }
-              }
-            : // Starting a task also clears done/cancelled: the line carries one
-              // state char, so the flip that wrote `/` overwrote whatever was
-              // there. Mirror that here or the row keeps a stale strike until
-              // the watcher echo lands.
-              { ...t, inProgress: nextInProgress, checked: false, cancelled: false }
+            ? withFileTaskStatus(t, nextStatus)
+            : withInlineTaskMarker(t, nextInProgress ? 'in-progress' : 'open')
           : t
       )
     }))

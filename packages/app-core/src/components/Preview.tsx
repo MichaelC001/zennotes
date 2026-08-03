@@ -11,7 +11,7 @@ import { expandEmbeds, hasNoteEmbeds } from "../lib/transclusion";
 import { todayIso } from "../lib/task-metadata-tokens";
 import { selectTypstPreambleFor } from "../lib/typst-preamble-select";
 import { useStore } from "../store";
-import { resolveAuto, THEMES } from "../lib/themes";
+import { useDiagramTheme } from "../lib/use-diagram-theme-mode";
 import {
   isSameFileHeadingLink,
   resolveWikilinkTarget,
@@ -171,30 +171,6 @@ async function renderMermaidBlocks(
   }
 }
 
-function usePreviewDiagramThemeMode(): "light" | "dark" {
-  const themeId = useStore((s) => s.themeId);
-  const themeFamily = useStore((s) => s.themeFamily);
-  const themeMode = useStore((s) => s.themeMode);
-  // Track the OS-level preference so `mode: 'auto'` themes still pick
-  // the right mermaid palette when the system toggles between light/dark.
-  const [prefersDark, setPrefersDark] = useState(() =>
-    typeof window !== "undefined"
-      ? window.matchMedia("(prefers-color-scheme: dark)").matches
-      : false,
-  );
-  useEffect(() => {
-    const mql = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (e: MediaQueryListEvent): void => setPrefersDark(e.matches);
-    mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
-  }, []);
-  return useMemo(() => {
-    const resolvedId =
-      themeMode === "auto" ? resolveAuto(themeFamily, prefersDark, themeId) : themeId;
-    return THEMES.find((t) => t.id === resolvedId)?.mode ?? "light";
-  }, [themeId, themeFamily, themeMode, prefersDark]);
-}
-
 export const Preview = memo(function Preview({
   markdown,
   notePath,
@@ -221,7 +197,7 @@ export const Preview = memo(function Preview({
   const customCodeLanguagesRevision = useStore((s) => s.customCodeLanguagesRevision);
   const refreshAssets = useStore((s) => s.refreshAssets);
   const deleteAssetAction = useStore((s) => s.deleteAsset);
-  const effectiveMode = usePreviewDiagramThemeMode();
+  const diagramTheme = useDiagramTheme();
   const selectNote = useStore((s) => s.selectNote);
   const openNoteInTab = useStore((s) => s.openNoteInTab);
   const setView = useStore((s) => s.setView);
@@ -715,8 +691,6 @@ export const Preview = memo(function Preview({
     const taskItems = Array.from(
       stage.querySelectorAll<HTMLLIElement>("li.task-list-item"),
     );
-    const taskIndexOf = new Map(taskItems.map((li, idx) => [li, idx]));
-
     const today = todayIso();
     taskItems.forEach((li, idx) => {
       const input = li.querySelector<HTMLInputElement>(
@@ -770,7 +744,7 @@ export const Preview = memo(function Preview({
 
     const applyRenderedDom = async (): Promise<void> => {
       try {
-        await renderMermaidBlocks(stage, effectiveMode);
+        await renderMermaidBlocks(stage, diagramTheme.mode);
       } catch {
         /* render errors are surfaced inline per block */
       }
@@ -781,7 +755,7 @@ export const Preview = memo(function Preview({
       // not found" and zero-size boards (#68). Mermaid renders to inline SVG, so
       // it is safe to render in the detached buffer above.
       root.replaceChildren(...Array.from(stage.childNodes));
-      await renderDiagrams(root, { themeKey: effectiveMode, expanded: false });
+      await renderDiagrams(root, { themeKey: diagramTheme.key, expanded: false });
       if (cancelled) return;
       // Typst math (a no-op when the KaTeX renderer is active, since it emits no
       // `.zen-typst-math` placeholders). Recolored to currentColor, so a theme
@@ -849,7 +823,8 @@ export const Preview = memo(function Preview({
     };
   }, [
     assetFilesKey,
-    effectiveMode,
+    diagramTheme.key,
+    diagramTheme.mode,
     databaseTargets,
     html,
     notePath,
@@ -1063,7 +1038,8 @@ export const Preview = memo(function Preview({
       {expandedDiagram && (
         <ExpandedDiagramModal
           diagram={expandedDiagram}
-          themeKey={effectiveMode}
+          diagramMode={diagramTheme.mode}
+          themeKey={diagramTheme.key}
           onOpenInTab={() => {
             const path = diagramTabPath(expandedDiagram.kind, expandedDiagram.source);
             setExpandedDiagram(null);
@@ -1078,12 +1054,14 @@ export const Preview = memo(function Preview({
 
 function ExpandedDiagramModal({
   diagram,
+  diagramMode,
   themeKey,
   onOpenInTab,
   onClose,
 }: {
   diagram: ExpandedDiagram;
-  themeKey: "light" | "dark";
+  diagramMode: "light" | "dark";
+  themeKey: string;
   onOpenInTab: () => void;
   onClose: () => void;
 }): JSX.Element {
@@ -1117,6 +1095,7 @@ function ExpandedDiagramModal({
     >
       <DiagramPanZoomFrame
         diagram={diagram}
+        diagramMode={diagramMode}
         themeKey={themeKey}
         variant="modal"
         title="Expanded diagram"
@@ -1135,7 +1114,7 @@ export function DiagramTabView({
 }: {
   diagram: DiagramTabPayload | null;
 }): JSX.Element {
-  const themeKey = usePreviewDiagramThemeMode();
+  const diagramTheme = useDiagramTheme();
 
   if (!diagram) {
     return (
@@ -1148,7 +1127,8 @@ export function DiagramTabView({
   return (
     <DiagramPanZoomFrame
       diagram={diagram}
-      themeKey={themeKey}
+      diagramMode={diagramTheme.mode}
+      themeKey={diagramTheme.key}
       variant="tab"
       title={diagramTitleFromKind(diagram.kind)}
     />
@@ -1157,6 +1137,7 @@ export function DiagramTabView({
 
 function DiagramPanZoomFrame({
   diagram,
+  diagramMode,
   themeKey,
   variant,
   title,
@@ -1166,7 +1147,8 @@ function DiagramPanZoomFrame({
   onClose,
 }: {
   diagram: ExpandedDiagram;
-  themeKey: "light" | "dark";
+  diagramMode: "light" | "dark";
+  themeKey: string;
   variant: "modal" | "tab";
   title: string;
   fullScreen?: boolean;
@@ -1265,7 +1247,7 @@ function DiagramPanZoomFrame({
 
     const render = async (): Promise<void> => {
       if (diagram.kind === "mermaid") {
-        await renderMermaidBlocks(host, themeKey, { expanded: true });
+        await renderMermaidBlocks(host, diagramMode, { expanded: true });
       } else {
         await renderDiagrams(host, { themeKey, expanded: true });
       }
@@ -1277,7 +1259,7 @@ function DiagramPanZoomFrame({
     return () => {
       cancelled = true;
     };
-  }, [centerDiagram, diagram, themeKey]);
+  }, [centerDiagram, diagram, diagramMode, themeKey]);
 
   const handleWheel = useCallback(
     (e: React.WheelEvent<HTMLDivElement>): void => {

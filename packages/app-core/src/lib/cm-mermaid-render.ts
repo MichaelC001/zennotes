@@ -10,9 +10,9 @@
  *
  *   1. The mermaid module is imported lazily and only when a fence exists, so a
  *      note without diagrams never pulls the heaviest chunk in the renderer.
- *   2. Rendered SVG is cached by (source, theme mode) in `mermaid-render`, so a
- *      keystroke elsewhere in the note repaints from the cache, and moving the
- *      cursor in and out of a block costs nothing.
+ *   2. Rendered SVG is cached by (source, full theme identity) in
+ *      `mermaid-render`, so a keystroke elsewhere in the note repaints from the
+ *      cache, and moving the cursor in and out of a block costs nothing.
  *
  * A diagram mid-edit is usually invalid, so a failed render keeps the LAST good
  * drawing of that block on screen rather than flashing an error at every
@@ -28,11 +28,16 @@ import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemir
 
 import { peekMermaidSvg, renderMermaidSvg } from './mermaid-render'
 
-/** Which palette the widgets draw in. Rides a facet so a theme switch
- *  reconfigures the live-preview compartment and every diagram is redrawn,
- *  rather than leaving a dark note holding light-coloured diagrams. */
-const diagramModeFacet = Facet.define<'light' | 'dark', 'light' | 'dark'>({
-  combine: (values) => (values.length ? values[values.length - 1] : 'light')
+interface DiagramThemeFacetValue {
+  mode: 'light' | 'dark'
+  key: string
+}
+
+/** Which palette the widgets draw in. The full identity matters because theme
+ *  variants, custom CSS, overrides, tweaks, and fonts can change while the
+ *  light/dark mode stays the same. */
+const diagramThemeFacet = Facet.define<DiagramThemeFacetValue, DiagramThemeFacetValue>({
+  combine: (values) => values[values.length - 1] ?? { mode: 'light', key: 'light' }
 })
 
 /** The info string that marks a fence as mermaid: the language token only, so
@@ -49,32 +54,28 @@ function selectionTouches(state: EditorState, from: number, to: number): boolean
   return false
 }
 
-/**
- * The last drawing of each block that rendered successfully, keyed by the
- * block's source. Keeps a diagram on screen while its text is being edited into
- * something momentarily invalid.
- */
-const lastGood = new Map<string, string>()
-const LAST_GOOD_LIMIT = 40
-
-function rememberGood(source: string, svg: string): void {
-  if (lastGood.size >= LAST_GOOD_LIMIT) {
-    const oldest = lastGood.keys().next().value
-    if (oldest !== undefined) lastGood.delete(oldest)
-  }
-  lastGood.set(source, svg)
+/** Mutable memory follows one fence through document transactions. It cannot
+ * be keyed by source: the whole point is to survive that source being edited
+ * into a temporarily invalid value. */
+interface MermaidBlockMemory {
+  lastGood?: { themeKey: string; svg: string }
 }
 
 class MermaidBlockWidget extends WidgetType {
   constructor(
     readonly source: string,
-    readonly mode: 'light' | 'dark'
+    readonly theme: DiagramThemeFacetValue,
+    readonly memory: MermaidBlockMemory
   ) {
     super()
   }
 
   eq(other: MermaidBlockWidget): boolean {
-    return other.source === this.source && other.mode === this.mode
+    return (
+      other.source === this.source &&
+      other.theme.key === this.theme.key &&
+      other.memory === this.memory
+    )
   }
 
   toDOM(): HTMLElement {
@@ -83,21 +84,22 @@ class MermaidBlockWidget extends WidgetType {
     el.setAttribute('role', 'img')
     el.setAttribute('aria-label', 'Mermaid diagram')
 
-    const cached = peekMermaidSvg(this.source, this.mode)
+    const cached = peekMermaidSvg(this.source, this.theme.mode, this.theme.key)
     if (cached?.ok) {
       el.innerHTML = cached.svg
-      rememberGood(this.source, cached.svg)
+      this.memory.lastGood = { themeKey: this.theme.key, svg: cached.svg }
       return el
     }
 
     // Nothing drawn yet: show the previous good diagram if this block has one,
     // otherwise leave the space empty rather than collapsing the line and
     // making the note jump as diagrams arrive.
-    const previous = lastGood.get(this.source)
+    const previous =
+      this.memory.lastGood?.themeKey === this.theme.key ? this.memory.lastGood.svg : undefined
     if (previous) el.innerHTML = previous
     else el.classList.add('cm-mermaid-pending')
 
-    void renderMermaidSvg(this.source, this.mode).then((result) => {
+    void renderMermaidSvg(this.source, this.theme.mode, this.theme.key).then((result) => {
       // The widget may have been replaced while mermaid was working (a
       // keystroke, a cursor move). Writing into a detached node is harmless and
       // the live widget renders from the cache, so no check is needed beyond
@@ -106,10 +108,10 @@ class MermaidBlockWidget extends WidgetType {
         el.innerHTML = result.svg
         el.classList.remove('cm-mermaid-pending', 'cm-mermaid-error')
         el.removeAttribute('title')
-        rememberGood(this.source, result.svg)
+        this.memory.lastGood = { themeKey: this.theme.key, svg: result.svg }
         return
       }
-      if (lastGood.has(this.source)) return // keep the last good drawing
+      if (this.memory.lastGood?.themeKey === this.theme.key) return
       el.classList.remove('cm-mermaid-pending')
       el.classList.add('cm-mermaid-error')
       el.textContent = `Mermaid error: ${result.error}`
@@ -135,12 +137,22 @@ interface MermaidRenderValue {
   /** Every mermaid fence, rendered or revealed, so vertical motion can step
    *  INTO one instead of sailing over a widget with no cursor positions in it. */
   blockLines: readonly MermaidBlockLineRange[]
+  /** Block position + stable memory, mapped through edits on the next rebuild. */
+  blocks: readonly { from: number; memory: MermaidBlockMemory }[]
 }
 
-function buildMermaidDecorations(state: EditorState): MermaidRenderValue {
-  const mode = state.facet(diagramModeFacet)
+function buildMermaidDecorations(
+  state: EditorState,
+  previousBlocks: MermaidRenderValue['blocks'] = [],
+  mapPreviousPosition: (position: number) => number = (position) => position
+): MermaidRenderValue {
+  const theme = state.facet(diagramThemeFacet)
   const builder = new RangeSetBuilder<Decoration>()
   const blockLines: MermaidBlockLineRange[] = []
+  const blocks: { from: number; memory: MermaidBlockMemory }[] = []
+  const previousMemory = new Map(
+    previousBlocks.map((block) => [mapPreviousPosition(block.from), block.memory])
+  )
   const tree = syntaxTree(state)
 
   tree.iterate({
@@ -152,6 +164,8 @@ function buildMermaidDecorations(state: EditorState): MermaidRenderValue {
       const openLine = state.doc.lineAt(from)
       const info = openLine.text.replace(/^\s*(?:`{3,}|~{3,})/, '')
       if (!isMermaidInfo(info)) return
+      const memory = previousMemory.get(openLine.from) ?? {}
+      blocks.push({ from: openLine.from, memory })
 
       const closeLine = state.doc.lineAt(to)
       // Recorded whether or not it is rendered right now: the navigation
@@ -172,12 +186,12 @@ function buildMermaidDecorations(state: EditorState): MermaidRenderValue {
       builder.add(
         openLine.from,
         closeLine.to,
-        Decoration.replace({ block: true, widget: new MermaidBlockWidget(body, mode) })
+        Decoration.replace({ block: true, widget: new MermaidBlockWidget(body, theme, memory) })
       )
     }
   })
 
-  return { decorations: builder.finish(), blockLines }
+  return { decorations: builder.finish(), blockLines, blocks }
 }
 
 const mermaidRenderField = StateField.define<MermaidRenderValue>({
@@ -190,9 +204,11 @@ const mermaidRenderField = StateField.define<MermaidRenderValue>({
       tr.docChanged ||
       tr.selection ||
       syntaxTree(tr.startState) !== syntaxTree(tr.state) ||
-      tr.startState.facet(diagramModeFacet) !== tr.state.facet(diagramModeFacet)
+      tr.startState.facet(diagramThemeFacet).key !== tr.state.facet(diagramThemeFacet).key
     ) {
-      return buildMermaidDecorations(tr.state)
+      return buildMermaidDecorations(tr.state, value.blocks, (position) =>
+        tr.changes.mapPos(position, -1)
+      )
     }
     return value
   },
@@ -212,6 +228,9 @@ export function mermaidBlockLineRanges(state: EditorState): readonly MermaidBloc
 }
 
 /** Live-preview mermaid rendering, drawn in the given palette. */
-export function mermaidRenderExtension(mode: 'light' | 'dark'): Extension {
-  return [diagramModeFacet.of(mode), mermaidRenderField]
+export function mermaidRenderExtension(
+  mode: 'light' | 'dark',
+  themeKey: string = mode
+): Extension {
+  return [diagramThemeFacet.of({ mode, key: themeKey }), mermaidRenderField]
 }

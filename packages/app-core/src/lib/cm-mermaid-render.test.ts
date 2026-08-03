@@ -2,21 +2,27 @@
 
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { forceParsing } from '@codemirror/language'
-import { EditorState, type EditorSelection } from '@codemirror/state'
+import { Compartment, EditorState, type EditorSelection, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mermaidBlockLineRanges, mermaidRenderExtension } from './cm-mermaid-render'
 
 // mermaid itself is never loaded here: the widget paints asynchronously and
 // these tests are about WHICH blocks become widgets and where their lines are,
 // which is decided before any rendering happens. Stubbing keeps the heaviest
 // chunk in the app out of the test run entirely.
-vi.mock('./mermaid-render', () => ({
-  peekMermaidSvg: () => null,
-  renderMermaidSvg: () => new Promise(() => {})
+const mermaidMocks = vi.hoisted(() => ({
+  peekMermaidSvg: vi.fn(),
+  renderMermaidSvg: vi.fn()
 }))
 
-function mount(doc: string, selection?: EditorSelection | { anchor: number }): EditorView {
+vi.mock('./mermaid-render', () => mermaidMocks)
+
+function mount(
+  doc: string,
+  selection?: EditorSelection | { anchor: number },
+  extension: Extension = mermaidRenderExtension('light', 'theme-a')
+): EditorView {
   const parent = document.createElement('div')
   document.body.append(parent)
   const view = new EditorView({
@@ -24,7 +30,7 @@ function mount(doc: string, selection?: EditorSelection | { anchor: number }): E
     state: EditorState.create({
       doc,
       selection: selection ?? { anchor: 0 },
-      extensions: [markdown({ base: markdownLanguage }), mermaidRenderExtension('light')]
+      extensions: [markdown({ base: markdownLanguage }), extension]
     })
   })
   forceParsing(view, doc.length, 5000)
@@ -37,6 +43,11 @@ function mount(doc: string, selection?: EditorSelection | { anchor: number }): E
 const DIAGRAM = 'start\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nend'
 
 describe('mermaidRenderExtension', () => {
+  beforeEach(() => {
+    mermaidMocks.peekMermaidSvg.mockReset().mockReturnValue(null)
+    mermaidMocks.renderMermaidSvg.mockReset().mockImplementation(() => new Promise(() => {}))
+  })
+
   it('draws a mermaid fence while the cursor is elsewhere', () => {
     const view = mount(DIAGRAM)
     expect(view.dom.querySelectorAll('.cm-mermaid-block').length).toBe(1)
@@ -65,6 +76,49 @@ describe('mermaidRenderExtension', () => {
   it('leaves an empty fence as source, since there is nothing to draw', () => {
     const view = mount('start\n\n```mermaid\n```\n\nend')
     expect(view.dom.querySelectorAll('.cm-mermaid-block').length).toBe(0)
+    view.destroy()
+  })
+
+  it('redraws when the theme identity changes without changing light/dark mode', async () => {
+    mermaidMocks.renderMermaidSvg.mockResolvedValue({ ok: true, svg: '<svg data-theme="a" />' })
+    const theme = new Compartment()
+    const view = mount(DIAGRAM, undefined, theme.of(mermaidRenderExtension('light', 'theme-a')))
+
+    await vi.waitFor(() => expect(mermaidMocks.renderMermaidSvg).toHaveBeenCalledTimes(1))
+    view.dispatch({
+      effects: theme.reconfigure(mermaidRenderExtension('light', 'theme-b'))
+    })
+
+    await vi.waitFor(() =>
+      expect(mermaidMocks.renderMermaidSvg).toHaveBeenCalledWith(
+        expect.stringContaining('flowchart LR'),
+        'light',
+        'theme-b'
+      )
+    )
+    view.destroy()
+  })
+
+  it('keeps the last good drawing for a block while its edited source is invalid', async () => {
+    mermaidMocks.renderMermaidSvg.mockImplementation((source: string) =>
+      Promise.resolve(
+        source.includes('INVALID')
+          ? { ok: false, error: 'parse failed' }
+          : { ok: true, svg: '<svg data-last-good="true" />' }
+      )
+    )
+    const view = mount(DIAGRAM)
+
+    await vi.waitFor(() =>
+      expect(view.dom.querySelector('[data-last-good="true"]')).not.toBeNull()
+    )
+    const from = view.state.doc.toString().indexOf('flowchart LR')
+    view.dispatch({ changes: { from, to: from + 'flowchart LR'.length, insert: 'INVALID' } })
+
+    await vi.waitFor(() => {
+      expect(view.dom.querySelector('[data-last-good="true"]')).not.toBeNull()
+      expect(view.dom.querySelector('.cm-mermaid-error')).toBeNull()
+    })
     view.destroy()
   })
 
