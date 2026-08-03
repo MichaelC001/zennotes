@@ -41,6 +41,7 @@ import {
   composeTaskFile,
   setTaskFileStatus,
   setTaskFileCancelled,
+  setTaskFileInProgress,
   taskFilePriorityValue,
   updateFrontmatterFields
 } from '@shared/frontmatter'
@@ -67,7 +68,7 @@ import { invalidateExcalidrawPreview } from './lib/excalidraw-preview'
 import {
   FENCE_RE,
   TASK_LINE_RE,
-  extractUncheckedTaskBlocks,
+  extractOpenTaskBlocks,
   insertTasksUnderTasksHeading,
   moveTaskLine,
   removeTaskAtIndex,
@@ -76,6 +77,7 @@ import {
   setTaskDueAtIndex,
   setTaskForwardedAtIndex,
   setTaskCancelledAtIndex,
+  setTaskInProgressAtIndex,
   setTaskPriorityAtIndex,
   setTaskFieldAtIndex,
   setTaskTextAtIndex,
@@ -2808,6 +2810,10 @@ interface Store {
   /** Toggle a task's cancelled state (`[-]` inline, `status: cancelled` for a
    *  file-task). Cancelled = intentionally abandoned, distinct from done. (#450) */
   cancelTaskFromList: (task: VaultTask) => Promise<void>
+  /** Toggle a task's in-progress state (`[/]` inline, `status: in-progress` for
+   *  a file-task). Still open work: it keeps its place in Today rather than
+   *  moving to a group of its own. (#512) */
+  startTaskFromList: (task: VaultTask) => Promise<void>
   /** Apply one or more structured mutations to the task line on disk
    *  and reflect them locally. Used by the Kanban DnD pipeline to
    *  flip checked / waiting / priority without forcing the user to
@@ -4850,8 +4856,10 @@ export const useStore = create<Store>((set, get) => {
       offset += lines[i].length + 1
     }
     // Nudge cursor past indentation + list marker so it lands on the content.
+    // All five states, or opening a `[/]` task from the list would drop the
+    // cursor at column 0 instead of on the text. (#512)
     const lineText = lines[taskLineNumber] ?? ''
-    const taskBracketMatch = lineText.match(/^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\]\s*/)
+    const taskBracketMatch = lineText.match(/^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX>/-]\]\s*/)
     const insideOffset = taskBracketMatch ? taskBracketMatch[0].length : 0
     const anchor = offset + insideOffset
 
@@ -4953,6 +4961,49 @@ export const useStore = create<Store>((set, get) => {
           ? task.kind === 'file'
             ? { ...t, cancelled: nextCancelled, status: nextStatus, fields: { ...t.fields, status: nextStatus } }
             : { ...t, cancelled: nextCancelled }
+          : t
+      )
+    }))
+  },
+
+  startTaskFromList: async (task) => {
+    const path = task.sourcePath
+    const openBuffer = get().noteContents[path]
+    const body = openBuffer?.body ?? (await window.zen.readNote(path)).body
+    const nextInProgress = !task.inProgress
+    const nextBody =
+      task.kind === 'file'
+        ? setTaskFileInProgress(body, nextInProgress)
+        : setTaskInProgressAtIndex(body, task.taskIndex, nextInProgress)
+    if (nextBody === body) return
+
+    if (openBuffer) {
+      get().updateNoteBody(path, nextBody)
+    } else {
+      try {
+        await window.zen.writeNote(path, nextBody)
+      } catch (err) {
+        console.error('writeNote (start) failed', err)
+        return
+      }
+    }
+
+    const nextStatus = nextInProgress ? 'in-progress' : 'open'
+    set((s) => ({
+      vaultTasks: s.vaultTasks.map((t) =>
+        t.sourcePath === path && t.taskIndex === task.taskIndex
+          ? task.kind === 'file'
+            ? {
+                ...t,
+                inProgress: nextInProgress,
+                status: nextStatus,
+                fields: { ...t.fields, status: nextStatus }
+              }
+            : // Starting a task also clears done/cancelled: the line carries one
+              // state char, so the flip that wrote `/` overwrote whatever was
+              // there. Mirror that here or the row keeps a stale strike until
+              // the watcher echo lands.
+              { ...t, inProgress: nextInProgress, checked: false, cancelled: false }
           : t
       )
     }))
@@ -7044,7 +7095,7 @@ export const useStore = create<Store>((set, get) => {
         console.error('rollover readNote failed', note.path, err)
         continue
       }
-      const { moved, rest } = extractUncheckedTaskBlocks(body)
+      const { moved, rest } = extractOpenTaskBlocks(body)
       if (moved.length === 0) continue
       movedLines.push(...moved)
       if (buffer) {

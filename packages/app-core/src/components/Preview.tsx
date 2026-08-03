@@ -705,57 +705,68 @@ export const Preview = memo(function Preview({
     enhancePreviewHeadingFolds(stage);
     enhanceCodeBlockCopy(stage, { notePath });
 
-    stage
-      .querySelectorAll<HTMLInputElement>('li.task-list-item input[type="checkbox"]')
-      .forEach((input, idx) => {
+    // The task index a click writes back with must count the way the markdown
+    // parser counts: EVERY task line, including the states with no checkbox of
+    // their own (`[/]`, `[-]`, `[>]`). Numbering the checkboxes alone made the
+    // index drift by one for each such line above them, so in a note that
+    // opened with a cancelled task, clicking the first real checkbox toggled
+    // the cancelled line instead. Task items are in document order here, which
+    // is line order. (#512)
+    const taskItems = Array.from(
+      stage.querySelectorAll<HTMLLIElement>("li.task-list-item"),
+    );
+    const taskIndexOf = new Map(taskItems.map((li, idx) => [li, idx]));
+
+    const today = todayIso();
+    taskItems.forEach((li, idx) => {
+      const input = li.querySelector<HTMLInputElement>(
+        ':scope > input[type="checkbox"], :scope > p > input[type="checkbox"]',
+      );
+      if (input) {
         input.disabled = false;
         input.dataset.taskIndex = String(idx);
         input.setAttribute("role", "checkbox");
         input.classList.add("cursor-pointer");
-        // Tag the item with its OWN checked state and wrap its inline text in a
-        // span, so the completed-task styling (strike/gray) targets just this
-        // line and never bleeds onto nested sub-tasks. Loose items keep their
-        // <p>, which the CSS targets directly; only bare-text (tight) items get
-        // the wrapper.
-        const li = input.closest<HTMLLIElement>("li.task-list-item");
-        if (li) {
-          li.classList.toggle("task-self-done", input.checked);
-          // Due chips are rendered date-neutral (the HTML is cached and outlives
-          // "today"), so the overdue tint is decided here, at attach time, the
-          // same rule the editor uses: past due and the task still open. (#479)
-          const today = todayIso();
-          li.querySelectorAll<HTMLElement>(":scope .zen-task-due[data-due]").forEach(
-            (chip) => {
-              const due = chip.dataset.due ?? "";
-              chip.classList.toggle(
-                "zen-task-due-overdue",
-                !input.checked && due !== "" && due < today,
-              );
-            },
-          );
-          if (!li.querySelector(":scope > .task-item-body")) {
-            const own = Array.from(li.childNodes).filter((node) => {
-              if (node === input) return false;
-              if (node.nodeType === Node.ELEMENT_NODE) {
-                const tag = (node as Element).tagName;
-                if (tag === "UL" || tag === "OL" || tag === "P") return false;
-              }
-              return true;
-            });
-            const hasText = own.some(
-              (node) =>
-                node.nodeType !== Node.TEXT_NODE ||
-                (node.textContent ?? "").trim() !== "",
-            );
-            if (hasText && own.length > 0) {
-              const body = document.createElement("span");
-              body.className = "task-item-body";
-              li.insertBefore(body, own[0]);
-              for (const node of own) body.appendChild(node);
-            }
-          }
-        }
+        li.classList.toggle("task-self-done", input.checked);
+      }
+      // An item is still open unless its own checkbox is checked; the `[/]` and
+      // `[>]` states have no checkbox and are open by definition, `[-]` is not.
+      const closed = input?.checked === true || li.classList.contains("zen-task-cancelled");
+      // Due chips are rendered date-neutral (the HTML is cached and outlives
+      // "today"), so the overdue tint is decided here, at attach time, the
+      // same rule the editor uses: past due and the task still open. (#479)
+      li.querySelectorAll<HTMLElement>(":scope .zen-task-due[data-due]").forEach((chip) => {
+        const due = chip.dataset.due ?? "";
+        chip.classList.toggle("zen-task-due-overdue", !closed && due !== "" && due < today);
       });
+      // Wrap the item's OWN inline text in a span, so state styling (strike/gray
+      // for done and cancelled) targets just this line and never bleeds onto
+      // nested sub-tasks. Loose items keep their <p>, which the CSS targets
+      // directly; only bare-text (tight) items get the wrapper. The state marker
+      // span stays outside it: it sits in the gutter and must not be struck
+      // along with the text. (#512)
+      if (!li.querySelector(":scope > .task-item-body")) {
+        const own = Array.from(li.childNodes).filter((node) => {
+          if (node === input) return false;
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const el = node as Element;
+            if (el.tagName === "UL" || el.tagName === "OL" || el.tagName === "P") return false;
+            if (el.classList.contains("zen-task-state")) return false;
+          }
+          return true;
+        });
+        const hasText = own.some(
+          (node) =>
+            node.nodeType !== Node.TEXT_NODE || (node.textContent ?? "").trim() !== "",
+        );
+        if (hasText && own.length > 0) {
+          const body = document.createElement("span");
+          body.className = "task-item-body";
+          li.insertBefore(body, own[0]);
+          for (const node of own) body.appendChild(node);
+        }
+      }
+    });
 
     const applyRenderedDom = async (): Promise<void> => {
       try {

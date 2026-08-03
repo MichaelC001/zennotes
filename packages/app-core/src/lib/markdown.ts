@@ -281,11 +281,83 @@ function remarkHashtags() {
 }
 
 /**
+ * The task states markdown itself does not know. GFM understands `[ ]` and
+ * `[x]` only, so ZenNotes' other three states arrive here as a plain list item
+ * whose text happens to start with `[/]`, `[-]` or `[>]` — which is exactly how
+ * they used to render: as literal characters, in the preview, in HTML and PDF
+ * export, and in a note shared with someone through the public viewer, while
+ * the editor drew a proper marker for the same line. (#316, #450, #512)
+ */
+const NON_GFM_TASK_STATES: Record<string, { state: string; label: string }> = {
+  '/': { state: 'in-progress', label: 'In progress' },
+  '-': { state: 'cancelled', label: 'Cancelled' },
+  '>': { state: 'forwarded', label: 'Forwarded to another note' }
+}
+// The marker must be followed by a space (or end the item), so `[-]this` and a
+// stray `[>]` mid-sentence are left alone.
+const NON_GFM_TASK_RE = /^\[([/>-])\](?:[ \t]+|$)/
+
+/**
+ * Remark plugin: give `- [/]`, `- [-]` and `- [>]` items the same shape as a
+ * GFM task item — the `task-list-item` class (so they line up in the list
+ * gutter with real checkboxes) plus a state marker span the CSS draws, in
+ * place of the literal `[/]` text.
+ *
+ * The state is also recorded on the node as `zenTaskState`, which is what
+ * `remarkTaskMetadata` keys off to chip `due:`/`!high` on these lines too, and
+ * what makes them countable as tasks when the preview maps a clicked checkbox
+ * back to its line.
+ */
+function remarkTaskStates() {
+  return (tree: MdRoot): void => {
+    visit(tree, 'listItem', (node) => {
+      const item = node as unknown as AnyParent & {
+        checked?: boolean | null
+        data?: Record<string, unknown>
+      }
+      // A real GFM task already renders a checkbox; leave it alone.
+      if (item.checked !== null && item.checked !== undefined) return
+      const para = item.children[0] as (AnyNode & { children?: AnyNode[] }) | undefined
+      if (!para || para.type !== 'paragraph' || !Array.isArray(para.children)) return
+      const first = para.children[0] as (AnyNode & { value?: string }) | undefined
+      if (!first || first.type !== 'text' || typeof first.value !== 'string') return
+      const match = first.value.match(NON_GFM_TASK_RE)
+      if (!match) return
+      const { state, label } = NON_GFM_TASK_STATES[match[1]]
+
+      first.value = first.value.slice(match[0].length)
+      para.children.unshift({
+        type: 'emphasis',
+        data: {
+          hName: 'span',
+          hProperties: {
+            className: ['zen-task-state', `zen-task-state-${state}`],
+            title: label
+          }
+        },
+        children: []
+      } as AnyNode)
+
+      const data = (item.data ??= {})
+      data.zenTaskState = state
+      const hProperties = ((data.hProperties ??= {}) as Record<string, unknown>)
+      const existing = hProperties.className
+      hProperties.className = [
+        ...(Array.isArray(existing) ? (existing as string[]) : []),
+        'task-list-item',
+        `zen-task-${state}`
+      ]
+    })
+  }
+}
+
+/**
  * Remark plugin: task metadata (`!high`, `due:2026-01-31`, `@waiting`) inside a
  * task list item becomes chips, matching what the editor shows for the same
- * line (#454, #479). Only GFM task items are scanned — `listItem.checked` is
- * non-null exactly for those — and only their own content: nested lists are
- * skipped here because each nested item is visited in its own right.
+ * line (#454, #479). Every task item is scanned: the GFM ones (`listItem.checked`
+ * is non-null exactly for those) plus the states `remarkTaskStates` marked. Only
+ * their own content, though — nested lists are skipped here because each nested
+ * item is visited in its own right.
  *
  * Inline code is a separate mdast node, so `` `!high` `` is never touched.
  * The due chip carries `data-due` rather than an overdue class: whether a date
@@ -345,8 +417,12 @@ function remarkTaskMetadata() {
 
   return (tree: MdRoot): void => {
     visit(tree, 'listItem', (node) => {
-      const item = node as unknown as AnyParent & { checked?: boolean | null }
-      if (item.checked === null || item.checked === undefined) return
+      const item = node as unknown as AnyParent & {
+        checked?: boolean | null
+        data?: { zenTaskState?: string }
+      }
+      const isTask = item.checked != null || item.data?.zenTaskState != null
+      if (!isTask) return
       walk(item)
     })
   }
@@ -721,6 +797,9 @@ function createProcessor(mathRenderer: 'katex' | 'typst') {
     mathRenderer === 'typst' ? base.use(remarkTypstMathPlaceholders) : base
 
   const rehyped = withTypst
+    // Before the wikilink/hashtag splitters, so the state marker is still the
+    // head of one unsplit text node when it is matched.
+    .use(remarkTaskStates)
     .use(remarkWikilinks)
     .use(remarkHashtags)
     .use(remarkTaskMetadata)

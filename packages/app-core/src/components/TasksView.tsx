@@ -9,6 +9,8 @@ import { TasksCalendar } from './TasksCalendar'
 import { TasksKanban } from './TasksKanban'
 import { CalendarIcon, CheckSquareIcon, KanbanIcon, ListIcon } from './icons'
 import { advanceSequence, getKeymapBinding, matchesSequenceToken } from '../lib/keymaps'
+import { ContextMenu, type ContextMenuItem } from './ContextMenu'
+import { buildTaskMenuItems } from '../lib/task-context-menu'
 import { isImeComposing } from '../lib/ime'
 import { isAppOverlayOpen } from '../lib/overlay-open'
 
@@ -51,6 +53,7 @@ export function TasksView(): JSX.Element {
   const openTaskAt = useStore((s) => s.openTaskAt)
   const toggleTaskFromList = useStore((s) => s.toggleTaskFromList)
   const cancelTaskFromList = useStore((s) => s.cancelTaskFromList)
+  const startTaskFromList = useStore((s) => s.startTaskFromList)
   const applyTaskMutation = useStore((s) => s.applyTaskMutation)
   const moveTaskToDate = useStore((s) => s.moveTaskToDate)
   const addTaskForDate = useStore((s) => s.addTaskForDate)
@@ -107,6 +110,7 @@ export function TasksView(): JSX.Element {
   // of ex commands.
   const [exOpen, setExOpen] = useState(false)
   const [exValue, setExValue] = useState('')
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null)
 
   // "Today" is computed once per render from the clock — stable enough for a
   // single view session. If the user leaves the view past midnight and comes
@@ -148,6 +152,32 @@ export function TasksView(): JSX.Element {
     currentRowIdx >= 0 && render.rows[currentRowIdx]?.kind === 'task'
       ? render.rows[currentRowIdx].task
       : undefined
+
+  // The hint chip on the cursor row must name a key that actually works here.
+  // `Space` reaches this view only when it is not the Vim leader, and it is the
+  // leader by default, so Space opens leader hints and the row's promise of
+  // "Space check" never fires. Name the toggle binding instead (`x`), and with
+  // Vim mode off name nothing: single-key list shortcuts are disabled there, so
+  // only Enter/arrows remain.
+  const toggleKeyLabel = useMemo(() => {
+    if (!vimMode) return null
+    const leader = getKeymapBinding(keymapOverrides, 'vim.leaderPrefix')
+    const toggle = getKeymapBinding(keymapOverrides, 'nav.toggleTask')
+    return leader.trim().toLowerCase() === 'space' ? toggle : 'Space'
+  }, [vimMode, keymapOverrides])
+
+  const openTaskMenu = useCallback(
+    (e: React.MouseEvent, task: VaultTask): void => {
+      e.preventDefault()
+      e.stopPropagation()
+      setMenu({
+        x: e.clientX,
+        y: e.clientY,
+        items: buildTaskMenuItems(task, { today, showKeyHints: vimMode })
+      })
+    },
+    [today, vimMode]
+  )
 
   // On first mount, pull fresh if we have nothing yet.
   useEffect(() => {
@@ -504,6 +534,13 @@ export function TasksView(): JSX.Element {
         void cancelTaskFromList(currentTask)
         return
       }
+      // Start / un-start the selected task (#512). Vim-gated single key. The
+      // task stays in Today, so the row keeps its place and the cursor with it.
+      if (vimMode && key === 'i' && currentTask) {
+        consume()
+        void startTaskFromList(currentTask)
+        return
+      }
     }
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
@@ -520,6 +557,7 @@ export function TasksView(): JSX.Element {
     openTaskAt,
     lingerToggle,
     cancelTaskFromList,
+    startTaskFromList,
     closeTasksView,
     setFilter,
     viewMode,
@@ -658,6 +696,8 @@ export function TasksView(): JSX.Element {
                   if (ti >= 0) setCursorIndex(ti)
                 }}
                 onReorder={reorderTaskByDrag}
+                onContextMenu={openTaskMenu}
+                toggleKeyLabel={toggleKeyLabel}
               />
             )
           })}
@@ -724,11 +764,20 @@ export function TasksView(): JSX.Element {
       ) : (
         <div className="border-t border-paper-300/45 px-4 py-1.5 text-xs text-current/40">
           {viewMode === 'list'
-            ? 'j/k move · J/K reorder · Enter/o open · Space/x toggle · c cancel · / filter · :q close'
+            ? 'j/k move · J/K reorder · Enter/o open · x toggle · i start · c cancel · right-click actions · :q close'
             : viewMode === 'calendar'
-              ? 'h/j/k/l day · [ ] month · gt today · Tab pick · < > reschedule · drag to move · Enter open · :q'
-              : 'h/l column · j/k card · Space toggle · Enter open · 1/2/3 view · : command · :q close'}
+              ? 'h/j/k/l day · [ ] month · Tab pick · x toggle · i start · c cancel · drag to move · right-click actions · :q'
+              : 'h/l column · j/k card · x toggle · i start · c cancel · Enter open · right-click actions · :q close'}
         </div>
+      )}
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menu.items}
+          onClose={() => setMenu(null)}
+        />
       )}
     </div>
   )

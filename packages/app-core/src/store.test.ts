@@ -21,6 +21,7 @@ function makeTask(content: string, taskIndex = 0): VaultTask {
     checked: false,
     forwarded: false,
     cancelled: false,
+    inProgress: false,
     waiting: false,
     tags: []
   }

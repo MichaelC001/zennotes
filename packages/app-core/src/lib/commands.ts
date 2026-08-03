@@ -840,6 +840,26 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       }
     },
     {
+      id: 'task.start',
+      title: 'Mark Task In Progress',
+      category: 'Editor',
+      keywords: 'start begin task in progress doing wip partial half started',
+      when: () => {
+        const view = getState().editorViewRef
+        return !!view && !!getState().activeNote && !!taskAtEditorCursor(view)
+      },
+      run: async () => {
+        const view = getState().editorViewRef
+        if (!view) return
+        const task = taskAtEditorCursor(view)
+        if (!task) {
+          window.alert('Put the cursor on a task line to mark it in progress.')
+          return
+        }
+        await getState().startTaskFromList(task)
+      }
+    },
+    {
       id: 'task.cancel',
       title: 'Cancel Task',
       category: 'Editor',

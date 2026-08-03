@@ -280,6 +280,16 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
       'Cancelling marks a task as intentionally abandoned — distinct from done (finished) or forwarded (moved). Write `- [-]` directly, run “Cancel Task” from the command palette with the cursor on a task, or press `c` on a task in the Tasks list (press `c` again to un-cancel). A cancelled task renders with a muted `✕` and struck-through text, and collects under its own “Cancelled” group in the Tasks list, kept out of Today, Done, and the Kanban board. A whole-note task file cancels the same way, writing `status: cancelled` to its frontmatter.'
   },
   {
+    title: 'Right-click a task for actions',
+    body:
+      'Every task surface has the same right-click menu: the Tasks list, the Kanban board, the Tasks calendar, and the calendar side panel. It carries Open note, Mark done, Mark in progress, Cancel, @waiting, Forward to note…, due-date presets (today / tomorrow / next week / clear), priority, and Delete, with the keyboard equivalent shown beside each one so the menu doubles as a reminder of the shortcut. Right-clicking also moves the cursor to that task, so the menu and the keyboard always act on the same row. The menu takes typing as a filter: right-click, type “prio”, and only the priority entries stay. Editing a task inline is offered on the calendar surfaces, which have an edit field; elsewhere “Open note” takes you to the line.'
+  },
+  {
+    title: 'Mark a task in progress',
+    body:
+      'A task you have started but not finished can say so: `- [/]`. Write it directly, run “Mark Task In Progress” from the command palette with the cursor on a task, or press `i` on a task in the Tasks list (press `i` again to set it back to open). It renders as a half-filled box in the editor and the reading view. Unlike forwarded or cancelled, an in-progress task is still live work: it keeps its place in Today, stays on the calendar and the Kanban board, and rolls forward with your unfinished tasks when you roll over a daily note, `/` and all. A whole-note task file uses `status: in-progress` in its frontmatter (`doing`, `started` and `wip` are read the same way).'
+  },
+  {
     title: 'Style completed tasks',
     body:
       'By default, checking a task (`- [x]`) just fills its checkbox. Settings → Editor → Completed task style can also dim the text, strike it through, or both, so finished items visually recede in the editor and reading view while the checkbox stays checked. The command palette has direct entries (“Completed Tasks: Strikethrough”, “Gray”, “Strikethrough + Gray”, “No Style”). Nested sub-tasks keep their own state, so a completed parent never strikes an unchecked child.'
@@ -538,6 +548,8 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'Enter / o', action: 'Open current result', detail: 'Open the selected task source note, tagged note, or trashed note.' },
       { keys: 'x', action: 'Toggle task', detail: 'Tasks view only: check or uncheck the selected task. A checked task lingers in place for a couple of seconds before it drops into Done, so you can toggle it again to undo. Space also toggles unless Space is your Vim leader key, in which case it starts a leader sequence.' },
       { keys: '>', action: 'Forward task', detail: 'Tasks list only: forward the selected task to another note. Opens a note picker; the original becomes a forwarded record (`[>]`) linking to the target, and a fresh copy is added there, backlinked home. Forwarded tasks live under a “Forwarded” group.' },
+      { keys: 'i', action: 'Mark task in progress', detail: 'Tasks list only: mark the selected task as started (`- [/]`), or set it back to open. In-progress tasks stay in Today and on the calendar, so the row keeps its place.' },
+      { keys: 'c', action: 'Cancel task', detail: 'Tasks list only: mark the selected task as intentionally abandoned (`- [-]`), or un-cancel it. Cancelled tasks live under a “Cancelled” group, out of Today and Done.' },
       { keys: 'r', action: 'Restore trashed note', detail: 'Trash view only: restore the selected trashed note.' },
       { keys: 'x / d', action: 'Delete forever', detail: 'Trash view only: permanently delete the selected trashed note after confirmation.' },
       { keys: '/', action: 'Filter the view', detail: 'Focus the local filter box for tasks, tag matches, or trashed notes.' },
