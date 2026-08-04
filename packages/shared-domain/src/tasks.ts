@@ -415,6 +415,18 @@ function toIsoDate(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
+/**
+ * Tasks the live Tasks surfaces show. Archived notes keep their tasks in the
+ * markdown, but by default those tasks retire from the list, boards, and
+ * calendars together with the note; `showArchived` (Settings, mirrored by the
+ * `show_archived_tasks` config key) brings them back. Trash never appears,
+ * which the scanners on every surface already guarantee. (#540)
+ */
+export function filterTasksForDisplay(tasks: VaultTask[], showArchived: boolean): VaultTask[] {
+  if (showArchived) return tasks
+  return tasks.filter((task) => task.noteFolder !== 'archive')
+}
+
 /** Group using a "today" anchor — caller supplies it so tests are stable and
  *  the user's timezone is respected. Waiting overrides everything except Done.
  *  Tasks without a due date land in Today. */

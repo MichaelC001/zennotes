@@ -188,7 +188,7 @@ const FOLDER_LABEL: Record<NoteFolder, string> = {
   trash: 'Trash'
 }
 
-function folderColumns(tasks: VaultTask[]): Column[] {
+function folderColumns(tasks: VaultTask[], showArchived: boolean): Column[] {
   const map = new Map<NoteFolder, VaultTask[]>()
   for (const task of tasks) {
     if (task.checked) continue
@@ -196,7 +196,10 @@ function folderColumns(tasks: VaultTask[]): Column[] {
     if (list) list.push(task)
     else map.set(task.noteFolder, [task])
   }
-  return FOLDER_ORDER.map((folder) => ({
+  // With archived tasks hidden (#540) the Archive column would only ever be
+  // empty, so it leaves the board instead of standing as a hollow promise.
+  const order = showArchived ? FOLDER_ORDER : FOLDER_ORDER.filter((f) => f !== 'archive')
+  return order.map((folder) => ({
     id: folder,
     label: FOLDER_LABEL[folder],
     tasks: map.get(folder) ?? []
@@ -276,10 +279,11 @@ function buildColumns(
   groupBy: KanbanGroupBy,
   tasks: VaultTask[],
   today: Date,
-  statuses: string[]
+  statuses: string[],
+  showArchived: boolean
 ): Column[] {
   if (groupBy === 'priority') return priorityColumns(tasks)
-  if (groupBy === 'folder') return folderColumns(tasks)
+  if (groupBy === 'folder') return folderColumns(tasks, showArchived)
   const fieldKey = fieldKeyOf(groupBy)
   if (fieldKey) {
     // The status field keeps its friendly `kanban_statuses` order; other fields
@@ -477,6 +481,7 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
   const setKanbanColumnOrder = useStore((s) => s.setKanbanColumnOrder)
   const setKanbanCardOrder = useStore((s) => s.setKanbanCardOrder)
   const kanbanStatuses = useStore((s) => s.kanbanStatuses)
+  const showArchivedTasks = useStore((s) => s.showArchivedTasks)
   const applyTaskMutation = useStore((s) => s.applyTaskMutation)
   const startTaskFromList = useStore((s) => s.startTaskFromList)
   const cancelTaskFromList = useStore((s) => s.cancelTaskFromList)
@@ -566,7 +571,7 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
       const orderedColumns = applyColumnOrder(
         groupBy,
         arrangeColumns(
-          buildColumns(groupBy, displayTasks, today, kanbanStatuses),
+          buildColumns(groupBy, displayTasks, today, kanbanStatuses, showArchivedTasks),
           kanbanColumnOrder[groupBy] ?? []
         ),
         columnOrderRef.current
@@ -583,6 +588,7 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
       kanbanColumnOrder,
       kanbanColumnTitles,
       kanbanStatuses,
+      showArchivedTasks,
       today
     ]
   )

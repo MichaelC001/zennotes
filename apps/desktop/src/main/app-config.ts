@@ -325,6 +325,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     comment: 'show ISO week numbers in the calendar'
   },
   tasksViewMode: { section: 'view', tomlKey: 'tasks_view_mode', comment: 'list | calendar | kanban' },
+  showArchivedTasks: {
+    section: 'view',
+    tomlKey: 'show_archived_tasks',
+    comment: 'keep tasks from archived notes in the Tasks views'
+  },
   kanbanGroupBy: {
     section: 'view',
     tomlKey: 'kanban_group_by',

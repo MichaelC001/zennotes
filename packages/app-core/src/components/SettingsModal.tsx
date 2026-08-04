@@ -450,6 +450,8 @@ export function SettingsModal(): JSX.Element {
   );
   const completedTaskStyle = useStore((s) => s.completedTaskStyle);
   const setCompletedTaskStyle = useStore((s) => s.setCompletedTaskStyle);
+  const showArchivedTasks = useStore((s) => s.showArchivedTasks);
+  const setShowArchivedTasks = useStore((s) => s.setShowArchivedTasks);
   const mathRenderer = useStore((s) => s.mathRenderer);
   const typstTagPreambles = useStore((s) => s.typstTagPreambles);
   const setTypstTagPreambles = useStore((s) => s.setTypstTagPreambles);
@@ -2662,6 +2664,21 @@ export function SettingsModal(): JSX.Element {
             "workflow",
           ],
         },
+        {
+          id: "show-archived-tasks",
+          title: "Show tasks from archived notes",
+          description:
+            "Keep archived notes' tasks in the Tasks list, boards, and calendars instead of retiring them with the note.",
+          keywords: [
+            "archive",
+            "archived",
+            "retire",
+            "hide",
+            "done",
+            "history",
+            "old",
+          ],
+        },
       ],
       content: (
         <div className="space-y-6">
@@ -2670,6 +2687,18 @@ export function SettingsModal(): JSX.Element {
             description="Set up the columns for the Tasks Kanban Custom status board. Other @field boards (sprint, area, …) appear automatically as you tag tasks — no setup needed."
           >
             <KanbanStatusesRow settingId="kanban-statuses" />
+          </Section>
+          <Section
+            title="Archived notes"
+            description="What happens to a note's tasks when the note moves to the Archive."
+          >
+            <ToggleRow
+              label="Show tasks from archived notes"
+              description="Keep archived notes' tasks in the Tasks list, boards, and calendars. Off by default: archiving a note retires its tasks with it (the markdown is untouched, and un-archiving brings them back). Archiving a note that still has open tasks always asks first."
+              value={showArchivedTasks}
+              settingId="show-archived-tasks"
+              onChange={setShowArchivedTasks}
+            />
           </Section>
           <button
             type="button"

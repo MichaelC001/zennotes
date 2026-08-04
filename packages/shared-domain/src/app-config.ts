@@ -130,6 +130,7 @@ export const PORTABLE_PREF_KEYS = [
   'calendarWeekStart',
   'calendarShowWeekNumbers',
   'tasksViewMode',
+  'showArchivedTasks',
   'kanbanGroupBy',
   'kanbanColumnTitles',
   'kanbanStatuses'
@@ -237,6 +238,7 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   calendarWeekStart: 'monday',
   calendarShowWeekNumbers: true,
   tasksViewMode: 'list',
+  showArchivedTasks: false,
   kanbanGroupBy: 'status',
   kanbanColumnTitles: {},
   kanbanStatuses: []

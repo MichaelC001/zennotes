@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isTasksViewActive, useStore, type TasksViewMode } from '../store'
-import { inferDailyTaskDueDates, type VaultTask } from '@shared/tasks'
+import { filterTasksForDisplay, inferDailyTaskDueDates, type VaultTask } from '@shared/tasks'
 import { buildDailyNoteDateByPath } from '../lib/vault-layout'
 import { computeTasksRender, isOverdue } from '../lib/tasks-filter'
 import { forwardTaskWithPicker } from '../lib/forward-task'
@@ -69,7 +69,11 @@ export function TasksView(): JSX.Element {
     () => buildDailyNoteDateByPath(notes, vaultSettings),
     [notes, vaultSettings]
   )
-  const tasks = useMemo(() => inferDailyTaskDueDates(rawTasks, dueByPath), [rawTasks, dueByPath])
+  const showArchivedTasks = useStore((s) => s.showArchivedTasks)
+  const tasks = useMemo(
+    () => inferDailyTaskDueDates(filterTasksForDisplay(rawTasks, showArchivedTasks), dueByPath),
+    [rawTasks, showArchivedTasks, dueByPath]
+  )
   const keymapOverrides = useStore((s) => s.keymapOverrides)
   const vimMode = useStore((s) => s.vimMode)
   const viewMode = useStore((s) => s.tasksViewMode)

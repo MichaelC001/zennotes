@@ -617,6 +617,10 @@ interface Prefs {
   calendarShowWeekNumbers: boolean
   /** Last selected view inside the Tasks tab. List is the v1 default. */
   tasksViewMode: TasksViewMode
+  /** Keep tasks from archived notes on the Tasks surfaces. Off by default:
+   *  archiving a note retires its tasks from the list, boards, and calendars
+   *  (the markdown is untouched; un-archiving brings them back). (#540) */
+  showArchivedTasks: boolean
   /** Column source used when the Tasks Kanban view is active. */
   kanbanGroupBy: KanbanGroupBy
   /** Display-only Kanban column title overrides. Keyed by `${groupBy}:${columnId}`. */
@@ -991,6 +995,7 @@ export const DEFAULT_PREFS: Prefs = {
   calendarWeekStart: 'monday',
   calendarShowWeekNumbers: true,
   tasksViewMode: 'list',
+  showArchivedTasks: false,
   kanbanGroupBy: 'status',
   kanbanColumnTitles: {},
   kanbanColumnOrder: {},
@@ -1291,6 +1296,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       p.tasksViewMode && VALID_TASKS_VIEW_MODES.includes(p.tasksViewMode)
         ? p.tasksViewMode
         : DEFAULT_PREFS.tasksViewMode,
+    showArchivedTasks:
+      typeof p.showArchivedTasks === 'boolean'
+        ? p.showArchivedTasks
+        : DEFAULT_PREFS.showArchivedTasks,
     kanbanGroupBy: normalizeKanbanGroupBy(p.kanbanGroupBy),
     kanbanColumnTitles: normalizeKanbanColumnTitles(p.kanbanColumnTitles),
     kanbanColumnOrder: normalizeKanbanColumnOrder(p.kanbanColumnOrder),
@@ -2110,6 +2119,7 @@ function collectPrefs(s: {
   calendarWeekStart: CalendarWeekStart
   calendarShowWeekNumbers: boolean
   tasksViewMode: TasksViewMode
+  showArchivedTasks: boolean
   kanbanGroupBy: KanbanGroupBy
   kanbanColumnTitles: Record<string, string>
   kanbanColumnOrder: Record<string, string[]>
@@ -2198,6 +2208,7 @@ function collectPrefs(s: {
     calendarWeekStart: s.calendarWeekStart,
     calendarShowWeekNumbers: s.calendarShowWeekNumbers,
     tasksViewMode: s.tasksViewMode,
+    showArchivedTasks: s.showArchivedTasks,
     kanbanGroupBy: s.kanbanGroupBy,
     kanbanColumnTitles: s.kanbanColumnTitles,
     kanbanColumnOrder: s.kanbanColumnOrder,
@@ -2786,6 +2797,8 @@ interface Store {
   taskCursorIndex: number
   /** Which sub-view is active inside the Tasks tab. */
   tasksViewMode: TasksViewMode
+  /** Keep tasks from archived notes on the Tasks surfaces (off by default). */
+  showArchivedTasks: boolean
   /** Column source for the Tasks Kanban view. */
   kanbanGroupBy: KanbanGroupBy
   /** Display-only column title overrides for the Tasks Kanban view. */
@@ -2967,6 +2980,13 @@ interface Store {
   forwardTask: (task: VaultTask, targetPath: string) => Promise<void>
   setTasksFilter: (q: string) => void
   setTasksViewMode: (mode: TasksViewMode) => void
+  /** Toggle whether archived notes' tasks stay on the Tasks surfaces (#540). */
+  setShowArchivedTasks: (show: boolean) => void
+  /** Confirm archiving `paths` when they still carry open tasks. Resolves true
+   *  when nothing is open or the user confirmed; every archive entry point
+   *  (single or bulk) calls this first so the warning cannot be bypassed by
+   *  surface, and a bulk archive asks once, not once per note. */
+  confirmArchiveNotes: (paths: string[]) => Promise<boolean>
   setKanbanGroupBy: (group: KanbanGroupBy) => void
   setKanbanColumnTitle: (
     group: KanbanGroupBy,
@@ -4378,6 +4398,7 @@ export const useStore = create<Store>((set, get) => {
   calendarWeekStart: loadPrefs().calendarWeekStart,
   calendarShowWeekNumbers: loadPrefs().calendarShowWeekNumbers,
   tasksViewMode: loadPrefs().tasksViewMode,
+  showArchivedTasks: loadPrefs().showArchivedTasks,
   kanbanGroupBy: loadPrefs().kanbanGroupBy,
   kanbanColumnTitles: loadPrefs().kanbanColumnTitles,
   kanbanColumnOrder: loadPrefs().kanbanColumnOrder,
@@ -5468,6 +5489,30 @@ export const useStore = create<Store>((set, get) => {
     savePrefs(collectPrefs(get()))
     persistVaultViewOverride({ tasksViewMode: mode })
   },
+  setShowArchivedTasks: (show) => {
+    set({ showArchivedTasks: show })
+    savePrefs(collectPrefs(get()))
+  },
+  confirmArchiveNotes: async (paths) => {
+    const state = get()
+    const targets = new Set(paths)
+    // Open = not done, not cancelled, not forwarded; waiting and in-progress
+    // still count as live work someone could lose sight of.
+    const open = state.vaultTasks.filter(
+      (t) => targets.has(t.sourcePath) && !t.checked && !t.cancelled && !t.forwarded
+    ).length
+    if (open === 0) return true
+    const subject =
+      paths.length === 1 ? 'This note still has' : `These ${paths.length} notes still have`
+    const hidden = !state.showArchivedTasks
+    return await confirmApp({
+      title: paths.length === 1 ? 'Archive note?' : 'Archive notes?',
+      description: `${subject} ${open} open task${open === 1 ? '' : 's'}.${
+        hidden ? ' Tasks from archived notes leave the Tasks views.' : ''
+      } Archive anyway?`,
+      confirmLabel: 'Archive'
+    })
+  },
   setKanbanGroupBy: (group) => {
     set({ kanbanGroupBy: group })
     savePrefs(collectPrefs(get()))
@@ -6368,6 +6413,7 @@ export const useStore = create<Store>((set, get) => {
   archiveActive: async () => {
     const path = get().selectedPath
     if (!path) return
+    if (!(await get().confirmArchiveNotes([path]))) return
     await window.zen.archiveNote(path)
     set((s) => {
       const nextLayout = rewritePathsInTree(s.paneLayout, (p) => (p === path ? null : p))

@@ -1603,6 +1603,8 @@ export function Sidebar(): JSX.Element {
         label: `Move ${archivableNotes.length} note${archivableNotes.length === 1 ? "" : "s"} to ${folderLabels.archive}`,
         icon: <ArchiveIcon />,
         onSelect: async () => {
+          const paths = archivableNotes.map((note) => note.path);
+          if (!(await useStore.getState().confirmArchiveNotes(paths))) return;
           for (const note of archivableNotes) {
             await window.zen.archiveNote(note.path);
           }
@@ -2232,6 +2234,7 @@ export function Sidebar(): JSX.Element {
         label: folderLabels.archive,
         icon: <ArchiveIcon />,
         onSelect: async () => {
+          if (!(await useStore.getState().confirmArchiveNotes([n.path]))) return;
           await window.zen.archiveNote(n.path);
           await refreshNotes();
           if (selectedPath === n.path) await selectNote(null);

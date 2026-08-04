@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { NoteContent, NoteMeta } from '@shared/ipc'
 import {
+  filterTasksForDisplay,
   inferDailyTaskDueDates,
   isTaskOpen,
   parseTasksFromBody,
@@ -115,6 +116,7 @@ export function CalendarPanel({ note }: { note: NoteContent }): JSX.Element {
   const openDailyNoteForDate = useStore((s) => s.openDailyNoteForDate)
   const openWeeklyNoteForDate = useStore((s) => s.openWeeklyNoteForDate)
   const vaultTasks = useStore((s) => s.vaultTasks)
+  const showArchivedTasks = useStore((s) => s.showArchivedTasks)
   const tasksLoading = useStore((s) => s.tasksLoading)
   const refreshTasks = useStore((s) => s.refreshTasks)
   const addTaskForDate = useStore((s) => s.addTaskForDate)
@@ -186,8 +188,8 @@ export function CalendarPanel({ note }: { note: NoteContent }): JSX.Element {
     [notes, vaultSettings]
   )
   const inferredTasks = useMemo(
-    () => inferDailyTaskDueDates(vaultTasks, dueByPath),
-    [vaultTasks, dueByPath]
+    () => inferDailyTaskDueDates(filterTasksForDisplay(vaultTasks, showArchivedTasks), dueByPath),
+    [vaultTasks, showArchivedTasks, dueByPath]
   )
   // The 7 days of the selected day's week (respecting the week-start setting),
   // shown as an agenda under the calendar.

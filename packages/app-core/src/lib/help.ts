@@ -255,6 +255,11 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
       'Tasks scans every note for checkboxes, Tags lets you browse notes that carry all of the selected tags (toggle Match to Any for a union), Archive gives you a dedicated list of cold-storage notes, and Trash gives you a recovery surface for deleted notes without turning the left rail into a second browser. Selected tags accumulate so you can narrow across several at once; clear them with the Selected strip’s “Clear all”, the `c` key, or a right-click on any tag chip (which also offers “Unselect others” to keep just that one).'
   },
   {
+    title: 'Archiving a note retires its tasks',
+    body:
+      'When a note moves to the Archive, its tasks leave the Tasks list, the Kanban boards, and the calendars with it, keeping Done focused on recent work instead of years of finished projects. Nothing is written: the markdown keeps its checkboxes, and un-archiving the note brings its tasks straight back. Archiving a note that still has open tasks asks first, so live work never disappears silently, and a bulk archive from the sidebar asks once for the whole set. Prefer the old behavior? Settings → Tasks → “Show tasks from archived notes” (or `show_archived_tasks` in `config.toml`) keeps archived tasks on every surface, including the Archive column on the folder Kanban board, which otherwise steps aside.'
+  },
+  {
     title: 'Any line becomes a checkbox with ⌘L',
     body:
       'Press `⌘L` (`Ctrl+L` on Windows/Linux) in the editor to turn the current line into a checkbox and toggle it on repeat: plain text becomes `- [ ] text`, an existing bullet or numbered item keeps its marker (`* note` becomes `* [ ] note`), and pressing again flips `[ ]` to `[x]` and back. An in-progress `[/]` checks off to `[x]`; forwarded `[>]` and cancelled `[-]` lines are left alone, since those states have their own commands. It applies to every line of a multi-line selection, works with Vim mode on or off, is remappable as `editor.toggleCheckbox` under `[keymaps]` in `config.toml`, and is also in the command palette as “Toggle Checkbox”.'
