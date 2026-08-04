@@ -468,6 +468,11 @@ export function Sidebar(): JSX.Element {
   const deleteAssetAction = useStore((s) => s.deleteAsset);
   const sidebarWidth = useStore((s) => s.sidebarWidth);
   const setSidebarWidth = useStore((s) => s.setSidebarWidth);
+  // Footer degrade ladder (#539). The width is the pref, which is exactly the
+  // rendered width (the aside is fixed-width and shrink-0), so this stays a
+  // plain prop check instead of a resize observer.
+  const footerShowsCount = sidebarWidth >= 310;
+  const footerShowsLabels = sidebarWidth >= 265;
   const noteSortOrder = useStore((s) => s.noteSortOrder);
   const manualNoteOrder = useStore((s) => s.manualNoteOrder);
   const setNoteSortOrder = useStore((s) => s.setNoteSortOrder);
@@ -2883,8 +2888,10 @@ export function Sidebar(): JSX.Element {
         </div>
       </div>
 
-      {/* Search + toolbar on one row */}
-      <div className="flex items-center gap-1 px-3">
+      {/* Search + toolbar on one row. flex-wrap: on a narrow sidebar the
+       *  icon strip drops to its own line under the search field instead of
+       *  overflowing through the border (#539). */}
+      <div className="flex flex-wrap items-center gap-1 px-3">
         <button
           onClick={() => setSearchOpen(true)}
           className="group flex h-7 flex-1 min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-700 transition-colors hover:bg-paper-200/70 hover:text-ink-900"
@@ -3522,7 +3529,13 @@ export function Sidebar(): JSX.Element {
       {/* Footer — vault-level utilities. Kept deliberately small so the
        *  main tree area dominates; Help and Settings are also reachable
        *  from the command palette and (for Settings) ⌘,. Trash lives in
-       *  the main tree above and opens its dedicated recovery view. */}
+       *  the main tree above and opens its dedicated recovery view.
+       *
+       *  The three labeled actions need ~306px with the file-count badge and
+       *  ~260px without it, but the sidebar resizes down to 160. Below those
+       *  widths the row degrades instead of painting labels over each other
+       *  (#539): first the count folds into the Files tooltip, then the
+       *  labels drop and the icons stand alone. */}
       <div
         className="zn-sidebar-footer-safe mt-2 grid h-16 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 px-3"
         style={{ borderTop: "1px solid var(--glass-stroke)" }}
@@ -3531,7 +3544,9 @@ export function Sidebar(): JSX.Element {
           <SidebarFooterAction
             icon={<FolderGlyphIcon />}
             label="Files"
-            count={assetFiles.length}
+            title={footerShowsCount ? undefined : `Files · ${assetFiles.length}`}
+            count={footerShowsCount ? assetFiles.length : undefined}
+            iconOnly={!footerShowsLabels}
             onClick={() => void revealAssetsDir()}
             sidebarIdx={idxCounter.current.value++}
             vimHighlight={vimCursor === idxCounter.current.value - 1}
@@ -3543,6 +3558,7 @@ export function Sidebar(): JSX.Element {
         <SidebarFooterAction
           icon={<DocumentIcon />}
           label="Help"
+          iconOnly={!footerShowsLabels}
           active={helpViewActive}
           onClick={() => void openHelpView()}
           sidebarIdx={idxCounter.current.value++}
@@ -3555,6 +3571,7 @@ export function Sidebar(): JSX.Element {
           label="Settings"
           title={appUpdateSettingsTitle}
           badgeLabel={appUpdateBadge ?? undefined}
+          iconOnly={!footerShowsLabels}
           onClick={() => setSettingsOpen(true)}
           sidebarIdx={idxCounter.current.value++}
           vimHighlight={vimCursor === idxCounter.current.value - 1}
@@ -5668,6 +5685,7 @@ function SidebarFooterAction({
   count,
   badgeLabel,
   active,
+  iconOnly,
   onClick,
   sidebarIdx,
   vimHighlight,
@@ -5680,6 +5698,9 @@ function SidebarFooterAction({
   count?: number;
   badgeLabel?: string;
   active?: boolean;
+  /** Narrow-sidebar mode (#539): the label is dropped and the tooltip and
+   *  aria-label carry it instead, so the row never outgrows the sidebar. */
+  iconOnly?: boolean;
   onClick: () => void;
   sidebarIdx?: number;
   vimHighlight?: boolean;
@@ -5695,7 +5716,7 @@ function SidebarFooterAction({
       title={resolvedTitle}
       aria-label={resolvedTitle}
       className={[
-        "inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium leading-none transition-colors whitespace-nowrap",
+        "inline-flex h-8 min-w-0 items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-xs font-medium leading-none transition-colors whitespace-nowrap",
         active
           ? vimHighlight
             ? "vim-cursor-on-active bg-paper-300/70 text-ink-900 font-medium"
@@ -5718,11 +5739,11 @@ function SidebarFooterAction({
       >
         {icon}
       </span>
-      <span className="truncate">{label}</span>
-      {typeof count === "number" && (
+      {!iconOnly && <span className="truncate">{label}</span>}
+      {!iconOnly && typeof count === "number" && (
         <span
           className={[
-            "rounded-full px-1.5 py-0.5 text-2xs",
+            "shrink-0 rounded-full px-1.5 py-0.5 text-2xs",
             strongActive
               ? "bg-ink-900/10 text-ink-700"
               : "bg-paper-200/80 text-ink-500",
@@ -5734,7 +5755,7 @@ function SidebarFooterAction({
       {badgeLabel && (
         <span
           className={[
-            "rounded-full px-1.5 py-0.5 text-2xs font-semibold",
+            "shrink-0 rounded-full px-1.5 py-0.5 text-2xs font-semibold",
             strongActive
               ? "bg-accent/20 text-accent"
               : "bg-accent/12 text-accent",
