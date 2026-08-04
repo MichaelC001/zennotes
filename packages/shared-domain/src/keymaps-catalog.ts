@@ -135,6 +135,7 @@ export const KEYMAP_CATALOG: KeymapCatalogEntry[] = [
   { id: "editor.unfoldHeading", group: "view-actions", defaultBinding: "Alt+Mod+U", title: "Unfold heading" },
   { id: "editor.moveLineUp", group: "view-actions", defaultBinding: "Alt+ArrowUp", title: "Move line up" },
   { id: "editor.moveLineDown", group: "view-actions", defaultBinding: "Alt+ArrowDown", title: "Move line down" },
+  { id: "editor.toggleCheckbox", group: "view-actions", defaultBinding: "Mod+L", title: "Toggle checkbox" },
   { id: "nav.localEx", group: "view-actions", defaultBinding: ":", title: "Open local ex prompt" },
   { id: "nav.newQuickNote", group: "view-actions", defaultBinding: "n", title: "New quick note from Quick Notes view" },
   { id: "nav.unarchive", group: "view-actions", defaultBinding: "u", title: "Unarchive selected note" }

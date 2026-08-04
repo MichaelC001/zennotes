@@ -15,6 +15,7 @@ import { findLeaf } from './pane-layout'
 import { requestPaneMode } from './pane-mode'
 import { resolveQuickNoteTitle } from './quick-note-title'
 import { forwardTaskWithPicker, taskAtEditorCursor } from './forward-task'
+import { toggleCheckbox } from './cm-toggle-checkbox'
 import { getKeymapDisplay, type KeymapId } from './keymaps'
 import { dispatchKeyboardContextMenu, findTabContextMenuTarget } from './keyboard-context-menu'
 import { resolveSystemFolderLabels } from './system-folder-labels'
@@ -877,6 +878,18 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
           return
         }
         await getState().cancelTaskFromList(task)
+      }
+    },
+    {
+      id: 'task.toggle-checkbox',
+      title: 'Toggle Checkbox',
+      category: 'Editor',
+      shortcut: shortcut('editor.toggleCheckbox'),
+      keywords: 'toggle checkbox task check uncheck line todo checklist convert done',
+      when: () => !!getState().editorViewRef && !!getState().activeNote,
+      run: () => {
+        const view = getState().editorViewRef
+        if (view) toggleCheckbox(view)
       }
     },
     {

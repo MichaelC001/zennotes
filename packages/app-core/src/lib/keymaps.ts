@@ -105,7 +105,8 @@ export type KeymapId =
   | "editor.hopMarkerForward"
   | "editor.hopMarkerBackward"
   | "editor.foldHeading"
-  | "editor.unfoldHeading";
+  | "editor.unfoldHeading"
+  | "editor.toggleCheckbox";
 
 export type KeymapOverrides = Partial<Record<KeymapId, string>>;
 
@@ -1089,6 +1090,16 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     description:
       "Move the current line (or selected lines) down in the note editor — reorders the markdown, so it sticks in the file. Works with Vim mode on or off.",
     defaultBinding: "Alt+ArrowDown",
+  },
+  {
+    id: "editor.toggleCheckbox",
+    kind: "shortcut",
+    scope: "vim-editor",
+    group: "view-actions",
+    title: "Toggle checkbox",
+    description:
+      "Turn the current line (or selected lines) into a checkbox, and toggle it between unchecked and checked on repeat. Plain text becomes `- [ ]`, keeping any list marker or blockquote prefix. Works with Vim mode on or off.",
+    defaultBinding: "Mod+L",
   },
   {
     id: "nav.localEx",

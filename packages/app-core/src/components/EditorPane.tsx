@@ -55,6 +55,7 @@ import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languag
 import { markdownListIndentPlugin } from '../lib/cm-markdown-list-indent'
 import { forwardOnCheckboxArrow } from '../lib/cm-forward-task'
 import { hopMarkerBackward, hopMarkerForward } from '../lib/cm-marker-hop'
+import { toggleCheckbox } from '../lib/cm-toggle-checkbox'
 import { completionKeymapForEditor, completionNavKeymap } from '../lib/cm-completion-nav'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
 import { toCodeMirrorKey, vimHalfPageKeymap } from '../lib/vim-half-page-keymap'
@@ -313,6 +314,12 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
     {
       key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.moveLineDown')),
       run: moveLineDown
+    },
+    // Obsidian-style checkbox toggle: line -> `- [ ]` -> `[x]` and back.
+    // Mode-agnostic like the line moves.
+    {
+      key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.toggleCheckbox')),
+      run: toggleCheckbox
     },
     // Step across inline markers, so a formatted word can be finished without
     // reaching for the arrow keys. Mode-agnostic like the line moves. (#490)
