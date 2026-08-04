@@ -377,7 +377,10 @@ function columnOrderKey(groupBy: KanbanGroupBy, columnId: string): string {
   return `${groupBy}:${columnId}`
 }
 
-function applyColumnOrder(
+/** Replay a manual card arrangement onto built columns. Listed cards sort
+ *  first in their saved order; unlisted cards keep their built position after
+ *  them, so new tasks appear and stale entries decay harmlessly. */
+export function applyColumnOrder(
   groupBy: KanbanGroupBy,
   columns: Column[],
   orderMap: Map<string, string[]>
@@ -472,6 +475,7 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
   const setKanbanColumnTitle = useStore((s) => s.setKanbanColumnTitle)
   const kanbanColumnOrder = useStore((s) => s.kanbanColumnOrder)
   const setKanbanColumnOrder = useStore((s) => s.setKanbanColumnOrder)
+  const setKanbanCardOrder = useStore((s) => s.setKanbanCardOrder)
   const kanbanStatuses = useStore((s) => s.kanbanStatuses)
   const applyTaskMutation = useStore((s) => s.applyTaskMutation)
   const startTaskFromList = useStore((s) => s.startTaskFromList)
@@ -493,7 +497,19 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
   const latestTasksRef = useRef(tasks)
   const displayTasksRef = useRef(tasks)
   const pendingTaskMovesRef = useRef(new Map<string, VaultTask>())
-  const columnOrderRef = useRef(new Map<string, string[]>())
+  // Seeded from the persisted pref exactly once, before the first columns
+  // build, so a hand-arranged column comes back arranged instead of flashing
+  // the default sort. After mount the ref is the live truth and the store
+  // trails it (every drop writes both through setKanbanCardOrder), so later
+  // store changes are deliberately not re-imported.
+  const [initialCardOrder] = useState(() => {
+    const map = new Map<string, string[]>()
+    for (const [key, order] of Object.entries(useStore.getState().kanbanCardOrder)) {
+      map.set(key, [...order])
+    }
+    return map
+  })
+  const columnOrderRef = useRef(initialCardOrder)
   const columnsRef = useRef<Column[]>([])
   const columnTitleInputRef = useRef<HTMLInputElement | null>(null)
   const boardRef = useRef<HTMLDivElement | null>(null)
@@ -837,6 +853,7 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
 
       const movingKey = taskIdentityKey(task)
       const nextOrderMap = new Map(columnOrderRef.current)
+      const persistedEntries: Record<string, string[]> = {}
 
       for (const column of columnsRef.current) {
         const keys = column.tasks
@@ -849,12 +866,17 @@ export function TasksKanban({ tasks, today, onOpenTask, onToggleTask }: Props): 
         }
 
         nextOrderMap.set(columnOrderKey(groupBy, column.id), keys)
+        persistedEntries[columnOrderKey(groupBy, column.id)] = keys
       }
 
       columnOrderRef.current = nextOrderMap
       setColumnOrderVersion((version) => version + 1)
+      // Persist the whole board's arrangement, not just the touched column:
+      // the lists carry only tasks currently on the board, so each write also
+      // prunes entries for tasks that were completed, deleted, or moved away.
+      setKanbanCardOrder(persistedEntries)
     },
-    [groupBy]
+    [groupBy, setKanbanCardOrder]
   )
 
   const applyTaskToBoard = useCallback(

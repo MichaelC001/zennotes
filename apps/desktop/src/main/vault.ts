@@ -821,6 +821,13 @@ function cloneVaultViewSettings(view: VaultViewSettings): VaultViewSettings {
           )
         }
       : {}),
+    ...(view.kanbanCardOrder
+      ? {
+          kanbanCardOrder: Object.fromEntries(
+            Object.entries(view.kanbanCardOrder).map(([column, keys]) => [column, [...keys]])
+          )
+        }
+      : {}),
     ...(view.systemFolderLabels ? { systemFolderLabels: { ...view.systemFolderLabels } } : {})
   }
 }
@@ -1112,6 +1119,9 @@ function normalizeVaultViewSettings(raw: unknown): VaultViewSettings | undefined
   }
   if (c.kanbanColumnOrder && typeof c.kanbanColumnOrder === 'object') {
     view.kanbanColumnOrder = c.kanbanColumnOrder as Record<string, string[]>
+  }
+  if (c.kanbanCardOrder && typeof c.kanbanCardOrder === 'object') {
+    view.kanbanCardOrder = c.kanbanCardOrder as Record<string, string[]>
   }
   if (typeof c.autoReveal === 'boolean') view.autoReveal = c.autoReveal
   if (c.systemFolderLabels && typeof c.systemFolderLabels === 'object') {

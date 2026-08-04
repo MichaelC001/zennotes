@@ -624,6 +624,12 @@ interface Prefs {
   /** Manual Kanban column arrangement per board. Keyed by groupBy → ordered
    *  column ids; unlisted columns fall to the end in their built order. */
   kanbanColumnOrder: Record<string, string[]>
+  /** Manual card arrangement inside Kanban columns. Keyed by
+   *  `${groupBy}:${columnId}` → ordered task identity keys
+   *  (`${sourcePath}\0${taskIndex}`). Listed cards sort first, unlisted ones
+   *  keep their built order after them, so entries whose task moved or vanished
+   *  decay toward the default sort instead of misplacing cards. */
+  kanbanCardOrder: Record<string, string[]>
   /** Ordered status ids for the custom-status Kanban board (group-by "custom").
    *  Each id matches an inline `@status:<id>` task token. Config-driven. (#354) */
   kanbanStatuses: string[]
@@ -737,6 +743,44 @@ function normalizeKanbanColumnOrder(raw: unknown): Record<string, string[]> {
   return out
 }
 
+const MAX_KANBAN_CARD_ORDER_COLUMNS = 64
+const MAX_KANBAN_CARD_ORDER_CARDS = 512
+const MAX_TASK_IDENTITY_KEY_LENGTH = 1024
+
+// Manual card arrangement inside Kanban columns:
+// `{ "<groupBy>:<columnId>": ["<sourcePath>\0<taskIndex>", ...] }`. Column keys
+// share the column-title key grammar; card entries are opaque task identity
+// keys (note paths are free-form, so only length is validated). Entries that no
+// longer match a task are harmless: replay ranks listed cards first and leaves
+// the rest in built order, so stale entries decay instead of misplacing cards.
+export function normalizeKanbanCardOrder(raw: unknown): Record<string, string[]> {
+  if (!raw || typeof raw !== 'object') return {}
+  const out: Record<string, string[]> = {}
+  let columns = 0
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(value)) continue
+    const isStatic =
+      STATIC_COLUMN_TITLE_KEY_RE.test(key) &&
+      STATIC_KANBAN_GROUP_BYS.some((group) => key.startsWith(`${group}:`))
+    const isField = FIELD_COLUMN_TITLE_KEY_RE.test(key)
+    if (!isStatic && !isField) continue
+    const cards: string[] = []
+    const seen = new Set<string>()
+    for (const entry of value) {
+      if (typeof entry !== 'string') continue
+      if (!entry || entry.length > MAX_TASK_IDENTITY_KEY_LENGTH || seen.has(entry)) continue
+      seen.add(entry)
+      cards.push(entry)
+      if (cards.length >= MAX_KANBAN_CARD_ORDER_CARDS) break
+    }
+    if (!cards.length) continue
+    out[key] = cards
+    columns += 1
+    if (columns >= MAX_KANBAN_CARD_ORDER_COLUMNS) break
+  }
+  return out
+}
+
 // A status id is a tag-like slug, matching the `@status:<id>` grammar the task
 // parser accepts (see INLINE_STATUS_RE). Lower-cased, de-duplicated, capped. (#354)
 const KANBAN_STATUS_ID_RE = /^[\p{L}\d][\p{L}\d/_-]*$/u
@@ -821,6 +865,9 @@ export function viewPrefsFromVault(settings: VaultSettings | null | undefined): 
   }
   if (v.kanbanColumnOrder && typeof v.kanbanColumnOrder === 'object') {
     patch.kanbanColumnOrder = normalizeKanbanColumnOrder(v.kanbanColumnOrder)
+  }
+  if (v.kanbanCardOrder && typeof v.kanbanCardOrder === 'object') {
+    patch.kanbanCardOrder = normalizeKanbanCardOrder(v.kanbanCardOrder)
   }
   if (Array.isArray(v.kanbanStatuses)) {
     patch.kanbanStatuses = normalizeKanbanStatuses(v.kanbanStatuses)
@@ -947,6 +994,7 @@ export const DEFAULT_PREFS: Prefs = {
   kanbanGroupBy: 'status',
   kanbanColumnTitles: {},
   kanbanColumnOrder: {},
+  kanbanCardOrder: {},
   kanbanStatuses: [],
   hasCompletedOnboarding: false
 }
@@ -1246,6 +1294,7 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
     kanbanGroupBy: normalizeKanbanGroupBy(p.kanbanGroupBy),
     kanbanColumnTitles: normalizeKanbanColumnTitles(p.kanbanColumnTitles),
     kanbanColumnOrder: normalizeKanbanColumnOrder(p.kanbanColumnOrder),
+    kanbanCardOrder: normalizeKanbanCardOrder(p.kanbanCardOrder),
     kanbanStatuses: normalizeKanbanStatuses(p.kanbanStatuses),
     hasCompletedOnboarding:
       typeof p.hasCompletedOnboarding === 'boolean'
@@ -2064,6 +2113,7 @@ function collectPrefs(s: {
   kanbanGroupBy: KanbanGroupBy
   kanbanColumnTitles: Record<string, string>
   kanbanColumnOrder: Record<string, string[]>
+  kanbanCardOrder: Record<string, string[]>
   kanbanStatuses: string[]
   hasCompletedOnboarding: boolean
 }): Prefs {
@@ -2151,6 +2201,7 @@ function collectPrefs(s: {
     kanbanGroupBy: s.kanbanGroupBy,
     kanbanColumnTitles: s.kanbanColumnTitles,
     kanbanColumnOrder: s.kanbanColumnOrder,
+    kanbanCardOrder: s.kanbanCardOrder,
     kanbanStatuses: s.kanbanStatuses,
     hasCompletedOnboarding: s.hasCompletedOnboarding
   }
@@ -2741,6 +2792,10 @@ interface Store {
   kanbanColumnTitles: Record<string, string>
   /** Manual column arrangement per board (groupBy → ordered column ids). */
   kanbanColumnOrder: Record<string, string[]>
+  /** Manual card arrangement inside columns (`groupBy:columnId` → ordered
+   *  task identity keys). Persisted so a hand-prioritized column survives
+   *  leaving the Kanban view. */
+  kanbanCardOrder: Record<string, string[]>
   /** Ordered status ids for the custom-status Kanban board (config-driven). */
   kanbanStatuses: string[]
   /** True once the user has finished or skipped the first-run onboarding. */
@@ -2921,6 +2976,11 @@ interface Store {
   /** Persist the manual column arrangement for a board. Pass the full ordered
    *  list of column ids; empties clear the override for that board. */
   setKanbanColumnOrder: (group: KanbanGroupBy, orderedIds: string[]) => void
+  /** Persist the manual card arrangement after a drop. `entries` maps
+   *  `${groupBy}:${columnId}` keys to the full ordered list of task identity
+   *  keys for that column; an empty list clears the column's entry, so writing
+   *  a whole board prunes columns that emptied out. */
+  setKanbanCardOrder: (entries: Record<string, string[]>) => void
   /** Replace the ordered custom-status list (from Settings). Normalized and
    *  written back to config.toml + the per-vault view override. (#354) */
   setKanbanStatuses: (statuses: string[]) => void
@@ -4321,6 +4381,7 @@ export const useStore = create<Store>((set, get) => {
   kanbanGroupBy: loadPrefs().kanbanGroupBy,
   kanbanColumnTitles: loadPrefs().kanbanColumnTitles,
   kanbanColumnOrder: loadPrefs().kanbanColumnOrder,
+  kanbanCardOrder: loadPrefs().kanbanCardOrder,
   kanbanStatuses: loadPrefs().kanbanStatuses,
   hasCompletedOnboarding: loadPrefs().hasCompletedOnboarding,
   vaultTasks: [],
@@ -5437,6 +5498,19 @@ export const useStore = create<Store>((set, get) => {
     set({ kanbanColumnOrder: nextOrder })
     savePrefs(collectPrefs(get()))
     persistVaultViewOverride({ kanbanColumnOrder: nextOrder })
+  },
+  setKanbanCardOrder: (entries) => {
+    const merged = { ...get().kanbanCardOrder }
+    for (const [key, order] of Object.entries(entries)) {
+      if (order.length) merged[key] = order
+      else delete merged[key]
+    }
+    // Re-normalizing enforces the key grammar and the column/card caps on
+    // every write, so the map can't grow without bound.
+    const next = normalizeKanbanCardOrder(merged)
+    set({ kanbanCardOrder: next })
+    savePrefs(collectPrefs(get()))
+    persistVaultViewOverride({ kanbanCardOrder: next })
   },
   setKanbanStatuses: (statuses) => {
     const next = normalizeKanbanStatuses(statuses)

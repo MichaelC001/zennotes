@@ -396,6 +396,7 @@ export interface VaultViewSettings {
   kanbanGroupBy?: string
   kanbanColumnTitles?: Record<string, string>
   kanbanColumnOrder?: Record<string, string[]>
+  kanbanCardOrder?: Record<string, string[]>
   kanbanStatuses?: string[]
   autoReveal?: boolean
   systemFolderLabels?: Record<string, unknown>

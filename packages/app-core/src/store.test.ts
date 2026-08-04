@@ -1160,6 +1160,27 @@ describe('viewPrefsFromVault (#292 — per-vault view overlay)', () => {
     expect(patch.kanbanColumnOrder).toEqual({ 'field:status': ['review', 'backlog', 'done'] })
   })
 
+  it('overlays and normalizes kanbanCardOrder (manual card arrangement)', async () => {
+    installZen()
+    const { viewPrefsFromVault } = await loadStore()
+    const key = (path: string, index: number): string => `${path}\0${index}`
+    const patch = viewPrefsFromVault({
+      view: {
+        kanbanCardOrder: {
+          'status:today': [key('inbox/a.md', 1), key('inbox/b.md', 0), key('inbox/a.md', 1), 42],
+          'field:status:review': [key('inbox/c.md', 3)],
+          'not-a-groupby:today': [key('inbox/d.md', 0)],
+          'status:done': []
+        }
+      }
+    } as unknown as ViewArg)
+    // Dedupes, drops non-strings, drops unknown board keys, drops empty lists.
+    expect(patch.kanbanCardOrder).toEqual({
+      'status:today': [key('inbox/a.md', 1), key('inbox/b.md', 0)],
+      'field:status:review': [key('inbox/c.md', 3)]
+    })
+  })
+
   it('keeps a renamed No-value bucket title through normalization (#389)', async () => {
     installZen()
     const { viewPrefsFromVault } = await loadStore()
