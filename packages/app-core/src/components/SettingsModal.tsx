@@ -36,6 +36,7 @@ import {
   type McpInstructionsPayload,
   type McpServerRuntime,
 } from "@shared/mcp-clients";
+import { normalizeTasksExcludedFolder } from "@shared/tasks-excluded-folders";
 import { useStore, refreshCustomThemes, refreshOverrides } from "../store";
 import { WORKFLOW_PRESETS, hiddenPresetsInOrder } from "@shared/workflows/presets";
 import { startWorkflowTutorial } from "../lib/workflow-tutorial-flow";
@@ -2679,6 +2680,22 @@ export function SettingsModal(): JSX.Element {
             "old",
           ],
         },
+        {
+          id: "tasks-excluded-folders",
+          title: "Folders excluded from Tasks",
+          description:
+            "Keep checkbox-heavy folders (reading lists, media backlogs) out of the Tasks list, boards, and calendars. Stored in the vault, honored by every runtime.",
+          keywords: [
+            "exclude",
+            "excluded",
+            "checklist",
+            "reading list",
+            "backlog",
+            "folder",
+            "hide",
+            "checkbox",
+          ],
+        },
       ],
       content: (
         <div className="space-y-6">
@@ -2699,6 +2716,12 @@ export function SettingsModal(): JSX.Element {
               settingId="show-archived-tasks"
               onChange={setShowArchivedTasks}
             />
+          </Section>
+          <Section
+            title="Checklists"
+            description="Not every checkbox is a task. Exclude whole folders here, or opt out a single note with tasks: false in its frontmatter (tasks: note keeps a #task note on the board while silencing its checklist)."
+          >
+            <TasksExcludedFoldersRow settingId="tasks-excluded-folders" />
           </Section>
           <button
             type="button"
@@ -6676,6 +6699,93 @@ function KanbanStatusesRow({ settingId }: { settingId?: string }): JSX.Element {
           className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
         >
           Add status
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const NO_EXCLUDED_FOLDERS: string[] = [];
+
+/** Settings editor for the vault's `tasks.excludedFolders` list (#458). The
+ *  sidebar folder context menu ("Exclude from Tasks") is the primary way in;
+ *  this list is where entries are reviewed, removed, or typed by hand. Saved
+ *  to vault.json, so it travels with the vault and applies to every runtime. */
+function TasksExcludedFoldersRow({
+  settingId,
+}: {
+  settingId?: string;
+}): JSX.Element {
+  const excluded = useStore(
+    (s) => s.vaultSettings.tasks?.excludedFolders ?? NO_EXCLUDED_FOLDERS,
+  );
+  const toggleTasksExcludedFolder = useStore(
+    (s) => s.toggleTasksExcludedFolder,
+  );
+  const [draft, setDraft] = useState("");
+
+  const addDraft = (): void => {
+    const cleaned = normalizeTasksExcludedFolder(draft);
+    if (!cleaned || excluded.includes(cleaned)) return;
+    setDraft("");
+    void toggleTasksExcludedFolder(cleaned);
+  };
+
+  return (
+    <div className="px-5 py-4" {...settingsSearchTargetProps(settingId)}>
+      <div className="text-sm font-medium text-ink-900">
+        Folders excluded from Tasks
+      </div>
+      <div className="mt-1 text-xs leading-5 text-ink-500">
+        Notes in these folders never feed the Tasks list, boards, or calendars
+        (their checkboxes stay plain checkboxes). Right-click a folder in the
+        sidebar and choose “Exclude from Tasks”, or add its vault path here.
+        Saved in the vault itself, so the CLI, MCP, and the self-hosted server
+        respect it too.
+      </div>
+      <div className="mt-3 space-y-2">
+        {excluded.length === 0 && (
+          <div className="rounded-md border border-dashed border-paper-300 px-3 py-2 text-xs text-ink-500">
+            No folders excluded. Reading lists and media backlogs are the usual
+            candidates.
+          </div>
+        )}
+        {excluded.map((relDir) => (
+          <div key={relDir} className="flex items-center gap-2">
+            <div className="min-w-0 flex-1 truncate rounded-md border border-paper-300 bg-paper-100 px-2.5 py-1.5 font-mono text-xs text-ink-900">
+              {relDir}
+            </div>
+            <button
+              type="button"
+              onClick={() => void toggleTasksExcludedFolder(relDir)}
+              aria-label={`Include ${relDir} in Tasks again`}
+              className="rounded-md px-2 py-1 text-xs text-ink-500 hover:bg-rose-500/15 hover:text-rose-400"
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addDraft();
+            }
+          }}
+          placeholder="Folder path, e.g. inbox/Books"
+          aria-label="Folder path to exclude from Tasks"
+          className="min-w-0 flex-1 rounded-md border border-paper-300 bg-paper-100 px-2.5 py-1.5 text-sm text-ink-900 outline-none focus:border-accent/60"
+        />
+        <button
+          type="button"
+          onClick={addDraft}
+          className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+        >
+          Exclude folder
         </button>
       </div>
     </div>

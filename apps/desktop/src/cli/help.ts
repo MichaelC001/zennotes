@@ -134,7 +134,7 @@ const SECTIONS: Array<{ heading: string; rows: CommandRow[] }> = [
   {
     heading: 'TASKS',
     rows: [
-      { name: 'task list', description: 'Open checkbox tasks across all notes', flags: '--unchecked  --all  --tag <t>  --json' },
+      { name: 'task list', description: 'Open checkbox tasks across all notes', flags: '--unchecked  --all  --tag <t>  --include-excluded  --json' },
       { name: 'task toggle <id>', description: 'Flip a task checkbox by stable id' }
     ]
   },

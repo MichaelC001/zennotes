@@ -77,6 +77,7 @@ import {
   systemFolderForDirName,
   type SystemFolderPaths
 } from '@shared/system-folder-paths'
+import { normalizeTasksExcludedFolders } from '@shared/tasks-excluded-folders'
 
 const CONFIG_FILE = 'zennotes.config.json'
 const FOLDERS: NoteFolder[] = ['inbox', 'quick', 'archive', 'trash']
@@ -1045,6 +1046,7 @@ function normalizeVaultSettings(
     favorites?: unknown
     view?: unknown
     systemFolderPaths?: unknown
+    tasks?: unknown
   }
   const folderIcons: Record<string, FolderIconId> = {}
   if (candidate.folderIcons && typeof candidate.folderIcons === 'object') {
@@ -1099,8 +1101,20 @@ function normalizeVaultSettings(
     folderColors: normalizeFolderColors(candidate.folderColors),
     favorites: normalizeFavorites(candidate.favorites),
     view: normalizeVaultViewSettings(candidate.view),
-    systemFolderPaths: normalizeSystemFolderPaths(candidate.systemFolderPaths)
+    systemFolderPaths: normalizeSystemFolderPaths(candidate.systemFolderPaths),
+    tasks: normalizeTasksSettings(candidate.tasks)
   }
+}
+
+/** Carry the Tasks-system settings (#458) through the round-trip: a validated
+ *  excludedFolders list, or undefined when nothing survives so vault.json
+ *  stays free of empty stubs. */
+function normalizeTasksSettings(raw: unknown): VaultSettings['tasks'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const excluded = normalizeTasksExcludedFolders(
+    (raw as { excludedFolders?: unknown }).excludedFolders
+  )
+  return excluded.length > 0 ? { excludedFolders: excluded } : undefined
 }
 
 /** Carry the per-vault view overrides (#292) through the round-trip, keeping

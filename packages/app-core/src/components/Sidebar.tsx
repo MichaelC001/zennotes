@@ -441,6 +441,7 @@ export function Sidebar(): JSX.Element {
   const newDrawing = useStore((s) => s.newDrawing);
   const newDatabase = useStore((s) => s.newDatabase);
   const toggleFavorite = useStore((s) => s.toggleFavorite);
+  const toggleTasksExcludedFolder = useStore((s) => s.toggleTasksExcludedFolder);
   const createDatabase = useStore((s) => s.createDatabase);
   const createNoteInChosenFolder = useStore((s) => s.createNoteInChosenFolder);
   const openTemplatePaletteForFolder = useStore((s) => s.openTemplatePaletteForFolder);
@@ -1962,6 +1963,27 @@ export function Sidebar(): JSX.Element {
       },
     });
 
+    // Vault-level Tasks exclusion (#458). The list stores on-disk relative
+    // paths, so a root-primary inbox's top level resolves to "": no valid
+    // entry to toggle, hide the item there.
+    const tasksExcludeRelDir = vaultRelativeFolderPath(
+      folder,
+      subpath,
+      vaultSettings,
+    );
+    if (tasksExcludeRelDir) {
+      const tasksExcluded = (
+        vaultSettings.tasks?.excludedFolders ?? []
+      ).includes(tasksExcludeRelDir);
+      items.push({ kind: "separator" });
+      items.push({
+        label: tasksExcluded ? "Include in Tasks" : "Exclude from Tasks",
+        onSelect: async () => {
+          await toggleTasksExcludedFolder(tasksExcludeRelDir);
+        },
+      });
+    }
+
     if (!isTop) {
       items.push({ kind: "separator" });
       const leafName = subpath.split("/").slice(-1)[0];
@@ -2046,6 +2068,7 @@ export function Sidebar(): JSX.Element {
     openIconPicker,
     openColorPicker,
     toggleFavorite,
+    toggleTasksExcludedFolder,
     bulkSelectionMenuItems,
     selectedSidebarKeys,
   ]);

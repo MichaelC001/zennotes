@@ -68,12 +68,20 @@ export class CliRemoteClient {
     return this.get<VaultTextSearchMatch[]>(`/api/search/text?${params.toString()}`)
   }
 
-  scanTasks(): Promise<VaultTask[]> {
-    return this.get<VaultTask[]>('/api/tasks')
+  scanTasks(opts?: { includeExcluded?: boolean }): Promise<VaultTask[]> {
+    return this.get<VaultTask[]>(
+      opts?.includeExcluded ? '/api/tasks?includeExcluded=1' : '/api/tasks'
+    )
   }
 
-  scanTasksForPath(relPath: string): Promise<VaultTask[]> {
-    return this.get<VaultTask[]>(`/api/tasks/for?path=${encodeURIComponent(relPath)}`)
+  scanTasksForPath(
+    relPath: string,
+    opts?: { includeExcluded?: boolean }
+  ): Promise<VaultTask[]> {
+    const suffix = opts?.includeExcluded ? '&includeExcluded=1' : ''
+    return this.get<VaultTask[]>(
+      `/api/tasks/for?path=${encodeURIComponent(relPath)}${suffix}`
+    )
   }
 
   /* --- writes --- */

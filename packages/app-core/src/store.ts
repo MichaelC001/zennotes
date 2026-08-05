@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { EditorView } from '@codemirror/view'
 import { DEFAULT_VAULT_SETTINGS } from '@shared/ipc'
 import { resolveFolderPath } from '@shared/system-folder-paths'
+import { normalizeTasksExcludedFolder } from '@shared/tasks-excluded-folders'
 import type {
   AssetMeta,
   DateNotePatternSettings,
@@ -2884,6 +2885,13 @@ interface Store {
   toggleFavoriteActiveNote: () => Promise<void>
   /** @internal Replace the favorites list and persist (no note refresh). */
   applyFavorites: (nextFavorites: string[]) => Promise<void>
+  /**
+   * Toggle a folder on the vault's `tasks.excludedFolders` list (#458) and
+   * rescan, so its checkboxes leave (or rejoin) every Tasks surface at once.
+   * `relDir` is the folder's vault-relative on-disk path
+   * (`vaultRelativeFolderPath` output, e.g. `inbox/Books`).
+   */
+  toggleTasksExcludedFolder: (relDir: string) => Promise<void>
   setNotes: (notes: NoteMeta[]) => void
   setView: (view: View) => void
   /** Open the Tasks panel as a tab in the active pane. If the tab is
@@ -4483,6 +4491,22 @@ export const useStore = create<Store>((set, get) => {
   toggleFavorite: async (key) => {
     if (!key) return
     await get().applyFavorites(toggleFavoriteKey(get().vaultSettings.favorites, key))
+  },
+  toggleTasksExcludedFolder: async (relDir) => {
+    const cleaned = normalizeTasksExcludedFolder(relDir)
+    if (!cleaned) return
+    const settings = get().vaultSettings
+    const current = settings.tasks?.excludedFolders ?? []
+    const next = current.includes(cleaned)
+      ? current.filter((f) => f !== cleaned)
+      : [...current, cleaned]
+    await get().setVaultSettings({
+      ...settings,
+      tasks: next.length > 0 ? { excludedFolders: next } : undefined
+    })
+    // Rescan immediately: the Tasks view, boards, and calendars should reflect
+    // the exclusion without waiting for the next natural refresh.
+    await get().refreshTasks()
   },
   toggleFavoriteActiveNote: async () => {
     const path = get().activeNote?.path ?? get().selectedPath

@@ -23,6 +23,7 @@ import {
   resolveFolderPath,
   systemFolderForDirName
 } from '@shared/system-folder-paths'
+import { normalizeTasksExcludedFolders } from '@shared/tasks-excluded-folders'
 import { getISOWeek, getISOWeekYear, mondayOfISOWeek } from './template-render'
 
 // Reserved however the system folders are remapped:
@@ -593,6 +594,9 @@ export function normalizeVaultSettings(
       normalizedFavorites.push(entry)
     }
   }
+  const normalizedTasksExcluded = normalizeTasksExcludedFolders(
+    settings?.tasks?.excludedFolders
+  )
   const primaryNotesLocation =
     settings?.primaryNotesLocation === 'root'
       ? 'root'
@@ -658,7 +662,10 @@ export function normalizeVaultSettings(
     systemFolderPaths: normalizeSystemFolderPaths(settings?.systemFolderPaths),
     // Per-vault view overrides (#292): passed through as-is; the store validates
     // each value when it overlays them onto the live prefs.
-    ...(settings?.view ? { view: settings.view } : {})
+    ...(settings?.view ? { view: settings.view } : {}),
+    ...(normalizedTasksExcluded.length > 0
+      ? { tasks: { excludedFolders: normalizedTasksExcluded } }
+      : {})
   }
 }
 

@@ -438,6 +438,14 @@ export interface VaultSettings {
    * internal ID (`inbox`).
    */
   systemFolderPaths?: Partial<Record<NoteFolder, string>>
+  /**
+   * Tasks-system settings (#458). `excludedFolders` lists vault-relative
+   * directory paths (as they exist on disk) whose notes never feed the Tasks
+   * surfaces, on any runtime. Absent means nothing is excluded. An object
+   * rather than a bare list so the deferred per-vault `mode: all | tagged`
+   * can land beside it without another migration.
+   */
+  tasks?: { excludedFolders?: string[] }
 }
 
 export const DEFAULT_DAILY_NOTES_DIRECTORY = 'Daily Notes'

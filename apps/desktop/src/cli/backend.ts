@@ -87,7 +87,7 @@ export interface VaultBackend {
   deleteFolder(folder: NoteFolder, subpath: string): Promise<void>
   searchText(query: string, limit: number): Promise<VaultTextSearchMatch[]>
   backlinks(rel: string): Promise<NoteMeta[]>
-  scanAllTasks(): Promise<VaultTask[]>
+  scanAllTasks(opts?: { includeExcluded?: boolean }): Promise<VaultTask[]>
   toggleTask(taskId: string): Promise<VaultTask | null>
 }
 
@@ -138,7 +138,8 @@ class LocalBackend implements VaultBackend {
   searchText = (query: string, limit: number): Promise<VaultTextSearchMatch[]> =>
     searchText(this.root, query, limit)
   backlinks = (rel: string): Promise<NoteMeta[]> => backlinks(this.root, rel)
-  scanAllTasks = (): Promise<VaultTask[]> => scanAllTasks(this.root)
+  scanAllTasks = (opts?: { includeExcluded?: boolean }): Promise<VaultTask[]> =>
+    scanAllTasks(this.root, opts)
   toggleTask = (taskId: string): Promise<VaultTask | null> => toggleTask(this.root, taskId)
 }
 
@@ -213,7 +214,8 @@ class RemoteBackend implements VaultBackend {
   backlinks = async (rel: string): Promise<NoteMeta[]> =>
     backlinksIn(await this.client.listNotes(), normalizeRelPath(rel))
 
-  scanAllTasks = (): Promise<VaultTask[]> => this.client.scanTasks()
+  scanAllTasks = (opts?: { includeExcluded?: boolean }): Promise<VaultTask[]> =>
+    this.client.scanTasks(opts)
 
   /** No task-toggle endpoint exists, so the note is read, the same transform a
    *  local toggle applies is applied here, and the server re-parses the result
@@ -222,9 +224,14 @@ class RemoteBackend implements VaultBackend {
     const { rel, indexStr } = splitTaskId(taskId)
     const note = await this.client.readNote(rel)
 
+    // Exclusion-blind (#458), like the local toggle: an explicit task id is an
+    // explicit ask, and ids for excluded tasks only circulate via
+    // `zn task list --include-excluded`.
     let nextBody: string | null
     if (indexStr === 'task') {
-      const current = (await this.client.scanTasksForPath(rel)).find((t) => t.id === taskId)
+      const current = (
+        await this.client.scanTasksForPath(rel, { includeExcluded: true })
+      ).find((t) => t.id === taskId)
       nextBody = current ? toggleFileTaskInBody(note.body, current.checked) : null
     } else {
       nextBody = toggleTaskInBody(note.body, parseTaskIndex(taskId, indexStr))
@@ -232,7 +239,11 @@ class RemoteBackend implements VaultBackend {
     if (nextBody == null) return null
 
     await this.client.writeNote(rel, nextBody)
-    return (await this.client.scanTasksForPath(rel)).find((t) => t.id === taskId) ?? null
+    return (
+      (await this.client.scanTasksForPath(rel, { includeExcluded: true })).find(
+        (t) => t.id === taskId
+      ) ?? null
+    )
   }
 }
 
