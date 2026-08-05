@@ -4143,11 +4143,10 @@ app.whenReady().then(async () => {
   // dock picks up whatever the running binary advertises. During
   // `npm run dev` that's Electron's default, so we force our own.
   //
-  // The path has to come from windowIconPath(): build/ is not in the asar
-  // (`files` ships out/** only), the icon travels as an extraResource, and a
-  // packaged app resolving __dirname/../../build/icon.png just logged a failure
-  // on every launch.
-  if (isMac() && app.dock) {
+  // Dev only: a packaged app already advertises its bundle .icns, and
+  // setIcon would replace it with a raw NSImage, bypassing the system's
+  // icon treatment (#544 shipped an oversized dock tile this way).
+  if (isMac() && app.dock && !app.isPackaged) {
     try {
       app.dock.setIcon(windowIconPath())
     } catch (err) {
