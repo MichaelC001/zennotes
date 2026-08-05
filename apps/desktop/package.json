@@ -290,10 +290,15 @@
       ]
     },
     "deb": {
-      "afterInstall": "build/after-install.sh"
+      "afterInstall": "build/after-install.sh",
+      "compression": "xz"
     },
     "rpm": {
-      "afterInstall": "build/after-install.sh"
+      "afterInstall": "build/after-install.sh",
+      "compression": "xz"
+    },
+    "pacman": {
+      "compression": "xz"
     }
   }
 }
