@@ -793,6 +793,14 @@ function remarkSourceLines() {
 const STRICT_INLINE_MATH_RE = /^\$(?!\s)(?:\\.|[^$\\])*(?<!\s)\$$/
 
 /**
+ * Mid-line `$$…$$` with non-empty content, the shape remark-math parses as an
+ * inline-math node when display math lives inside other markdown (a table
+ * cell, in practice). Two dollars on each side can never be currency, so the
+ * guard lets these through where the single-`$` rule would demote them.
+ */
+const CELL_DISPLAY_MATH_RE = /^\$\$[\s\S]+\$\$$/
+
+/**
  * remark-math is more permissive than the editor: it renders `$5 and got $10` as
  * a formula (the content only has to avoid *both-sided* padding), so a currency
  * line shows up as math in the reading view while the editor keeps it literal.
@@ -812,6 +820,28 @@ function remarkCurrencyGuard() {
       if (start == null || end == null) return
       const token = source.slice(start, end)
       if (STRICT_INLINE_MATH_RE.test(token)) return
+      // `$$…$$` in a table cell: genuine display math, not currency. The
+      // editor's table widget renders it in display mode, so swap the node's
+      // math-inline class for math-display (rehype-katex keys displayMode off
+      // it) and flag it for the Typst placeholder plugin, which overwrites
+      // hProperties wholesale and cannot see the class. Cell-scoped on
+      // purpose: in prose the editor leaves mid-line `$$…$$` literal (#399),
+      // so the reading view must keep demoting it there.
+      const mathNode = node as typeof node & { value?: string; data?: Record<string, unknown> }
+      if (
+        (parent as { type?: string }).type === 'tableCell' &&
+        CELL_DISPLAY_MATH_RE.test(token) &&
+        String(mathNode.value ?? '').trim() !== ''
+      ) {
+        const data = (mathNode.data ??= {})
+        data.zenDisplayMath = true
+        const hProperties = ((data.hProperties ??= {}) as Record<string, unknown>)
+        const classes = Array.isArray(hProperties.className)
+          ? (hProperties.className as string[]).filter((c) => c !== 'math-inline')
+          : []
+        hProperties.className = [...classes, 'math-display']
+        return
+      }
       ;(parent as unknown as AnyParent).children.splice(index, 1, { type: 'text', value: token })
       return [SKIP, index + 1]
     })
@@ -852,7 +882,9 @@ function remarkTypstMathPlaceholders() {
   return (tree: MdRoot): void => {
     visit(tree, ['math', 'inlineMath'], (node) => {
       const mathNode = node as AnyNode & { value?: string; data?: Record<string, unknown> }
-      const display = mathNode.type === 'math'
+      // zenDisplayMath: a `$$…$$` living inside a table cell, flagged by the
+      // currency guard; inline position, display rendering.
+      const display = mathNode.type === 'math' || mathNode.data?.zenDisplayMath === true
       const value = String(mathNode.value ?? '')
       const data = (mathNode.data ??= {})
       data.hName = display ? 'div' : 'span'

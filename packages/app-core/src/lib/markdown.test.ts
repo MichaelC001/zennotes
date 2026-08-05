@@ -332,6 +332,41 @@ describe('Typst math renderer', () => {
   })
 })
 
+describe('display math inside a table cell (reading view matches the editor)', () => {
+  // The reported shape: a worked answer living in a table cell. Mid-line
+  // `$$…$$` can never be currency, so the guard must let it through, and the
+  // editor's table widget shows it as display math, so the reading view must
+  // agree.
+  const table = [
+    '| # | Ans | Working |',
+    '| --- | --- | --- |',
+    '| 9 | B | $$\\frac{800}{10000} \\times 100\\% = 8\\%$$ |'
+  ].join('\n')
+
+  it('renders $$…$$ in a cell as display math instead of literal source', () => {
+    setMarkdownMathRenderer('katex')
+    const html = renderMarkdown(table)
+    expect(html).toContain('katex')
+    expect(html).toContain('katex-display')
+    expect(html).not.toContain('$$\\frac')
+  })
+
+  it('renders a display placeholder under Typst', () => {
+    setMarkdownMathRenderer('typst')
+    const html = renderMarkdown(table)
+    expect(html).toContain('zen-typst-math')
+    expect(html).toContain('zen-typst-display')
+    setMarkdownMathRenderer('katex')
+  })
+
+  it('still leaves single-dollar currency in cells literal', () => {
+    setMarkdownMathRenderer('katex')
+    const html = renderMarkdown('| item | price |\n| --- | --- |\n| tea | $5 and $10 |')
+    expect(html).not.toContain('katex')
+    expect(html).toContain('$5 and $10')
+  })
+})
+
 describe('non-GFM task states in the reading view (#512)', () => {
   it('renders [/], [-] and [>] as markers instead of literal text', () => {
     const html = renderMarkdown(
