@@ -70,6 +70,7 @@ import type {
 import type { VaultTask } from '@shared/tasks'
 import { createDatabaseOps, type DatabaseVaultLayout } from '@shared/database-ops'
 import { isUnknownRouteResponse, parseServerErrorBody } from '@shared/server-error-shape'
+import { pastedImageFilename } from '@shared/pasted-image'
 import { createAbsenceAwareReader } from '@shared/remote-absence'
 import type {
   McpClientId,
@@ -826,13 +827,11 @@ async function importFilesToNote(
 async function importPastedImage(input: PastedImageInput): Promise<ImportedAsset> {
   const blob = new Blob([input.data as BlobPart], { type: input.mimeType })
   if (blob.size === 0) throw new Error('Clipboard image is empty.')
-  const ext = input.mimeType === 'image/jpeg' ? '.jpg' : input.mimeType === 'image/gif' ? '.gif' : '.png'
-  const suggested = (input.suggestedName ?? '').trim()
-  // Same shape as the desktop paste: "Pasted Image YYYY-MM-DD HHMMSS.png".
-  const now = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  const filename = suggested || `Pasted Image ${stamp}${ext}`
+  // Named by the shared helper the desktop paste uses, so the stem is
+  // scrubbed of the characters that break the `![[...]]` wikilink returned
+  // below ([ ] # ^ and friends). The server's upload cleaning leaves those
+  // in, and a raw "diagram [v2] #3.png" rendered as a broken embed.
+  const filename = pastedImageFilename(input, new Date())
   const form = new FormData()
   form.append('file', blob, filename)
   form.append('notePath', '')

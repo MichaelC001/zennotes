@@ -51,6 +51,7 @@ import {
 } from '@shared/ipc'
 import { DEMO_TOUR_DIR } from '@shared/demo-tour'
 import { FRONTMATTER_BLOCK_RE, frontmatterTags } from '@shared/frontmatter'
+import { IMAGE_FILE_EXTENSIONS, pastedImageFilename } from '@shared/pasted-image'
 import {
   DATABASE_SIDECAR_SUFFIX,
   databaseCsvPathFor,
@@ -108,26 +109,7 @@ const RESERVED_NON_SYSTEM_ROOT_NAMES = new Set<string>([
   ...ATTACHMENTS_DIRS,
   INTERNAL_VAULT_DIR
 ])
-const IMAGE_EXTENSIONS = new Set([
-  '.apng',
-  '.avif',
-  '.gif',
-  '.jpeg',
-  '.jpg',
-  '.png',
-  '.svg',
-  '.webp'
-])
-const PASTED_IMAGE_MIME_EXTENSIONS: Record<string, string> = {
-  'image/apng': '.apng',
-  'image/avif': '.avif',
-  'image/gif': '.gif',
-  'image/jpeg': '.jpg',
-  'image/jpg': '.jpg',
-  'image/png': '.png',
-  'image/svg+xml': '.svg',
-  'image/webp': '.webp'
-}
+const IMAGE_EXTENSIONS = IMAGE_FILE_EXTENSIONS
 const PDF_EXTENSIONS = new Set(['.pdf'])
 const AUDIO_EXTENSIONS = new Set(['.aac', '.flac', '.m4a', '.mp3', '.ogg', '.wav'])
 const VIDEO_EXTENSIONS = new Set(['.m4v', '.mov', '.mp4', '.ogv', '.webm'])
@@ -3300,49 +3282,10 @@ function markdownForImportedAsset(
   return `[${filename}](${destination})`
 }
 
-function padPastedImageDatePart(value: number): string {
-  return String(value).padStart(2, '0')
-}
-
-function pastedImageTimestamp(now: Date): string {
-  const date = [
-    now.getFullYear(),
-    padPastedImageDatePart(now.getMonth() + 1),
-    padPastedImageDatePart(now.getDate())
-  ].join('-')
-  const time = [
-    padPastedImageDatePart(now.getHours()),
-    padPastedImageDatePart(now.getMinutes()),
-    padPastedImageDatePart(now.getSeconds())
-  ].join('')
-  return `${date} ${time}`
-}
-
-function pastedImageExtension(input: Pick<PastedImageInput, 'mimeType' | 'suggestedName'>): string {
-  const suggestedExt = path.extname(input.suggestedName ?? '').toLowerCase()
-  if (IMAGE_EXTENSIONS.has(suggestedExt)) return suggestedExt
-
-  const mimeExt = PASTED_IMAGE_MIME_EXTENSIONS[input.mimeType.toLowerCase()]
-  if (mimeExt) return mimeExt
-  if (input.mimeType.toLowerCase().startsWith('image/')) return '.png'
-  throw new Error('Clipboard item is not an image.')
-}
-
-// Exported for the remote-workspace paste path, which uploads the bytes but
-// must name the file exactly like a local paste would.
-export function pastedImageFilename(input: Pick<PastedImageInput, 'mimeType' | 'suggestedName'>, now: Date): string {
-  const ext = pastedImageExtension(input)
-  const rawName = path.basename(input.suggestedName ?? '')
-  const nameExt = path.extname(rawName)
-  const rawBase = nameExt ? path.basename(rawName, nameExt) : rawName
-  const base = rawBase
-    .replace(/[\\/:%*?"<>|\[\]#^]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
-  const fallbackBase = `Pasted Image ${pastedImageTimestamp(now)}`
-  const finalBase = base && base !== '.' && base !== '..' ? base : fallbackBase
-  return `${finalBase}${ext}`
-}
+// The naming lives in @shared/pasted-image so the web client produces the
+// same filenames; re-exported for the remote-workspace paste path, which
+// uploads the bytes but must name the file exactly like a local paste would.
+export { pastedImageFilename }
 
 function pastedImageBuffer(data: PastedImageInput['data']): Buffer {
   if (data instanceof ArrayBuffer) return Buffer.from(data)
