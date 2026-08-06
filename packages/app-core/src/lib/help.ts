@@ -61,7 +61,7 @@ export const HELP_QUICK_START: HelpCard[] = [
   {
     title: 'Switch between write and read modes',
     body:
-      'Use Edit when you want raw markdown control, Split when you want source and rendered output together, and Preview when you want a clean reading surface with keyboard navigation. Your editor cursor stays where you left it when you return from Preview.'
+      'Use Edit when you want raw markdown control, Split when you want source and rendered output together, and Preview when you want a clean reading surface with keyboard navigation. Your editor cursor stays where you left it when you return from Preview, and switching into Preview opens the reading view at the line you were editing instead of the top of the note. Each note remembers its own last mode; pick what notes open in before that with Settings → Editor → Default view mode (Edit, Split, or Preview), which travels with your portable config.'
   },
   {
     title: 'Find things in the right place',

@@ -192,7 +192,12 @@ import {
   type PaneLayout,
   type PaneLeaf
 } from './lib/pane-layout'
-import { paneModesWithPathMode, type PaneMode, type PaneModesByPath } from './lib/pane-mode'
+import {
+  isPaneMode,
+  paneModesWithPathMode,
+  type PaneMode,
+  type PaneModesByPath
+} from './lib/pane-mode'
 import {
   normalizeTextReplacements,
   type TextReplacements
@@ -489,6 +494,9 @@ interface Prefs {
   /** Keep the current view mode (Edit / Split / Preview) when switching notes
    *  instead of resolving each note's own last mode. Off = per-note (default). */
   keepViewModeAcrossNotes: boolean
+  /** The mode a note opens in before the user has picked one for it: Edit
+   *  (default), Split, or Preview for read-first workflows. (#543) */
+  defaultPaneMode: PaneMode
   /** Renaming a note also rewrites its leading `# Heading` to the new title,
    *  so the title line stops drifting from the filename. Never adds a heading
    *  to a note that has none. (#455) */
@@ -929,6 +937,7 @@ export const DEFAULT_PREFS: Prefs = {
   typstTagPreambles: false,
   looseMathDelimiters: false,
   keepViewModeAcrossNotes: false,
+  defaultPaneMode: 'edit',
   syncTitleHeadingOnRename: true,
   markdownSnippets: true,
   textReplacementsEnabled: true,
@@ -1091,6 +1100,7 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.keepViewModeAcrossNotes === 'boolean'
         ? p.keepViewModeAcrossNotes
         : DEFAULT_PREFS.keepViewModeAcrossNotes,
+    defaultPaneMode: isPaneMode(p.defaultPaneMode) ? p.defaultPaneMode : DEFAULT_PREFS.defaultPaneMode,
     syncTitleHeadingOnRename:
       typeof p.syncTitleHeadingOnRename === 'boolean'
         ? p.syncTitleHeadingOnRename
@@ -2061,6 +2071,7 @@ function collectPrefs(s: {
   typstTagPreambles: boolean
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
+  defaultPaneMode: PaneMode
   syncTitleHeadingOnRename: boolean
   markdownSnippets: boolean
   textReplacementsEnabled: boolean
@@ -2150,6 +2161,7 @@ function collectPrefs(s: {
     typstTagPreambles: s.typstTagPreambles,
     looseMathDelimiters: s.looseMathDelimiters,
     keepViewModeAcrossNotes: s.keepViewModeAcrossNotes,
+    defaultPaneMode: s.defaultPaneMode,
     syncTitleHeadingOnRename: s.syncTitleHeadingOnRename,
     markdownSnippets: s.markdownSnippets,
     textReplacementsEnabled: s.textReplacementsEnabled,
@@ -2636,6 +2648,8 @@ interface Store {
   typstTagPreambles: boolean
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
+  /** The mode a note opens in before it has a remembered one. Persisted. (#543) */
+  defaultPaneMode: PaneMode
   /** Renaming a note rewrites its leading `# Heading` to match. Persisted. (#455) */
   syncTitleHeadingOnRename: boolean
   /** Auto-close markdown delimiters while typing. Persisted. */
@@ -3112,6 +3126,7 @@ interface Store {
   setTypstTagPreambles: (on: boolean) => void
   setLooseMathDelimiters: (on: boolean) => void
   setKeepViewModeAcrossNotes: (on: boolean) => void
+  setDefaultPaneMode: (mode: PaneMode) => void
   setSyncTitleHeadingOnRename: (on: boolean) => void
   setMarkdownSnippets: (on: boolean) => void
   setTextReplacementsEnabled: (on: boolean) => void
@@ -4343,6 +4358,7 @@ export const useStore = create<Store>((set, get) => {
   typstTagPreambles: loadPrefs().typstTagPreambles,
   looseMathDelimiters: loadPrefs().looseMathDelimiters,
   keepViewModeAcrossNotes: loadPrefs().keepViewModeAcrossNotes,
+  defaultPaneMode: loadPrefs().defaultPaneMode,
   syncTitleHeadingOnRename: loadPrefs().syncTitleHeadingOnRename,
   markdownSnippets: loadPrefs().markdownSnippets,
   textReplacementsEnabled: loadPrefs().textReplacementsEnabled,
@@ -6827,6 +6843,10 @@ export const useStore = create<Store>((set, get) => {
   },
   setKeepViewModeAcrossNotes: (on) => {
     set({ keepViewModeAcrossNotes: on })
+    savePrefs(collectPrefs(get()))
+  },
+  setDefaultPaneMode: (mode) => {
+    set({ defaultPaneMode: mode })
     savePrefs(collectPrefs(get()))
   },
   setSyncTitleHeadingOnRename: (on) => {

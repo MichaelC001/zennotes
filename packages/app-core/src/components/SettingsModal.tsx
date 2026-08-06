@@ -460,6 +460,8 @@ export function SettingsModal(): JSX.Element {
   const looseMathDelimiters = useStore((s) => s.looseMathDelimiters);
   const setLooseMathDelimiters = useStore((s) => s.setLooseMathDelimiters);
   const keepViewModeAcrossNotes = useStore((s) => s.keepViewModeAcrossNotes);
+  const defaultPaneMode = useStore((s) => s.defaultPaneMode);
+  const setDefaultPaneMode = useStore((s) => s.setDefaultPaneMode);
   const setKeepViewModeAcrossNotes = useStore(
     (s) => s.setKeepViewModeAcrossNotes,
   );
@@ -2309,6 +2311,18 @@ export function SettingsModal(): JSX.Element {
                   value={looseMathDelimiters}
                   settingId="loose-math-delimiters"
                   onChange={setLooseMathDelimiters}
+                />
+                <SegmentedRow
+                  label="Default view mode"
+                  description="The mode a note opens in before you have picked one for it: Edit to write, Preview to read, Split for both. Each note still remembers the mode you last used on it."
+                  value={defaultPaneMode}
+                  settingId="default-view-mode"
+                  options={[
+                    { value: "edit", label: "Edit" },
+                    { value: "split", label: "Split" },
+                    { value: "preview", label: "Preview" },
+                  ]}
+                  onChange={(next) => setDefaultPaneMode(next)}
                 />
                 <ToggleRow
                   label="Keep view mode when switching notes"
