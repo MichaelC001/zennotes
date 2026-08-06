@@ -5893,6 +5893,55 @@ export const useStore = create<Store>((set, get) => {
   },
 
   applyChange: async (ev) => {
+    if (ev.scope === 'resync') {
+      // The change feed was interrupted and events were lost; re-pull every
+      // surface the feed keeps fresh instead of trusting the resumed stream.
+      await Promise.all([
+        refreshNotesCoalesced(),
+        get().refreshAssets(),
+        window.zen
+          .getVaultSettings()
+          .then((settings) => {
+            const normalized = normalizeVaultSettings(settings)
+            set({
+              vaultSettings: normalized,
+              ...(get().viewSettingsScope === 'vault' ? viewPrefsFromVault(normalized) : {})
+            })
+          })
+          .catch((err) => {
+            console.error('resync vault settings failed', err)
+          }),
+        tasksSurfaceVisible(get()) ? get().refreshTasks() : Promise.resolve()
+      ])
+      // Open notes may have changed on the server while the feed was down.
+      // Re-read the clean ones; a dirty buffer holds local edits the user
+      // has not saved, and clobbering those trades a stale view for lost work.
+      const stateAfter = get()
+      const openPaths = allLeaves(stateAfter.paneLayout)
+        .flatMap((leaf) => leaf.tabs)
+        .filter((p) => stateAfter.noteContents[p] && !stateAfter.noteDirty[p])
+      await Promise.all(
+        [...new Set(openPaths)].map(async (openPath) => {
+          try {
+            const content = await window.zen.readNote(openPath)
+            set((s) => {
+              const existing = s.noteContents[openPath]
+              if (!existing || existing.body === content.body || s.noteDirty[openPath]) return s
+              const contents = { ...s.noteContents, [openPath]: content }
+              const dirty = { ...s.noteDirty, [openPath]: false }
+              return {
+                noteContents: contents,
+                noteDirty: dirty,
+                ...activeFieldsFrom(s.paneLayout, s.activePaneId, contents, dirty)
+              }
+            })
+          } catch {
+            /* the follow-up notes refresh already handled deletions */
+          }
+        })
+      )
+      return
+    }
     if (ev.scope === 'comments') {
       await get().loadNoteComments(ev.path)
       return

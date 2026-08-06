@@ -287,34 +287,82 @@ export class RemoteServerClient {
     return response
   }
 
-  watchVaultChanges(onEvent: (event: VaultChangeEvent) => void): () => void {
+  watchVaultChanges(
+    onEvent: (event: VaultChangeEvent) => void,
+    options: { onReconnect?: () => void } = {}
+  ): () => void {
     const url = new URL('/api/watch', `${this.baseUrl}/`)
     const headers: Record<string, string> = {}
     if (this.authToken) {
       headers['Authorization'] = `Bearer ${this.authToken}`
     }
-    const ws = new WebSocket(url, { headers })
 
-    ws.on('message', (data: WebSocket.RawData) => {
-      const text =
-        typeof data === 'string'
-          ? data
-          : data instanceof ArrayBuffer
-            ? Buffer.from(data).toString('utf8')
-            : Buffer.isBuffer(data)
-              ? data.toString('utf8')
-              : ''
-      if (!text) return
-      try {
-        onEvent(JSON.parse(text) as VaultChangeEvent)
-      } catch {
-        // ignore malformed watcher payloads
-      }
-    })
+    // The subscription must outlive any single socket: a laptop sleep, a
+    // Wi-Fi switch, a server restart, or an idle proxy all kill the
+    // connection without the user doing anything wrong. Every HTTP call
+    // keeps working through such a gap, so a silently dead socket shows up
+    // as "edits from my other device never arrive" — the app looks fine
+    // and is quietly frozen in the past.
+    let ws: WebSocket | null = null
+    let stopped = false
+    let reconnectTimer: NodeJS.Timeout | null = null
+    let failedAttempts = 0
+
+    const connect = (): void => {
+      if (stopped) return
+      const socket = new WebSocket(url, { headers })
+      ws = socket
+
+      socket.on('open', () => {
+        // Events that fired while we were down are gone for good; the
+        // caller re-pulls everything instead of trusting the resumed feed.
+        // Only the very first attempt connecting cleanly has no gap.
+        const hadGap = failedAttempts > 0
+        failedAttempts = 0
+        if (hadGap) options.onReconnect?.()
+      })
+
+      socket.on('message', (data: WebSocket.RawData) => {
+        const text =
+          typeof data === 'string'
+            ? data
+            : data instanceof ArrayBuffer
+              ? Buffer.from(data).toString('utf8')
+              : Buffer.isBuffer(data)
+                ? data.toString('utf8')
+                : ''
+        if (!text) return
+        try {
+          onEvent(JSON.parse(text) as VaultChangeEvent)
+        } catch {
+          // ignore malformed watcher payloads
+        }
+      })
+
+      // `ws` is an EventEmitter: an 'error' with no listener throws an
+      // uncaught exception in the main process (a server restart raises
+      // ECONNRESET here). The close handler owns recovery.
+      socket.on('error', () => {})
+
+      socket.on('close', () => {
+        if (stopped || ws !== socket) return
+        ws = null
+        const delay = Math.min(30_000, 1_000 * 2 ** failedAttempts)
+        failedAttempts += 1
+        reconnectTimer = setTimeout(connect, delay)
+      })
+    }
+
+    connect()
 
     return () => {
+      stopped = true
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
       try {
-        ws.close()
+        ws?.close()
       } catch {
         // ignore close errors
       }

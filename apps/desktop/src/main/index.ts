@@ -1417,10 +1417,30 @@ function stopRemoteWatch(): void {
 
 function startRemoteWatch(client: RemoteServerClient, capabilities: ServerCapabilities): void {
   stopRemoteWatch()
-  if (!capabilities.supportsWatch) return
-  stopRemoteVaultWatch = client.watchVaultChanges((ev) => {
-    windowVaults.sendRemoteVaultChange(ev)
-  })
+  if (!capabilities.supportsWatch) {
+    // A server can run with its watcher disabled (inotify-restricted hosts,
+    // ZENNOTES_DISABLE_WATCHER). Say so once, or "no live updates" has no
+    // trace anywhere.
+    console.warn(
+      `[remote] ${client.baseUrl} reports no watch support; live updates are off for this workspace`
+    )
+    return
+  }
+  stopRemoteVaultWatch = client.watchVaultChanges(
+    (ev) => {
+      windowVaults.sendRemoteVaultChange(ev)
+    },
+    {
+      onReconnect: () => {
+        windowVaults.sendRemoteVaultChange({
+          kind: 'change',
+          path: '',
+          folder: 'inbox',
+          scope: 'resync'
+        })
+      }
+    }
+  )
 }
 
 async function setVaultForWindow(

@@ -955,6 +955,10 @@ type VaultChangeListener = (ev: VaultChangeEvent) => void
 const vaultChangeListeners = new Set<VaultChangeListener>()
 let watchSocket: WebSocket | null = null
 let watchReconnectTimer: number | null = null
+// A dropped socket means lost events, not just downtime: once the next
+// connection opens, tell listeners to re-pull everything rather than
+// resuming the stream as if nothing happened.
+let watchHadGap = false
 
 function ensureWatchSocket(): void {
   if (watchSocket && watchSocket.readyState <= 1) return
@@ -962,6 +966,12 @@ function ensureWatchSocket(): void {
   const url = `${proto}//${window.location.host}${API_BASE}/watch`
   const ws = new WebSocket(url)
   watchSocket = ws
+  ws.addEventListener('open', () => {
+    if (!watchHadGap) return
+    watchHadGap = false
+    const resync: VaultChangeEvent = { kind: 'change', path: '', folder: 'inbox', scope: 'resync' }
+    for (const cb of vaultChangeListeners) cb(resync)
+  })
   ws.addEventListener('message', e => {
     try {
       const ev = JSON.parse(String(e.data)) as VaultChangeEvent
@@ -972,11 +982,14 @@ function ensureWatchSocket(): void {
   })
   ws.addEventListener('close', () => {
     watchSocket = null
-    if (vaultChangeListeners.size > 0 && watchReconnectTimer === null) {
-      watchReconnectTimer = window.setTimeout(() => {
-        watchReconnectTimer = null
-        ensureWatchSocket()
-      }, 1500)
+    if (vaultChangeListeners.size > 0) {
+      watchHadGap = true
+      if (watchReconnectTimer === null) {
+        watchReconnectTimer = window.setTimeout(() => {
+          watchReconnectTimer = null
+          ensureWatchSocket()
+        }, 1500)
+      }
     }
   })
   ws.addEventListener('error', () => {

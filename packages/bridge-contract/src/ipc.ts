@@ -770,7 +770,17 @@ export interface FolderEntry {
 }
 
 export type VaultChangeKind = 'add' | 'change' | 'unlink'
-export type VaultChangeScope = 'content' | 'vault-settings' | 'comments' | 'database' | 'folder'
+/** `resync` is synthesized client-side after a change-feed gap (a dropped
+ *  watch socket that reconnected): anything may have happened while the feed
+ *  was down, so the renderer re-pulls every surface the feed keeps fresh.
+ *  Servers never emit it. */
+export type VaultChangeScope =
+  | 'content'
+  | 'vault-settings'
+  | 'comments'
+  | 'database'
+  | 'folder'
+  | 'resync'
 
 export interface VaultChangeEvent {
   kind: VaultChangeKind
