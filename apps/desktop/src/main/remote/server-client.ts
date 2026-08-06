@@ -1,5 +1,6 @@
 import type {
   AssetMeta,
+  DeletedAsset,
   DirectoryBrowseResult,
   FolderEntry,
   ImportedAsset,
@@ -267,6 +268,94 @@ export class RemoteServerClient {
       method: 'POST',
       body: { folder, subpath }
     }).then((resp) => resp.subpath)
+  }
+
+  async renameAsset(relPath: string, nextName: string): Promise<AssetMeta> {
+    return this.jsonRequest<AssetMeta>('/api/assets/rename', {
+      method: 'POST',
+      body: { path: relPath, name: nextName }
+    })
+  }
+
+  async moveAsset(relPath: string, targetDir: string): Promise<AssetMeta> {
+    return this.jsonRequest<AssetMeta>('/api/assets/move', {
+      method: 'POST',
+      body: { path: relPath, targetDir }
+    })
+  }
+
+  async duplicateAsset(relPath: string): Promise<AssetMeta> {
+    return this.jsonRequest<AssetMeta>('/api/assets/duplicate', {
+      method: 'POST',
+      body: { path: relPath }
+    })
+  }
+
+  async deleteAsset(relPath: string): Promise<DeletedAsset> {
+    return this.jsonRequest<DeletedAsset>('/api/assets/delete', {
+      method: 'POST',
+      body: { path: relPath }
+    })
+  }
+
+  async listDeletedAssets(): Promise<DeletedAsset[]> {
+    return this.jsonRequest<DeletedAsset[]>('/api/assets/deleted')
+  }
+
+  async restoreDeletedAsset(deleted: DeletedAsset): Promise<AssetMeta> {
+    return this.jsonRequest<AssetMeta>('/api/assets/restore', {
+      method: 'POST',
+      body: deleted
+    })
+  }
+
+  async purgeDeletedAsset(undoToken: string): Promise<void> {
+    await this.jsonRequest<void>('/api/assets/purge', {
+      method: 'POST',
+      body: { undoToken }
+    })
+  }
+
+  async emptyDeletedAssets(): Promise<void> {
+    await this.jsonRequest<void>('/api/assets/empty-deleted', { method: 'POST' })
+  }
+
+  /** Multipart, not JSON: the payload is raw file bytes, and the server
+   *  reads a `file` form part plus the owning note's path. */
+  async uploadAsset(
+    notePath: string,
+    filename: string,
+    bytes: Uint8Array,
+    mimeType = 'application/octet-stream'
+  ): Promise<ImportedAsset> {
+    const form = new FormData()
+    form.append('notePath', notePath)
+    // The cast narrows ArrayBufferLike to ArrayBuffer: every source here
+    // (fs.readFile, structured-clone paste bytes) is plain-buffer backed,
+    // which BlobPart demands but the Uint8Array generic cannot promise.
+    form.append('file', new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mimeType }), filename)
+    const headers = new Headers()
+    if (this.authToken) {
+      headers.set('Authorization', `Bearer ${this.authToken}`)
+    }
+    let response: Response
+    try {
+      response = await fetch(`${this.baseUrl}/api/assets/upload`, {
+        method: 'POST',
+        headers,
+        body: form
+      })
+    } catch (error) {
+      throw new RemoteConnectionError(connectionErrorMessage(this.baseUrl, error))
+    }
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new RemoteRequestError(
+        requestErrorMessage(this.baseUrl, '/api/assets/upload', response, text),
+        response.status
+      )
+    }
+    return (await response.json()) as ImportedAsset
   }
 
   async fetchAssetResponse(assetPath: string): Promise<Response> {

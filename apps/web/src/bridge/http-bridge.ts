@@ -818,8 +818,29 @@ async function importFilesToNote(
   return results
 }
 
-async function importPastedImage(_input: PastedImageInput): Promise<ImportedAsset> {
-  throw new Error('Clipboard image paste is only available in the desktop app right now.')
+async function importPastedImage(input: PastedImageInput): Promise<ImportedAsset> {
+  const blob = new Blob([input.data as BlobPart], { type: input.mimeType })
+  if (blob.size === 0) throw new Error('Clipboard image is empty.')
+  const ext = input.mimeType === 'image/jpeg' ? '.jpg' : input.mimeType === 'image/gif' ? '.gif' : '.png'
+  const suggested = (input.suggestedName ?? '').trim()
+  // Same shape as the desktop paste: "Pasted Image YYYY-MM-DD HHMMSS.png".
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  const filename = suggested || `Pasted Image ${stamp}${ext}`
+  const form = new FormData()
+  form.append('file', blob, filename)
+  form.append('notePath', '')
+  const res = await fetch(`${API_BASE}/assets/upload`, {
+    method: 'POST',
+    body: form,
+    credentials: 'same-origin'
+  })
+  if (!res.ok) throw new Error(`paste upload failed: ${res.status}`)
+  const uploaded = (await res.json()) as ImportedAsset
+  // A paste embeds as a wikilink, matching the desktop paste path; the
+  // server's markdown is note-relative and meant for drag-drop imports.
+  return { name: uploaded.name, path: uploaded.path, markdown: `![[${uploaded.path}]]`, kind: 'image' }
 }
 
 function renameAsset(relPath: string, nextName: string): Promise<AssetMeta> {
@@ -836,28 +857,40 @@ function moveAsset(relPath: string, targetDir: string): Promise<AssetMeta> {
   })
 }
 
-async function duplicateAsset(_relPath: string): Promise<AssetMeta> {
-  throw new Error('Asset duplication is only available in the desktop app right now.')
+function duplicateAsset(relPath: string): Promise<AssetMeta> {
+  return jsonRequest<AssetMeta>('/assets/duplicate', {
+    method: 'POST',
+    body: { path: relPath }
+  })
 }
 
-async function deleteAsset(_relPath: string): Promise<DeletedAsset> {
-  throw new Error('Asset deletion is only available in the desktop app right now.')
+function deleteAsset(relPath: string): Promise<DeletedAsset> {
+  return jsonRequest<DeletedAsset>('/assets/delete', {
+    method: 'POST',
+    body: { path: relPath }
+  })
 }
 
-async function restoreDeletedAsset(_asset: DeletedAsset): Promise<AssetMeta> {
-  throw new Error('Asset restore is only available in the desktop app right now.')
+function restoreDeletedAsset(asset: DeletedAsset): Promise<AssetMeta> {
+  return jsonRequest<AssetMeta>('/assets/restore', {
+    method: 'POST',
+    body: { ...asset }
+  })
 }
 
-async function listDeletedAssets(): Promise<DeletedAsset[]> {
-  return []
+function listDeletedAssets(): Promise<DeletedAsset[]> {
+  return jsonRequest<DeletedAsset[]>('/assets/deleted')
 }
 
-async function purgeDeletedAsset(_undoToken: string): Promise<void> {
-  throw new Error('Asset deletion is only available in the desktop app right now.')
+async function purgeDeletedAsset(undoToken: string): Promise<void> {
+  await jsonRequest<void>('/assets/purge', {
+    method: 'POST',
+    body: { undoToken }
+  })
 }
 
 async function emptyDeletedAssets(): Promise<void> {
-  throw new Error('Asset deletion is only available in the desktop app right now.')
+  await jsonRequest<void>('/assets/empty-deleted', { method: 'POST' })
 }
 
 // Bucket for File objects "pretending" to be filesystem paths. The

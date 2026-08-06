@@ -3328,7 +3328,9 @@ function pastedImageExtension(input: Pick<PastedImageInput, 'mimeType' | 'sugges
   throw new Error('Clipboard item is not an image.')
 }
 
-function pastedImageFilename(input: Pick<PastedImageInput, 'mimeType' | 'suggestedName'>, now: Date): string {
+// Exported for the remote-workspace paste path, which uploads the bytes but
+// must name the file exactly like a local paste would.
+export function pastedImageFilename(input: Pick<PastedImageInput, 'mimeType' | 'suggestedName'>, now: Date): string {
   const ext = pastedImageExtension(input)
   const rawName = path.basename(input.suggestedName ?? '')
   const nameExt = path.extname(rawName)

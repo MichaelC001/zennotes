@@ -67,6 +67,7 @@ import {
   importExternalNote,
   importFiles,
   importPastedImage,
+  pastedImageFilename,
   invalidateNoteMetaCache,
   invalidateVaultSettingsCache,
   vaultChangeAffectsSettings,
@@ -2091,6 +2092,18 @@ function requireRemoteWorkspaceClient(): RemoteServerClient {
   return remoteWorkspaceClient
 }
 
+/** The delete/duplicate/restore endpoints shipped with server 2.24; against
+ *  an older server the request would just 404. Name the real remedy instead. */
+function requireRemoteAssetOps(action: string): RemoteServerClient {
+  const client = requireRemoteWorkspaceClient()
+  if (!remoteServerCapabilities?.supportsAssetOps) {
+    throw new Error(
+      `${action} needs a newer ZenNotes server. Update the server and reconnect this workspace.`
+    )
+  }
+  return client
+}
+
 /**
  * Enumerate installed font families for the font picker.
  *
@@ -3019,7 +3032,18 @@ function registerIpc(): void {
     IPC.VAULT_IMPORT_FILES,
     async (_e, notePath: string, sourcePaths: string[]) => {
       if (isRemoteWorkspaceActive()) {
-        throw new Error('Desktop file import is only available for local vaults right now.')
+        // The dropped files live on THIS machine; the vault does not. Read
+        // them here and hand the bytes to the server's upload endpoint.
+        const client = requireRemoteWorkspaceClient()
+        const imported = []
+        for (const sourcePath of sourcePaths) {
+          const abs = path.resolve(sourcePath)
+          const stat = await fsp.stat(abs)
+          if (!stat.isFile()) continue
+          const bytes = await fsp.readFile(abs)
+          imported.push(await client.uploadAsset(notePath, path.basename(abs), bytes))
+        }
+        return imported
       }
       const v = requireVault()
       return await importFiles(v.root, notePath, sourcePaths)
@@ -3028,7 +3052,25 @@ function registerIpc(): void {
 
   handle(IPC.VAULT_IMPORT_PASTED_IMAGE, async (_e, input: PastedImageInput) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error('Clipboard image paste is only available for local vaults right now.')
+      const client = requireRemoteWorkspaceClient()
+      const bytes =
+        input.data instanceof ArrayBuffer
+          ? new Uint8Array(input.data)
+          : ArrayBuffer.isView(input.data)
+            ? new Uint8Array(input.data.buffer, input.data.byteOffset, input.data.byteLength)
+            : null
+      if (!bytes) throw new Error('Clipboard image data is invalid.')
+      if (bytes.byteLength === 0) throw new Error('Clipboard image is empty.')
+      const filename = pastedImageFilename(input, new Date())
+      const uploaded = await client.uploadAsset('', filename, bytes, input.mimeType)
+      // A paste embeds as a wikilink exactly like the local path does; the
+      // server's markdown is note-relative and meant for drag-drop imports.
+      return {
+        name: uploaded.name,
+        path: uploaded.path,
+        markdown: `![[${uploaded.path}]]`,
+        kind: 'image' as const
+      }
     }
     const v = requireVault()
     return await importPastedImage(v.root, input)
@@ -3036,7 +3078,7 @@ function registerIpc(): void {
 
   handle(IPC.VAULT_RENAME_ASSET, async (_e, relPath: string, nextName: string) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error('Asset rename is only available for local vaults right now.')
+      return await requireRemoteWorkspaceClient().renameAsset(relPath, nextName)
     }
     const v = requireVault()
     return await renameAsset(v.root, relPath, nextName)
@@ -3044,7 +3086,7 @@ function registerIpc(): void {
 
   handle(IPC.VAULT_MOVE_ASSET, async (_e, relPath: string, targetDir: string) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error('Asset move is only available for local vaults right now.')
+      return await requireRemoteWorkspaceClient().moveAsset(relPath, targetDir)
     }
     const v = requireVault()
     return await moveAsset(v.root, relPath, targetDir)
@@ -3052,7 +3094,7 @@ function registerIpc(): void {
 
   handle(IPC.VAULT_DUPLICATE_ASSET, async (_e, relPath: string) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error('Asset duplication is only available for local vaults right now.')
+      return await requireRemoteAssetOps('Asset duplication').duplicateAsset(relPath)
     }
     const v = requireVault()
     return await duplicateAsset(v.root, relPath)
@@ -3060,7 +3102,7 @@ function registerIpc(): void {
 
   handle(IPC.VAULT_DELETE_ASSET, async (_e, relPath: string) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error('Asset deletion is only available for local vaults right now.')
+      return await requireRemoteAssetOps('Asset deletion').deleteAsset(relPath)
     }
     const v = requireVault()
     return await deleteAsset(v.root, relPath)
@@ -3068,21 +3110,27 @@ function registerIpc(): void {
 
   handle(IPC.VAULT_RESTORE_DELETED_ASSET, async (_e, deleted: DeletedAsset) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error('Asset restore is only available for local vaults right now.')
+      return await requireRemoteAssetOps('Asset restore').restoreDeletedAsset(deleted)
     }
     const v = requireVault()
     return await restoreDeletedAsset(v.root, deleted)
   })
 
   handle(IPC.VAULT_LIST_DELETED_ASSETS, async () => {
-    if (isRemoteWorkspaceActive()) return []
+    if (isRemoteWorkspaceActive()) {
+      // Older servers have no deleted-assets store; an empty Trash view is
+      // the truthful answer there, not an error.
+      if (!remoteServerCapabilities?.supportsAssetOps) return []
+      return await requireRemoteWorkspaceClient().listDeletedAssets()
+    }
     const v = requireVault()
     return await listDeletedAssets(v.root)
   })
 
   handle(IPC.VAULT_PURGE_DELETED_ASSET, async (_e, undoToken: string) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error('Asset deletion is only available for local vaults right now.')
+      await requireRemoteAssetOps('Asset deletion').purgeDeletedAsset(undoToken)
+      return
     }
     const v = requireVault()
     await purgeDeletedAsset(v.root, undoToken)
@@ -3090,7 +3138,8 @@ function registerIpc(): void {
 
   handle(IPC.VAULT_EMPTY_DELETED_ASSETS, async () => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error('Asset deletion is only available for local vaults right now.')
+      await requireRemoteAssetOps('Asset deletion').emptyDeletedAssets()
+      return
     }
     const v = requireVault()
     await emptyDeletedAssets(v.root)

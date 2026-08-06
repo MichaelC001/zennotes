@@ -700,6 +700,10 @@ export interface ServerCapabilities {
    *  because no server before 2.20.2 said so, and its ABSENCE is the useful
    *  half: it marks the servers whose 500 might only mean "missing". */
   reportsMissingAsNotFound?: boolean
+  /** The full asset mutation family incl. the deleted-assets store
+   *  (delete/duplicate/restore/purge). Absent on servers before 2.24, which
+   *  is what turns a bare 404 into a "server needs an update" message. */
+  supportsAssetOps?: boolean
 }
 
 export interface ServerSessionStatus {
