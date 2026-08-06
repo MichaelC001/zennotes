@@ -407,3 +407,46 @@ describe('non-GFM task states in the reading view (#512)', () => {
     expect(html).toContain('Target')
   })
 })
+
+describe('callout titles keep their inline markup (#549)', () => {
+  const titleOf = (html: string): string => {
+    const m = html.match(/<div class="callout-title">([\s\S]*?)<\/div>/)
+    return m ? m[1] : ''
+  }
+
+  it('keeps a link inside the title line, with no orphaned body paragraph', () => {
+    const html = renderMarkdown('> [!warning] This is warning [with](https://example.com) that is not multiline')
+    const title = titleOf(html)
+    expect(title).toContain('This is warning')
+    expect(title).toContain('<a')
+    expect(title).toContain('that is not multiline')
+    // The whole line is the title: nothing left over as a body paragraph.
+    expect(html).not.toMatch(/callout-title[\s\S]*?<\/div><p/)
+  })
+
+  it('keeps inline math inside the title line', () => {
+    const html = renderMarkdown('> [!note] This can also be reproduced with a $3+1=4$ formula inline.')
+    const title = titleOf(html)
+    expect(title).toContain('katex')
+    expect(title).toContain('formula inline.')
+  })
+
+  it('splits a multiline callout into title and a compact body without a stray <br>', () => {
+    const html = renderMarkdown('> [!note] line 1\n> line 2')
+    expect(titleOf(html)).toContain('line 1')
+    expect(html).toMatch(/<p[^>]*>line 2<\/p>/)
+    // The title/body soft break is a delimiter, not content: a leading <br>
+    // in the body paragraph rendered as a phantom empty line.
+    expect(html).not.toMatch(/<p[^>]*><br>/)
+  })
+
+  it('falls back to the capitalized type when the title line is empty', () => {
+    expect(titleOf(renderMarkdown('> [!note]\n> body only'))).toBe('Note')
+    expect(titleOf(renderMarkdown('> [!tip]'))).toBe('Tip')
+  })
+
+  it('leaves ordinary blockquotes and non-marker text alone', () => {
+    expect(renderMarkdown('> just a quote')).not.toContain('callout')
+    expect(renderMarkdown('> [!note]x is not a marker')).not.toContain('callout')
+  })
+})

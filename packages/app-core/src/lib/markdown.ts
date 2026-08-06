@@ -551,21 +551,61 @@ function remarkCallouts() {
       const firstText = first.children?.[0]
       if (!firstText || firstText.type !== 'text') return
 
-      const raw = firstText.value
-      const headerEnd = raw.indexOf('\n')
-      const header = headerEnd >= 0 ? raw.slice(0, headerEnd) : raw
-      const match = header.match(/^\[!(\w+)\](?:\s+(.*))?$/)
-      if (!match) return
+      // The marker must open the paragraph and be followed by whitespace (or
+      // nothing). The title is EVERYTHING else on the first line, inline
+      // nodes included — a [link](x) or $math$ in the title used to be
+      // orphaned into an uncolored body paragraph, because only this leading
+      // text fragment was consulted for the title. (#549)
+      const marker = firstText.value.match(/^\[!(\w+)\](?:[ \t]+|(?=\n)|$)/)
+      if (!marker) return
+      const type = marker[1].toLowerCase()
 
-      const type = match[1].toLowerCase()
-      const title = (match[2] ?? '').trim() || type.charAt(0).toUpperCase() + type.slice(1)
-      const rest = headerEnd >= 0 ? raw.slice(headerEnd + 1) : ''
-
-      firstText.value = rest
-      if (rest === '') {
-        first.children.shift()
+      // Split the paragraph's inline children into the title line and the
+      // body. remark-breaks runs earlier, so soft breaks arrive as `break`
+      // nodes and the first one ends the title; the delimiter itself is
+      // dropped, or the body paragraph opens with a stray <br> that reads as
+      // a phantom empty line. Raw newlines are handled too, in case the
+      // plugin ever runs without remark-breaks.
+      type Inline = (typeof first.children)[number]
+      const titleChildren: Inline[] = []
+      const bodyChildren: Inline[] = []
+      let inBody = false
+      const pushText = (value: string, into: Inline[]): void => {
+        if (value !== '') into.push({ type: 'text', value } as Inline)
       }
-      if (first.children.length === 0) {
+      first.children.forEach((child, i) => {
+        if (inBody) {
+          bodyChildren.push(child)
+          return
+        }
+        if (child.type === 'break') {
+          inBody = true
+          return
+        }
+        if (i === 0 || child.type === 'text') {
+          const value =
+            i === 0 ? firstText.value.slice(marker[0].length) : (child as { value: string }).value
+          const nl = value.indexOf('\n')
+          if (nl >= 0) {
+            pushText(value.slice(0, nl), titleChildren)
+            pushText(value.slice(nl + 1), bodyChildren)
+            inBody = true
+          } else {
+            pushText(value, titleChildren)
+          }
+          return
+        }
+        titleChildren.push(child)
+      })
+
+      const hasTitle = titleChildren.some(
+        (child) => child.type !== 'text' || (child as { value: string }).value.trim() !== ''
+      )
+      const fallbackTitle = type.charAt(0).toUpperCase() + type.slice(1)
+
+      if (bodyChildren.length > 0) {
+        first.children = bodyChildren
+      } else {
         node.children.shift()
       }
 
@@ -586,7 +626,7 @@ function remarkCallouts() {
           hName: 'div',
           hProperties: { className: ['callout-title'] }
         },
-        children: [{ type: 'text', value: title }]
+        children: hasTitle ? titleChildren : [{ type: 'text', value: fallbackTitle }]
       } as never)
     })
   }
