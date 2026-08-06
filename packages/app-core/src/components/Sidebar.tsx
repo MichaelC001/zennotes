@@ -2842,6 +2842,10 @@ export function Sidebar(): JSX.Element {
     <aside
       className={`glass-sidebar relative flex shrink-0 flex-col pt-3${isSidebarFocused ? " panel-focused" : ""}`}
       style={{ width: sidebarWidth }}
+      // Programmatic focus target for focusSidebarPanel (the Focus Sidebar
+      // command); -1 keeps it out of the tab order.
+      data-zen-sidebar
+      tabIndex={-1}
       onMouseDownCapture={(e) => {
         syncSidebarCursorFromTarget(e.target);
         setFocusedPanel("sidebar");

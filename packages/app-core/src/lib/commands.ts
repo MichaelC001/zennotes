@@ -11,6 +11,7 @@ import { confirmApp } from './confirm-requests'
 import { promptApp } from './prompt-requests'
 import { buildMoveNotePrompt, parseMoveNoteTarget } from './move-note'
 import { focusPaneInDirection } from './pane-nav'
+import { focusSidebarPanel } from './sidebar-focus'
 import { findLeaf } from './pane-layout'
 import { requestPaneMode } from './pane-mode'
 import { resolveQuickNoteTitle } from './quick-note-title'
@@ -1057,7 +1058,11 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       run: () => {
         const st = getState()
         if (!st.sidebarOpen) st.toggleSidebar()
-        st.setFocusedPanel('sidebar')
+        // Moves DOM focus too (with retries), not just the store panel: the
+        // closing palette restores focus on unmount, and if that lands in a
+        // self-keyed surface (database grid) it re-steals every key while the
+        // sidebar paints its vim cursor. See focusSidebarPanel.
+        focusSidebarPanel()
       }
     },
     {

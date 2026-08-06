@@ -149,6 +149,7 @@ import {
   rewriteFolderColorsForRename,
   rewriteFolderIconsForRename
 } from './lib/vault-layout'
+import { releaseSelfKeyedSurfaceFocus } from './lib/self-keyed-surfaces'
 import { renderTemplate, renderTitle } from './lib/template-render'
 import type { NoteTemplate } from '@bridge-contract/templates'
 import type { WorkflowRunReceipt, WorkflowUndoResult } from '@bridge-contract/workflows'
@@ -7741,7 +7742,15 @@ export const useStore = create<Store>((set, get) => {
     set({ hasCompletedOnboarding: false, settingsOpen: false })
     savePrefs(collectPrefs(get()))
   },
-  setFocusedPanel: (panel) => set({ focusedPanel: panel }),
+  setFocusedPanel: (panel) => {
+    // Handing the keyboard to the sidebar must also take it away from any
+    // self-keyed surface (the database grid keeps every key while it holds
+    // DOM focus). Without this, "Focus Sidebar" painted the vim cursor and
+    // `m` hint on a sidebar row while the grid silently kept the keys, and
+    // pressing `m` on a "selected" folder opened nothing.
+    if (panel === 'sidebar') releaseSelfKeyedSurfaceFocus()
+    set({ focusedPanel: panel })
+  },
   setSidebarCursorIndex: (idx) => set({ sidebarCursorIndex: idx }),
   // #301: date-nav tree expand/collapse. Ephemeral (no savePrefs) — mirrors
   // toggleCollapseFolder but for the Daily/Weekly date groups so VimNav's

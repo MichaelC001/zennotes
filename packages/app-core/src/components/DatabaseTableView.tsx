@@ -167,12 +167,16 @@ export function DatabaseTableView({ csvPath, doc, view, isActive }: Props): JSX.
   // a workspace restore (reopening the app), when the window regains focus, and
   // when focus comes back *down* from the tab strip (Ctrl+J / j, which sets
   // focusedPanel to 'editor') — so vim motions work without clicking a row.
-  // Bails while the tab strip is the focused region (Ctrl+K moved up there) and
-  // while an interactive control (a cell editor, a header button) owns focus,
-  // so it never yanks the caret out from under the user. rAF lets the opening
-  // click / restore settle so it can't steal focus back.
+  // Claims ONLY while the store says the content region owns the keyboard:
+  // when another panel holds it (tab strip via Ctrl+K, or the sidebar via
+  // Focus Sidebar / the boot default), stealing focus here re-routed every
+  // key to the grid while the sidebar painted its vim cursor and `m` hint,
+  // and the hinted key opened nothing. Also bails while an interactive
+  // control (a cell editor, a header button) owns focus, so it never yanks
+  // the caret out from under the user. rAF lets the opening click / restore
+  // settle so it can't steal focus back.
   useEffect(() => {
-    if (!isActive || focusedPanel === 'tabs') return
+    if (!isActive || focusedPanel !== 'editor') return
     const claimFocus = (): void => {
       const a = document.activeElement as HTMLElement | null
       if (a && a !== document.body && a.closest('input, textarea, button, [contenteditable="true"]'))
