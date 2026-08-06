@@ -4699,10 +4699,16 @@ export const useStore = create<Store>((set, get) => {
   },
 
   openAssetsView: async () => {
-    const state = get()
     // Refresh both: assets for the list, notes for fresh assetEmbeds (usage).
     await Promise.all([get().refreshAssets(), get().refreshNotes()])
-    await get().openNoteInPane(state.activePaneId, ASSETS_VIEW_TAB_PATH)
+    // The pane id must be read AFTER the refreshes. With no tabs open,
+    // refreshNotes prunes the empty leaf and mints a replacement with a new
+    // id (rewritePathsInTree returns makeLeaf() for a tree that pruned to
+    // nothing), so an id snapshotted before the await names a pane that no
+    // longer exists and openNoteInPane silently no-ops: clicking Assets on
+    // the home screen did nothing. The sibling view openers have no await
+    // between reading the id and using it.
+    await get().openNoteInPane(get().activePaneId, ASSETS_VIEW_TAB_PATH)
     ;(document.activeElement as HTMLElement | null)?.blur?.()
     set({ focusedPanel: 'editor' })
   },
