@@ -1373,8 +1373,12 @@ export function Sidebar(): JSX.Element {
     const startedAt = performance.now();
     // Classified through the same settings-aware helpers the tree uses; see
     // sidebarRevealTarget for why the raw path's first segment is not the
-    // folder (Vault Root mode, remapped system folders).
-    const target = sidebarRevealTarget(activePath, vaultSettings);
+    // folder (Vault Root mode, remapped system folders). Settings are read
+    // at effect time, not subscribed: with vaultSettings in the dependency
+    // array, every settings write (a favorite toggle, a folder color, a
+    // remote resync) re-ran the reveal and yanked the sidebar scroll back
+    // to the active note while the user was browsing elsewhere.
+    const target = sidebarRevealTarget(activePath, useStore.getState().vaultSettings);
     if (!target) return;
     const { folder, parts, ancestors } = target;
     const prev = new Set(useStore.getState().collapsedFolders);
@@ -1402,7 +1406,10 @@ export function Sidebar(): JSX.Element {
         return;
       }
 
-      for (let i = parts.length - 1; i >= 1; i--) {
+      // i reaches 0 so the walk can land on the folder's own root row
+      // (data-sidebar-subpath=""), which is also the only candidate for a
+      // note that sits directly in the folder root (parts.length === 1).
+      for (let i = parts.length - 1; i >= 0; i--) {
         const subpath = parts.slice(0, i).join("/");
         const folderEl = document.querySelector(
           `[data-sidebar-type="folder"][data-sidebar-folder="${folder}"][data-sidebar-subpath="${escapeForAttr(subpath)}"]`,
@@ -1428,7 +1435,7 @@ export function Sidebar(): JSX.Element {
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
-  }, [autoReveal, activePath, selectedPath, vaultSettings, setCollapsedFoldersAction]);
+  }, [autoReveal, activePath, selectedPath, setCollapsedFoldersAction]);
 
   const [activeBodyTagSnapshot, setActiveBodyTagSnapshot] = useState<{
     path: string;
