@@ -190,6 +190,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'loose_math_delimiters',
     comment: 'render $$…$$ display math even with text before/after the fences'
   },
+  defaultPaneMode: {
+    section: 'editor',
+    tomlKey: 'default_view_mode',
+    comment: 'edit | split | preview — the mode a note opens in before it has a remembered one'
+  },
   lineNumberMode: {
     section: 'editor',
     tomlKey: 'line_number_mode',
