@@ -80,6 +80,7 @@ export const IPC = {
   VAULT_REVEAL_FOLDER: 'vault:reveal-folder',
   VAULT_REVEAL_FILE_PATH: 'vault:reveal-file-path',
   VAULT_OPEN_EXTERNAL_FILE: 'vault:open-external-file',
+  VAULT_OPEN_ASSET_EXTERNALLY: 'vault:open-asset-externally',
   VAULT_FETCH_LINK_METADATA: 'vault:fetch-link-metadata',
   VAULT_REVEAL_FOLDER_TARGET: 'vault:reveal-folder-target',
   VAULT_REVEAL_ASSETS_DIR: 'vault:reveal-assets-dir',

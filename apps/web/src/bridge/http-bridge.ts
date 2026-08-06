@@ -570,6 +570,11 @@ async function openExternalFile(_href: string): Promise<{ ok: boolean; error?: s
   return { ok: false, error: 'desktop-only' }
 }
 
+async function openAssetExternally(_relPath: string): Promise<{ ok: boolean; error?: string }> {
+  // Same story as openExternalFile: no OS opener in a browser.
+  return { ok: false, error: 'desktop-only' }
+}
+
 async function fetchLinkMetadata(url: string): Promise<LinkMetadata> {
   // The browser can't fetch arbitrary cross-origin pages (CORS); a bookmark on
   // web falls back to a bare link card until a server-side proxy is added.
@@ -1411,6 +1416,7 @@ export const httpBridge: ZenBridge = {
   exportNoteDocx,
   revealNote,
   openExternalFile,
+  openAssetExternally,
   fetchLinkMetadata,
   revealNoteTarget,
   revealFilePath,

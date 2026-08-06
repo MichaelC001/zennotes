@@ -3013,6 +3013,32 @@ function registerIpc(): void {
     }
   })
 
+  handle(IPC.VAULT_OPEN_ASSET_EXTERNALLY, async (_e, relPath: string) => {
+    try {
+      const rel = String(relPath ?? '').trim()
+      if (!rel) return { ok: false, error: 'Empty path.' }
+      if (isRemoteWorkspaceActive()) {
+        // The asset lives on the server; the OS opener needs local bytes.
+        // Joining the remote vault root onto this machine's filesystem is
+        // exactly the "Failed to open path" the reporter hit. Download into
+        // a fresh temp dir per open (a second open must not clobber a file
+        // the first app still has mapped); the OS owns temp cleanup.
+        const client = requireRemoteWorkspaceClient()
+        const response = await client.fetchAssetResponse(rel)
+        const dir = await fsp.mkdtemp(path.join(app.getPath('temp'), 'zennotes-remote-open-'))
+        const target = path.join(dir, path.basename(rel) || 'attachment')
+        await fsp.writeFile(target, Buffer.from(await response.arrayBuffer()))
+        const error = await shell.openPath(target)
+        return error ? { ok: false, error } : { ok: true }
+      }
+      const v = requireVault()
+      const error = await shell.openPath(absolutePath(v.root, rel))
+      return error ? { ok: false, error } : { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   handle(IPC.VAULT_FETCH_LINK_METADATA, async (_e, url: string) => {
     return await fetchLinkMetadata(url)
   })
