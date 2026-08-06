@@ -374,6 +374,28 @@ function refreshNotesCoalesced(): Promise<void> {
   return coalescedNotesRefreshInFlight
 }
 
+/** A note the user just created is for typing: with the Default view mode
+ *  preference set to Preview, the fallback would open it read-only with no
+ *  editor mounted, breaking the create-then-type flow (#543 follow-up).
+ *  Remembering 'edit' for the new path wins over the fallback; a later
+ *  explicit mode switch still overwrites it. Written straight into
+ *  paneModes (not via setPaneModeForPath) so the pane's sticky mode is
+ *  untouched, and skipped entirely when the default is already 'edit'. */
+function rememberEditModeForCreatedNote(path: string): void {
+  const s = useStore.getState()
+  if (s.defaultPaneMode === 'edit') return
+  useStore.setState((cur) => ({
+    paneModes: {
+      ...cur.paneModes,
+      [cur.activePaneId]: paneModesWithPathMode(
+        cur.paneModes[cur.activePaneId] ?? {},
+        path,
+        'edit'
+      )
+    }
+  }))
+}
+
 async function refreshVaultIndexes(): Promise<void> {
   const state = useStore.getState()
   await Promise.all([
@@ -4766,6 +4788,7 @@ export const useStore = create<Store>((set, get) => {
       : resolveCreateLocation(settings.tasksLocation, s.activeNote, settings)
     try {
       const meta = await window.zen.createNote(folder, title, subpath)
+      rememberEditModeForCreatedNote(meta.path)
       // Overwrite the default `# title` body with the TaskNotes-style frontmatter
       // so the note is recognized as a task and shows up in the Tasks view.
       await window.zen.writeNote(
@@ -6341,6 +6364,7 @@ export const useStore = create<Store>((set, get) => {
   createAndOpen: async (folder, subpath = '', options) => {
     try {
       const meta = await window.zen.createNote(folder, options?.title, subpath)
+      rememberEditModeForCreatedNote(meta.path)
       await get().refreshNotes()
       set({
         view: { kind: 'folder', folder, subpath },
@@ -7360,6 +7384,7 @@ export const useStore = create<Store>((set, get) => {
     const body = template ? renderTemplate(template.body, { title, now: date }).body : ''
     try {
       const meta = await window.zen.createNote('inbox', title, subpath)
+      rememberEditModeForCreatedNote(meta.path)
       if (body) await window.zen.writeNote(meta.path, body)
       await get().refreshNotes()
       return get().notes.find((n) => n.path === meta.path) ?? meta
@@ -7666,6 +7691,7 @@ export const useStore = create<Store>((set, get) => {
       if (!title) title = template.name
       const { body, cursorOffset } = renderTemplate(template.body, { title, now: opts?.date })
       const meta = await window.zen.createNote(folder, title, subpath)
+      rememberEditModeForCreatedNote(meta.path)
       // Write the rendered body before opening so the editor never flashes the
       // default `# Title` scaffold (mirrors importDroppedMarkdownFiles).
       await window.zen.writeNote(meta.path, body)
