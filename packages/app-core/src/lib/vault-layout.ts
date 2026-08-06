@@ -1518,6 +1518,35 @@ export function folderForVaultRelativePath(
   return null
 }
 
+/**
+ * What the sidebar must expand (and where it can scroll) to make `relPath`
+ * visible. Classification goes through the same settings-aware helpers the
+ * tree itself uses: deriving the folder from the path's first segment holds
+ * only for unremapped inbox-mode vaults — in Vault Root mode the path has no
+ * folder prefix at all, so naively computed keys match nothing and
+ * auto-reveal silently expands nothing (Kta's report, 2.24).
+ *
+ * `ancestors` are collapse-set keys (`folder:` then `folder:sub/...` per
+ * level); `parts` is the path within the folder, for walking folder rows.
+ * Null when the path has no place in the tree.
+ */
+export function sidebarRevealTarget(
+  relPath: string,
+  settings: VaultSettings | null | undefined
+): { folder: NoteFolder; parts: string[]; ancestors: string[] } | null {
+  const folder = folderForVaultRelativePath(relPath, settings)
+  if (!folder) return null
+  const within = notePathWithinFolder(relPath, folder, settings)
+  const parts = within.split('/').filter(Boolean)
+  const ancestors: string[] = [`${folder}:`]
+  let acc = ''
+  for (let i = 0; i < parts.length - 1; i++) {
+    acc = acc ? `${acc}/${parts[i]}` : parts[i]
+    ancestors.push(`${folder}:${acc}`)
+  }
+  return { folder, parts, ancestors }
+}
+
 export function assetPathWithinFolder(
   assetPath: string,
   folder: NoteFolder,

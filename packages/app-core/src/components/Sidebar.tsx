@@ -80,6 +80,7 @@ import {
   normalizeVaultSettings,
   noteFolderSubpath,
   parseFavoriteFolderKey,
+  sidebarRevealTarget,
 } from "../lib/vault-layout";
 import { resolveFolderPath } from "@shared/system-folder-paths";
 import {
@@ -94,6 +95,7 @@ import { resolveSystemFolderLabels } from "../lib/system-folder-labels";
 import { assetTabPath } from "../lib/asset-tabs";
 import {
   csvPathForFormDir,
+  csvPathFromDatabaseTab,
   FORM_DIR_SUFFIX,
   formTitleFromDir,
   isFormDirName,
@@ -1359,20 +1361,22 @@ export function Sidebar(): JSX.Element {
    * can feel inert unless the note happens to live inside a currently
    * collapsed folder.
    */
+  // A database tab is a zen:// virtual path wrapping a real data.csv path;
+  // unwrap it so the reveal can walk to the .base folder row. Other zen://
+  // tabs (assets, tasks, help...) have no place in the tree and stay out.
   const activePath =
-    selectedPath && !selectedPath.startsWith("zen://") ? selectedPath : null;
+    selectedPath && !selectedPath.startsWith("zen://")
+      ? selectedPath
+      : csvPathFromDatabaseTab(selectedPath);
   useEffect(() => {
     if (!autoReveal || !activePath) return;
     const startedAt = performance.now();
-    const parts = activePath.split("/");
-    const folder = parts[0] as NoteFolder;
-    // Collect every ancestor key we need to make sure is expanded.
-    const ancestors: string[] = [`${folder}:`];
-    let acc = "";
-    for (let i = 1; i < parts.length - 1; i++) {
-      acc = acc ? `${acc}/${parts[i]}` : parts[i];
-      ancestors.push(`${folder}:${acc}`);
-    }
+    // Classified through the same settings-aware helpers the tree uses; see
+    // sidebarRevealTarget for why the raw path's first segment is not the
+    // folder (Vault Root mode, remapped system folders).
+    const target = sidebarRevealTarget(activePath, vaultSettings);
+    if (!target) return;
+    const { folder, parts, ancestors } = target;
     const prev = new Set(useStore.getState().collapsedFolders);
     let changed = false;
     for (const key of ancestors) {
@@ -1398,10 +1402,8 @@ export function Sidebar(): JSX.Element {
         return;
       }
 
-      const parts = activePath.split("/");
-      const folder = parts[0] as NoteFolder;
       for (let i = parts.length - 1; i >= 1; i--) {
-        const subpath = parts.slice(1, i).join("/");
+        const subpath = parts.slice(0, i).join("/");
         const folderEl = document.querySelector(
           `[data-sidebar-type="folder"][data-sidebar-folder="${folder}"][data-sidebar-subpath="${escapeForAttr(subpath)}"]`,
         ) as HTMLElement | null;
@@ -1426,7 +1428,7 @@ export function Sidebar(): JSX.Element {
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
-  }, [autoReveal, activePath, selectedPath, setCollapsedFoldersAction]);
+  }, [autoReveal, activePath, selectedPath, vaultSettings, setCollapsedFoldersAction]);
 
   const [activeBodyTagSnapshot, setActiveBodyTagSnapshot] = useState<{
     path: string;
