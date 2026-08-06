@@ -3704,14 +3704,23 @@ export async function deleteAsset(root: string, rel: string): Promise<DeletedAss
   await fs.mkdir(trashDir, { recursive: true })
   const name = path.basename(source.abs)
   const deletedAt = new Date().toISOString()
-  await fs.rename(source.abs, path.join(trashDir, name))
   // Persist the original location so the asset can be listed + restored from the
   // Trash view even after a restart (not just via the in-session undo stack).
-  await fs.writeFile(
-    path.join(trashDir, DELETED_ASSET_META),
-    JSON.stringify({ path: source.rel, name, deletedAt }, null, 2),
-    'utf8'
-  )
+  // Metadata first, file move last: a failure anywhere leaves the asset still
+  // in the vault. The old order (rename, then metadata) could hit a write
+  // error after the move and strand the asset in a token dir the Trash view
+  // skips, gone from the vault with no in-app way back.
+  try {
+    await fs.writeFile(
+      path.join(trashDir, DELETED_ASSET_META),
+      JSON.stringify({ path: source.rel, name, deletedAt }, null, 2),
+      'utf8'
+    )
+    await fs.rename(source.abs, path.join(trashDir, name))
+  } catch (err) {
+    await fs.rm(trashDir, { recursive: true, force: true }).catch(() => {})
+    throw err
+  }
   return { path: source.rel, name, undoToken, deletedAt }
 }
 
@@ -3761,10 +3770,27 @@ export async function emptyDeletedAssets(root: string): Promise<void> {
 }
 
 export async function restoreDeletedAsset(root: string, deleted: DeletedAsset): Promise<AssetMeta> {
-  const targetRel = cleanDeletedAssetPath(deleted.path)
-  const name = cleanAssetFilename(deleted.name)
   const undoToken = cleanDeletedAssetToken(deleted.undoToken)
   const trashDir = resolveSafe(root, `${INTERNAL_VAULT_DIR}/${DELETED_ASSETS_DIR}/${undoToken}`)
+  // Only the token comes from the caller; the stored metadata decides what
+  // gets restored and where. Trusting a caller-supplied name here once let a
+  // request naming the metadata file itself "restore" that file and then
+  // destroy the real asset bytes with the trash dir cleanup (the Go server
+  // shared the hole; the two stores are one disk contract).
+  let storedMeta: { path: string; name: string }
+  try {
+    const raw = await fs.readFile(path.join(trashDir, DELETED_ASSET_META), 'utf8')
+    const parsed = JSON.parse(raw) as { path?: unknown; name?: unknown }
+    if (typeof parsed.path !== 'string' || typeof parsed.name !== 'string') throw new Error()
+    storedMeta = { path: parsed.path, name: parsed.name }
+  } catch {
+    throw new Error('This deleted asset can no longer be restored.')
+  }
+  const targetRel = cleanDeletedAssetPath(storedMeta.path)
+  const name = cleanAssetFilename(storedMeta.name)
+  if (name === DELETED_ASSET_META) {
+    throw new Error('This deleted asset can no longer be restored.')
+  }
   const sourceAbs = path.join(trashDir, name)
   const targetAbs = resolveSafe(root, targetRel)
   const targetDir = path.dirname(targetAbs)
