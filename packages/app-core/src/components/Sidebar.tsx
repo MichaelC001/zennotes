@@ -3083,16 +3083,27 @@ export function Sidebar(): JSX.Element {
                   const idx = idxCounter.current.value++;
                   const vimHighlight = vimCursor === idx;
                   if (item.kind === "note") {
+                    // A favorited note keeps the icon and color it carries in
+                    // the tree; the row used to hardcode the document glyph,
+                    // so the same note looked different two sections apart.
+                    const customIconId = vaultSettings.folderIcons[item.path];
                     return (
                       <FavoriteRow
                         key={item.key}
                         label={item.title || "Untitled"}
                         icon={
-                          item.isDrawing ? (
+                          customIconId ? (
+                            iconOptionById(customIconId).icon
+                          ) : item.isDrawing ? (
                             <ExcalidrawIcon width={13} height={13} />
                           ) : (
                             <DocumentIcon width={13} height={13} />
                           )
+                        }
+                        colorClass={
+                          colorGlyphClassById(
+                            vaultSettings.folderColors[item.path],
+                          ) ?? undefined
                         }
                         active={selectedPath === item.path}
                         onClick={() => {
@@ -3123,6 +3134,13 @@ export function Sidebar(): JSX.Element {
                           item.subpath,
                           vaultSettings.folderIcons,
                         ).icon
+                      }
+                      colorClass={
+                        resolveFolderColorGlyphClass(
+                          item.folder,
+                          item.subpath,
+                          vaultSettings.folderColors,
+                        ) ?? undefined
                       }
                       active={isFolderActive(item.folder, item.subpath)}
                       onClick={() => {
@@ -5494,6 +5512,7 @@ function TaskSidebarRow({
 function FavoriteRow({
   label,
   icon,
+  colorClass,
   active,
   onClick,
   onContextMenu,
@@ -5504,6 +5523,8 @@ function FavoriteRow({
 }: {
   label: string;
   icon: JSX.Element;
+  /** Custom glyph/label tint (folder color), mirroring the tree rows. */
+  colorClass?: string;
   active: boolean;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
@@ -5541,10 +5562,12 @@ function FavoriteRow({
       {...(sidebarIdx != null ? { "data-sidebar-idx": sidebarIdx } : {})}
       {...dataAttrs}
     >
-      <SidebarGlyph active={strongActive} rowActive={active}>
+      <SidebarGlyph active={strongActive} rowActive={active} colorClass={colorClass}>
         {icon}
       </SidebarGlyph>
-      <span className="flex-1 truncate">{label}</span>
+      <span className={["flex-1 truncate", colorClass].filter(Boolean).join(" ")}>
+        {label}
+      </span>
       {sidebarFocused && vimHighlight && (
         <RowKeyHint active={active} keyLabel="m" compact />
       )}
