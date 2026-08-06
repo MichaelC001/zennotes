@@ -1381,6 +1381,18 @@ async function migrateLegacyRemoteWorkspaceSecrets(): Promise<void> {
         lastConnectedAt: null
       }
       nextProfiles = [...nextProfiles, targetProfile].sort((a, b) => a.name.localeCompare(b.name))
+    }
+
+    // After this write the target profile holds the only copy of the
+    // credential (the config's own copy is stripped right below). The config
+    // parser synthesizes the legacy workspace's profile with a fresh random
+    // id on every load and keeps remoteWorkspaceProfileId only when it
+    // matches a profile, so the common legacy case arrives here with a found
+    // profile and a null selection. Leaving the selection null strands the
+    // credential: boot resolves the token through the selected profile and
+    // lands on the reconnect screen asking for a token the user already
+    // saved. Never steal an existing valid selection, though.
+    if (!findRemoteProfileById(nextProfiles, nextProfileId)) {
       nextProfileId = targetProfile.id
     }
 
