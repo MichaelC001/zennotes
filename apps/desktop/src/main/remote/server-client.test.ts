@@ -133,6 +133,66 @@ describe('watchVaultChanges reconnect', () => {
     }
   }, 30_000)
 
+  it('a peer that accepts the upgrade and instantly drops it backs off instead of hammering', async () => {
+    const server = http.createServer()
+    const wss = new WebSocketServer({ server, path: '/api/watch' })
+    let connections = 0
+    wss.on('connection', (socket) => {
+      connections += 1
+      socket.close()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = (server.address() as AddressInfo)
+    const client = new RemoteServerClient({ baseUrl: `http://127.0.0.1:${port}` })
+
+    const stop = client.watchVaultChanges(() => {})
+    try {
+      // The old client reset the backoff on every 'open', so a handshake
+      // that immediately dies reconnected on a flat 1s forever: ~6
+      // connections in this window. Growing backoff (1s, 2s, 4s) allows 4
+      // at most.
+      await new Promise((resolve) => setTimeout(resolve, 6_000))
+      expect(connections).toBeGreaterThanOrEqual(2)
+      expect(connections).toBeLessThanOrEqual(4)
+    } finally {
+      stop()
+      for (const socket of wss.clients) socket.terminate()
+      await new Promise((resolve) => wss.close(resolve))
+      await new Promise((resolve) => server.close(resolve))
+    }
+  }, 15_000)
+
+  it('a connection that stays up long enough resets the backoff for the next gap', async () => {
+    const server = http.createServer()
+    const wss = new WebSocketServer({ server, path: '/api/watch' })
+    const connectedAt: number[] = []
+    wss.on('connection', () => {
+      connectedAt.push(Date.now())
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = (server.address() as AddressInfo)
+    const client = new RemoteServerClient({ baseUrl: `http://127.0.0.1:${port}` })
+
+    const stop = client.watchVaultChanges(() => {}, { stableAfterMs: 100 })
+    try {
+      // Three kill/reconnect cycles, each after the socket outlived the
+      // stability window. With the reset every gap retries at the base 1s;
+      // without it the third gap would wait 4s.
+      for (let cycle = 1; cycle <= 3; cycle += 1) {
+        await waitFor(() => connectedAt.length === cycle, 5_000, `connection ${cycle}`)
+        await new Promise((resolve) => setTimeout(resolve, 400))
+        for (const socket of wss.clients) socket.terminate()
+      }
+      await waitFor(() => connectedAt.length === 4, 5_000, 'connection 4')
+      expect(connectedAt[3] - connectedAt[2]).toBeLessThan(3_000)
+    } finally {
+      stop()
+      for (const socket of wss.clients) socket.terminate()
+      await new Promise((resolve) => wss.close(resolve))
+      await new Promise((resolve) => server.close(resolve))
+    }
+  }, 30_000)
+
   it('a stopped watch does not keep reconnecting', async () => {
     const watchServer = await startWatchServer(0, { kind: 'add', path: 'x.md', folder: 'inbox' })
     const { port } = watchServer.server.address() as AddressInfo

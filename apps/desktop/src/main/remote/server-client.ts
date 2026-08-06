@@ -321,19 +321,23 @@ export class RemoteServerClient {
   }
 
   /** Multipart, not JSON: the payload is raw file bytes, and the server
-   *  reads a `file` form part plus the owning note's path. */
+   *  reads a `file` form part plus the owning note's path. A Blob input
+   *  (fs.openAsBlob) streams from disk instead of sitting in memory, which
+   *  is how dropped files of any size reach a remote vault. */
   async uploadAsset(
     notePath: string,
     filename: string,
-    bytes: Uint8Array,
+    bytes: Uint8Array | Blob,
     mimeType = 'application/octet-stream'
   ): Promise<ImportedAsset> {
     const form = new FormData()
     form.append('notePath', notePath)
-    // The cast narrows ArrayBufferLike to ArrayBuffer: every source here
-    // (fs.readFile, structured-clone paste bytes) is plain-buffer backed,
-    // which BlobPart demands but the Uint8Array generic cannot promise.
-    form.append('file', new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mimeType }), filename)
+    // The cast narrows ArrayBufferLike to ArrayBuffer: every byte source
+    // here (structured-clone paste bytes) is plain-buffer backed, which
+    // BlobPart demands but the Uint8Array generic cannot promise.
+    const blob =
+      bytes instanceof Blob ? bytes : new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mimeType })
+    form.append('file', blob, filename)
     const headers = new Headers()
     if (this.authToken) {
       headers.set('Authorization', `Bearer ${this.authToken}`)
@@ -378,7 +382,7 @@ export class RemoteServerClient {
 
   watchVaultChanges(
     onEvent: (event: VaultChangeEvent) => void,
-    options: { onReconnect?: () => void } = {}
+    options: { onReconnect?: () => void; stableAfterMs?: number } = {}
   ): () => void {
     const url = new URL('/api/watch', `${this.baseUrl}/`)
     const headers: Record<string, string> = {}
@@ -395,7 +399,10 @@ export class RemoteServerClient {
     let ws: WebSocket | null = null
     let stopped = false
     let reconnectTimer: NodeJS.Timeout | null = null
+    let stableTimer: NodeJS.Timeout | null = null
     let failedAttempts = 0
+    // How long a socket must stay up before it counts as a real session.
+    const stableAfterMs = options.stableAfterMs ?? 15_000
 
     const connect = (): void => {
       if (stopped) return
@@ -407,7 +414,15 @@ export class RemoteServerClient {
         // caller re-pulls everything instead of trusting the resumed feed.
         // Only the very first attempt connecting cleanly has no gap.
         const hadGap = failedAttempts > 0
-        failedAttempts = 0
+        // The failure counter resets only after the socket has stayed up for
+        // a while, not on the handshake: a peer that accepts the upgrade and
+        // immediately drops it (a misconfigured proxy, a crash-looping
+        // server) would otherwise reconnect on a flat 1s delay forever, and
+        // every cycle's onReconnect re-pulls the entire vault.
+        if (stableTimer) clearTimeout(stableTimer)
+        stableTimer = setTimeout(() => {
+          if (!stopped && ws === socket) failedAttempts = 0
+        }, stableAfterMs)
         if (hadGap) options.onReconnect?.()
       })
 
@@ -435,6 +450,10 @@ export class RemoteServerClient {
 
       socket.on('close', () => {
         if (stopped || ws !== socket) return
+        if (stableTimer) {
+          clearTimeout(stableTimer)
+          stableTimer = null
+        }
         ws = null
         const delay = Math.min(30_000, 1_000 * 2 ** failedAttempts)
         failedAttempts += 1
@@ -449,6 +468,10 @@ export class RemoteServerClient {
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
+      }
+      if (stableTimer) {
+        clearTimeout(stableTimer)
+        stableTimer = null
       }
       try {
         ws?.close()

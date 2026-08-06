@@ -17,7 +17,7 @@ import {
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { promises as fsp } from 'node:fs'
+import { openAsBlob, promises as fsp } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1576,7 +1576,7 @@ async function setRemoteWorkspace(
   options: { persist?: boolean; profileId?: string | null; vaultPath?: string | null } = {}
 ): Promise<{ vault: VaultInfo | null; capabilities: ServerCapabilities }> {
   const client = new RemoteServerClient({ baseUrl, authToken })
-  const capabilities = await client.getCapabilities()
+  let capabilities = await client.getCapabilities()
   remoteWorkspaceBootError = null
   let vault = await client.getCurrentVault()
   const preferredVaultPath = options.vaultPath?.trim() || null
@@ -1586,6 +1586,11 @@ async function setRemoteWorkspace(
     vault?.root !== preferredVaultPath
   ) {
     vault = await client.selectVaultPath(preferredVaultPath)
+    // supportsWatch is per-watcher on the server (a root where fsnotify
+    // fails falls back to a no-op watcher), so the snapshot taken before
+    // the selection can be wrong in either direction for the vault we
+    // actually landed on. Re-ask before the watch decision below.
+    capabilities = await client.getCapabilities()
   }
 
   const win = currentIpcWindow() ?? mainWindow
@@ -2368,6 +2373,17 @@ function registerIpc(): void {
     const client = requireRemoteWorkspaceClient()
     const vault = await client.selectVaultPath(targetPath)
     currentVault = vault
+    // supportsWatch is per-watcher on the server: selecting a vault swaps
+    // the watcher, and the new root may have watch where the old one did
+    // not (or the reverse). Deciding from the connect-time snapshot left
+    // whole sessions without live updates, or watching a feed that
+    // structurally never emits.
+    try {
+      remoteServerCapabilities = await client.getCapabilities()
+    } catch {
+      // Keep the stale snapshot rather than failing the vault selection;
+      // the watch decision degrades to connect-time behavior.
+    }
     if (remoteServerCapabilities) {
       startRemoteWatch(client, remoteServerCapabilities)
     }
@@ -3058,16 +3074,34 @@ function registerIpc(): void {
     IPC.VAULT_IMPORT_FILES,
     async (_e, notePath: string, sourcePaths: string[]) => {
       if (isRemoteWorkspaceActive()) {
-        // The dropped files live on THIS machine; the vault does not. Read
-        // them here and hand the bytes to the server's upload endpoint.
+        // The dropped files live on THIS machine; the vault does not. Hand
+        // each one to the server's upload endpoint. openAsBlob streams the
+        // bytes (the local path streams via fs.copyFile too), so a large
+        // screen recording neither sits fully in main-process memory nor
+        // hits readFile's 2 GiB cap. Failures are collected per file: a
+        // whole-batch rejection after some files already uploaded stranded
+        // those uploads on the server with no markdown inserted for any.
         const client = requireRemoteWorkspaceClient()
         const imported = []
+        const failures: string[] = []
         for (const sourcePath of sourcePaths) {
           const abs = path.resolve(sourcePath)
-          const stat = await fsp.stat(abs)
-          if (!stat.isFile()) continue
-          const bytes = await fsp.readFile(abs)
-          imported.push(await client.uploadAsset(notePath, path.basename(abs), bytes))
+          try {
+            const stat = await fsp.stat(abs)
+            if (!stat.isFile()) continue
+            const blob = await openAsBlob(abs, { type: 'application/octet-stream' })
+            imported.push(await client.uploadAsset(notePath, path.basename(abs), blob))
+          } catch (err) {
+            failures.push(
+              `${path.basename(abs)}: ${err instanceof Error ? err.message : String(err)}`
+            )
+          }
+        }
+        if (imported.length === 0 && failures.length > 0) {
+          throw new Error(`Import failed. ${failures.join('; ')}`)
+        }
+        if (failures.length > 0) {
+          console.warn('[remote] some dropped files failed to import:', failures.join('; '))
         }
         return imported
       }

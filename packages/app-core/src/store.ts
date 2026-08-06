@@ -65,7 +65,10 @@ import { TRASH_TAB_PATH, isTrashTabPath } from '@shared/trash'
 import { ASSETS_VIEW_TAB_PATH, isAssetsViewTabPath } from '@shared/assets-view'
 import { QUICK_NOTES_TAB_PATH, isQuickNotesTabPath } from '@shared/quick-notes'
 import { isAssetTabPath, assetPathFromTab, assetTabPath } from './lib/asset-tabs'
-import { invalidateExcalidrawPreview } from './lib/excalidraw-preview'
+import {
+  invalidateAllExcalidrawPreviews,
+  invalidateExcalidrawPreview
+} from './lib/excalidraw-preview'
 import {
   FENCE_RE,
   TASK_LINE_RE,
@@ -5910,6 +5913,28 @@ export const useStore = create<Store>((set, get) => {
   },
 
   applyChange: async (ev) => {
+    // The live feed's unlink handling, shared with the resync path below:
+    // a deleted note's tab closes wherever it is open.
+    const closeUnlinkedNote = (notePath: string): void => {
+      set((s) => {
+        const nextLayout = rewritePathsInTree(s.paneLayout, (p) =>
+          p === notePath ? null : p
+        )
+        const ensured = ensureActivePane(nextLayout, s.activePaneId)
+        const { [notePath]: _drop, ...contents } = s.noteContents
+        const { [notePath]: _d, ...dirty } = s.noteDirty
+        void _drop
+        void _d
+        return {
+          paneLayout: ensured.layout,
+          activePaneId: ensured.activePaneId,
+          noteContents: contents,
+          noteDirty: dirty,
+          pinnedRefPath: s.pinnedRefPath === notePath ? null : s.pinnedRefPath,
+          ...activeFieldsFrom(ensured.layout, ensured.activePaneId, contents, dirty)
+        }
+      })
+    }
     if (ev.scope === 'resync') {
       // The change feed was interrupted and events were lost; re-pull every
       // surface the feed keeps fresh instead of trusting the resumed stream.
@@ -5930,15 +5955,35 @@ export const useStore = create<Store>((set, get) => {
           }),
         tasksSurfaceVisible(get()) ? get().refreshTasks() : Promise.resolve()
       ])
+      const stateAfter = get()
+      const openTabs = [...new Set(allLeaves(stateAfter.paneLayout).flatMap((leaf) => leaf.tabs))]
+      // Databases and comment threads have their own feed scopes ('database',
+      // 'comments') whose per-path events the gap swallowed too: re-pull
+      // every loaded database (syncDatabaseFromDisk forgets ones deleted on
+      // the server and refuses to clobber mid-debounce edits) and the
+      // comments of every open note. Any drawing may also have changed;
+      // drop all cached previews so embeds re-render instead of showing the
+      // pre-gap image.
+      invalidateAllExcalidrawPreviews()
+      set({ excalidrawPreviewVersion: get().excalidrawPreviewVersion + 1 })
+      await Promise.all([
+        ...Object.keys(stateAfter.databases).map((csvPath) =>
+          get().syncDatabaseFromDisk(csvPath)
+        ),
+        ...openTabs
+          .filter((p) => stateAfter.noteContents[p])
+          .map(async (p) => {
+            await get().loadNoteComments(p)
+          })
+      ])
       // Open notes may have changed on the server while the feed was down.
       // Re-read the clean ones; a dirty buffer holds local edits the user
       // has not saved, and clobbering those trades a stale view for lost work.
-      const stateAfter = get()
-      const openPaths = allLeaves(stateAfter.paneLayout)
-        .flatMap((leaf) => leaf.tabs)
-        .filter((p) => stateAfter.noteContents[p] && !stateAfter.noteDirty[p])
+      const openPaths = openTabs.filter(
+        (p) => stateAfter.noteContents[p] && !stateAfter.noteDirty[p]
+      )
       await Promise.all(
-        [...new Set(openPaths)].map(async (openPath) => {
+        openPaths.map(async (openPath) => {
           try {
             const content = await window.zen.readNote(openPath)
             set((s) => {
@@ -5953,7 +5998,17 @@ export const useStore = create<Store>((set, get) => {
               }
             })
           } catch {
-            /* the follow-up notes refresh already handled deletions */
+            // refreshNotes above deliberately never prunes selectedPath and
+            // refuses a prune that would close every note tab (#384),
+            // deferring real deletions to unlink events that a resync can
+            // never deliver. The fresh note list is the second witness: a
+            // path missing from it that also fails to read was deleted on
+            // the server while the feed was down, so close its tab like the
+            // lost unlink event would have. Dirty buffers never reach this
+            // loop, so unsaved local edits survive.
+            if (!get().notes.some((n) => n.path === openPath)) {
+              closeUnlinkedNote(openPath)
+            }
           }
         })
       )
@@ -6049,24 +6104,7 @@ export const useStore = create<Store>((set, get) => {
     if (!open) return
 
     if (ev.kind === 'unlink') {
-      set((s) => {
-        const nextLayout = rewritePathsInTree(s.paneLayout, (p) =>
-          p === ev.path ? null : p
-        )
-        const ensured = ensureActivePane(nextLayout, s.activePaneId)
-        const { [ev.path]: _drop, ...contents } = s.noteContents
-        const { [ev.path]: _d, ...dirty } = s.noteDirty
-        void _drop
-        void _d
-        return {
-          paneLayout: ensured.layout,
-          activePaneId: ensured.activePaneId,
-          noteContents: contents,
-          noteDirty: dirty,
-          pinnedRefPath: s.pinnedRefPath === ev.path ? null : s.pinnedRefPath,
-          ...activeFieldsFrom(ensured.layout, ensured.activePaneId, contents, dirty)
-        }
-      })
+      closeUnlinkedNote(ev.path)
       return
     }
 
