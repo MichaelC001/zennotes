@@ -31,10 +31,14 @@ export const SELF_KEYED_SURFACES = [
 ].join(', ')
 
 /** Blur the active element when it sits inside a self-keyed surface, so keys
- *  follow the store's focused panel instead of the surface's own handler. */
+ *  follow the store's focused panel instead of the surface's own handler.
+ *  An interactive control inside the surface (a cell editor mid-edit, a
+ *  header button) keeps focus: blurring it commits or cancels the user's
+ *  edit, the exact yank DatabaseTableView's claimFocus refuses in the other
+ *  direction. The handoff only needs the surface's own grid element blurred. */
 export function releaseSelfKeyedSurfaceFocus(): void {
   const active = document.activeElement
-  if (active instanceof HTMLElement && active.closest(SELF_KEYED_SURFACES)) {
-    active.blur()
-  }
+  if (!(active instanceof HTMLElement) || !active.closest(SELF_KEYED_SURFACES)) return
+  if (active.closest('input, textarea, button, [contenteditable="true"]')) return
+  active.blur()
 }

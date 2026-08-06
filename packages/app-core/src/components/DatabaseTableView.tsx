@@ -171,12 +171,15 @@ export function DatabaseTableView({ csvPath, doc, view, isActive }: Props): JSX.
   // when another panel holds it (tab strip via Ctrl+K, or the sidebar via
   // Focus Sidebar / the boot default), stealing focus here re-routed every
   // key to the grid while the sidebar painted its vim cursor and `m` hint,
-  // and the hinted key opened nothing. Also bails while an interactive
-  // control (a cell editor, a header button) owns focus, so it never yanks
-  // the caret out from under the user. rAF lets the opening click / restore
-  // settle so it can't steal focus back.
+  // and the hinted key opened nothing. A null focusedPanel still claims: the
+  // boot fallback only assigns 'sidebar' when the sidebar is open, so a
+  // workspace restore with the sidebar hidden leaves it null, and bailing
+  // there left the restored grid deaf until a mouse click. Also bails while
+  // an interactive control (a cell editor, a header button) owns focus, so
+  // it never yanks the caret out from under the user. rAF lets the opening
+  // click / restore settle so it can't steal focus back.
   useEffect(() => {
-    if (!isActive || focusedPanel !== 'editor') return
+    if (!isActive || (focusedPanel !== 'editor' && focusedPanel !== null)) return
     const claimFocus = (): void => {
       const a = document.activeElement as HTMLElement | null
       if (a && a !== document.body && a.closest('input, textarea, button, [contenteditable="true"]'))
