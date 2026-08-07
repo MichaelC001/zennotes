@@ -150,6 +150,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'tab_size',
     comment: 'tab width in columns, from 1 through 8'
   },
+  listIndentGuides: {
+    section: 'editor',
+    tomlKey: 'list_indent_guides',
+    comment: 'vertical guide lines at each nested list level'
+  },
   editorScrollOff: {
     section: 'editor',
     tomlKey: 'scroll_off',

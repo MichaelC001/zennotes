@@ -52,7 +52,11 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { isImeComposing } from '../lib/ime'
 import { resolveCodeLanguage } from '../lib/cm-code-languages'
 import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languages'
-import { markdownListIndentPlugin } from '../lib/cm-markdown-list-indent'
+import {
+  listIndentGuides as listIndentGuidesExt,
+  listIndentWidth,
+  markdownListIndentPlugin
+} from '../lib/cm-markdown-list-indent'
 import { forwardOnCheckboxArrow } from '../lib/cm-forward-task'
 import { hopMarkerBackward, hopMarkerForward } from '../lib/cm-marker-hop'
 import { toggleCheckbox } from '../lib/cm-toggle-checkbox'
@@ -814,6 +818,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const editorFontSize = useStore((s) => s.editorFontSize)
   const editorLineHeight = useStore((s) => s.editorLineHeight)
   const editorTabSizeValue = useStore((s) => s.editorTabSize)
+  const listIndentGuidesOn = useStore((s) => s.listIndentGuides)
   const editorScrollOff = useStore((s) => s.editorScrollOff)
   const lineNumberMode = useStore((s) => s.lineNumberMode)
   const textFont = useStore((s) => s.textFont)
@@ -1704,7 +1709,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           drawSelectionCompartment.of(
             drawSelection({ cursorBlinkRate: s0.cursorBlink ? 1200 : 0 })
           ),
-          tabSizeCompartment.of(editorTabSize(s0.editorTabSize)),
+          tabSizeCompartment.of([
+            editorTabSize(s0.editorTabSize),
+            listIndentWidth(s0.editorTabSize),
+            listIndentGuidesExt(s0.listIndentGuides)
+          ]),
           highlightActiveLine(),
           taskJumpHighlightField,
           yankHighlightExtension,
@@ -2198,8 +2207,14 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     const view = viewRef.current
     const comp = tabSizeCompartmentRef.current
     if (!view || !comp) return
-    view.dispatch({ effects: comp.reconfigure(editorTabSize(editorTabSizeValue)) })
-  }, [editorTabSizeValue])
+    view.dispatch({
+      effects: comp.reconfigure([
+        editorTabSize(editorTabSizeValue),
+        listIndentWidth(editorTabSizeValue),
+        listIndentGuidesExt(listIndentGuidesOn)
+      ])
+    })
+  }, [editorTabSizeValue, listIndentGuidesOn])
 
   // Re-measure CM on prefs that change line geometry.
   useEffect(() => {

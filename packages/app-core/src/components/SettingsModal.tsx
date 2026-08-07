@@ -474,11 +474,13 @@ export function SettingsModal(): JSX.Element {
   const markdownSnippets = useStore((s) => s.markdownSnippets);
   const setMarkdownSnippets = useStore((s) => s.setMarkdownSnippets);
   const showHeadingLevelLabels = useStore((s) => s.showHeadingLevelLabels);
+  const listIndentGuides = useStore((s) => s.listIndentGuides);
   const setShowHeadingLevelLabels = useStore(
     (s) => s.setShowHeadingLevelLabels,
   );
   const editorTabSize = useStore((s) => s.editorTabSize);
   const setEditorTabSize = useStore((s) => s.setEditorTabSize);
+  const setListIndentGuides = useStore((s) => s.setListIndentGuides);
   const textReplacementsEnabled = useStore(
     (s) => s.textReplacementsEnabled,
   );
@@ -1920,6 +1922,12 @@ export function SettingsModal(): JSX.Element {
           keywords: ["tab", "indent", "spaces", "width"],
         },
         {
+          id: "list-indent-guides",
+          title: "Indent guides",
+          description: "Vertical guide lines at each nested list level.",
+          keywords: ["indent", "guides", "list", "nested", "outline", "lines"],
+        },
+        {
           id: "text-replacements-enabled",
           title: "Text replacements",
           description: "Replace typed snippets such as -> with →.",
@@ -2240,6 +2248,7 @@ export function SettingsModal(): JSX.Element {
             "markdown-overrides",
             "heading-level-labels",
             "editor-tab-size",
+            "list-indent-guides",
             "auto-pairs",
             "auto-pair-quotes-in-prose",
             "note-tabs",
@@ -2354,7 +2363,7 @@ export function SettingsModal(): JSX.Element {
                 />
                 <SliderRow
                   label="Tab size"
-                  description="How many spaces a tab occupies in the editor and when indenting."
+                  description="How many spaces a tab occupies in the editor and when indenting. Nested list levels also render this many columns deep, whatever the note's source spacing."
                   value={editorTabSize}
                   min={1}
                   max={8}
@@ -2362,6 +2371,13 @@ export function SettingsModal(): JSX.Element {
                   unit=" spaces"
                   settingId="editor-tab-size"
                   onChange={setEditorTabSize}
+                />
+                <ToggleRow
+                  label="Indent guides"
+                  description="Draw a vertical guide line at each nested list level in the editor. Guides sit at the Tab size columns."
+                  value={listIndentGuides}
+                  settingId="list-indent-guides"
+                  onChange={setListIndentGuides}
                 />
                 <ToggleRow
                   label="Auto-pair brackets and delimiters"

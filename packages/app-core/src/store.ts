@@ -501,6 +501,8 @@ interface Prefs {
   livePreview: boolean      // hide markdown syntax on inactive lines
   /** Show an H1 through H6 badge before Markdown headings in the editor. */
   showHeadingLevelLabels: boolean
+  /** Vertical guide lines at each nested-list level in the editor (#491). */
+  listIndentGuides: boolean
   /** Render Markdown tables as interactive WYSIWYG widgets in live preview.
    *  Off keeps tables as plain editable markdown — full keyboard/Vim editing. */
   renderTablesInLivePreview: boolean
@@ -956,6 +958,7 @@ export const DEFAULT_PREFS: Prefs = {
   fzfBinaryPath: null,
   livePreview: true,
   showHeadingLevelLabels: false,
+  listIndentGuides: true,
   renderTablesInLivePreview: true,
   completedTaskStyle: 'none',
   mathRenderer: 'katex',
@@ -1098,6 +1101,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.showHeadingLevelLabels === 'boolean'
         ? p.showHeadingLevelLabels
         : DEFAULT_PREFS.showHeadingLevelLabels,
+    listIndentGuides:
+      typeof p.listIndentGuides === 'boolean'
+        ? p.listIndentGuides
+        : DEFAULT_PREFS.listIndentGuides,
     renderTablesInLivePreview:
       typeof p.renderTablesInLivePreview === 'boolean'
         ? p.renderTablesInLivePreview
@@ -2090,6 +2097,7 @@ function collectPrefs(s: {
   fzfBinaryPath: string | null
   livePreview: boolean
   showHeadingLevelLabels: boolean
+  listIndentGuides: boolean
   renderTablesInLivePreview: boolean
   completedTaskStyle: CompletedTaskStyle
   mathRenderer: MathRenderer
@@ -2180,6 +2188,7 @@ function collectPrefs(s: {
     fzfBinaryPath: s.fzfBinaryPath,
     livePreview: s.livePreview,
     showHeadingLevelLabels: s.showHeadingLevelLabels,
+    listIndentGuides: s.listIndentGuides,
     renderTablesInLivePreview: s.renderTablesInLivePreview,
     completedTaskStyle: s.completedTaskStyle,
     mathRenderer: s.mathRenderer,
@@ -2667,6 +2676,7 @@ interface Store {
   fzfBinaryPath: string | null
   livePreview: boolean
   showHeadingLevelLabels: boolean
+  listIndentGuides: boolean
   renderTablesInLivePreview: boolean
   completedTaskStyle: CompletedTaskStyle
   mathRenderer: MathRenderer
@@ -3145,6 +3155,7 @@ interface Store {
   setFzfBinaryPath: (path: string | null) => void
   setLivePreview: (on: boolean) => void
   setShowHeadingLevelLabels: (on: boolean) => void
+  setListIndentGuides: (on: boolean) => void
   setRenderTablesInLivePreview: (on: boolean) => void
   setCompletedTaskStyle: (style: CompletedTaskStyle) => void
   setMathRenderer: (renderer: MathRenderer) => void
@@ -4377,6 +4388,7 @@ export const useStore = create<Store>((set, get) => {
   fzfBinaryPath: loadPrefs().fzfBinaryPath,
   livePreview: loadPrefs().livePreview,
   showHeadingLevelLabels: loadPrefs().showHeadingLevelLabels,
+  listIndentGuides: loadPrefs().listIndentGuides,
   renderTablesInLivePreview: loadPrefs().renderTablesInLivePreview,
   completedTaskStyle: loadPrefs().completedTaskStyle,
   mathRenderer: loadPrefs().mathRenderer,
@@ -6885,6 +6897,10 @@ export const useStore = create<Store>((set, get) => {
   },
   setShowHeadingLevelLabels: (on) => {
     set({ showHeadingLevelLabels: on })
+    savePrefs(collectPrefs(get()))
+  },
+  setListIndentGuides: (on) => {
+    set({ listIndentGuides: on })
     savePrefs(collectPrefs(get()))
   },
   setRenderTablesInLivePreview: (on) => {

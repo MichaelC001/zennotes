@@ -71,6 +71,7 @@ export const PORTABLE_PREF_KEYS = [
   // editor
   'livePreview',
   'showHeadingLevelLabels',
+  'listIndentGuides',
   'renderTablesInLivePreview',
   'completedTaskStyle',
   'mathRenderer',
@@ -184,6 +185,7 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   fzfBinaryPath: null,
   livePreview: true,
   showHeadingLevelLabels: false,
+  listIndentGuides: true,
   renderTablesInLivePreview: true,
   completedTaskStyle: 'none',
   mathRenderer: 'katex',

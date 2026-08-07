@@ -1548,9 +1548,16 @@ textarea,
   padding: 0;
   line-height: var(--z-editor-line-height, 1.7);
 }
+/* Nested lists: the hanging indent aligns wrapped lines under their text, and
+ * the pad widens shallow source indents so every level steps the configured
+ * width (#491). The pad shifts the whole first line right while the negative
+ * text-indent still pulls the literal markup back, so the caret and columns
+ * stay honest. Guide lines are per-line background layers set inline by
+ * cm-markdown-list-indent; only their color lives here, per theme. */
 .cm-editor .cm-line.cm-markdown-list-line {
-  padding-left: var(--z-list-hanging-indent, 0);
+  padding-left: calc(var(--z-list-hanging-indent, 0) + var(--z-list-indent-pad, 0ch));
   text-indent: calc(var(--z-list-hanging-indent, 0) * -1);
+  --z-list-guide-color: rgb(var(--z-grey-0) / 0.16);
 }
 .cm-editor .cm-cursor,
 .cm-editor .cm-dropCursor {
