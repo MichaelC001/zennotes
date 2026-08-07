@@ -124,7 +124,7 @@ export const HELP_HOW_TO_GUIDES: HelpCard[] = [
   {
     title: 'Turn a CSV into a database',
     body:
-      'Run “New Database” from the command palette (or right-click a folder in the sidebar → New database) to create one, or just open an existing `.csv` file from the vault. ZenNotes stores the data as `<Name>.csv` plus a small `<Name>.csv.base.json` sidecar that holds field types, select options, and your saved views. Edit cells inline in the Table view, group records in a Board by any select field, switch the raw-CSV toggle to see the underlying file, and press `o` on a row to open it as a full Markdown page whose frontmatter mirrors the row’s properties. The whole grid is keyboard-driven — see the Database grid shortcuts.'
+      'Run “New Database” from the command palette (or right-click a folder in the sidebar → New database) to create one, or just open an existing `.csv` file from the vault. ZenNotes stores a database as a `<Name>.base` folder: `data.csv` (the rows), `schema.json` (field types, select options, saved views), and the record-page notes rows open into. Edit cells inline in the Table view, group records in a Board by any select field, switch the raw-CSV toggle to see the underlying file, and press `o` on a row to open it as a full Markdown page whose frontmatter mirrors the row’s properties. The whole grid is keyboard-driven — see the Database grid shortcuts.'
   },
   {
     title: 'Move a note without dragging',
@@ -392,7 +392,12 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Any CSV is a database',
     body:
-      'A `.csv` file in your vault is a full Notion-style database, with zero new dependencies. The same data shows up as an editable Table (inline cell editing) and as a Board grouped by a select field; add and switch views freely. Fields are typed — text, number, checkbox, date, select, multi-select — and support sort, filter, and a raw-CSV toggle, while every row keeps a stable id so external edits round-trip cleanly. Open any row as a real Markdown note — a “record page” in a per-database folder — whose frontmatter mirrors the row’s properties and whose body is a freeform page. Create one with “New Database” in the command palette or by right-clicking a folder → New database.'
+      'A `.csv` file in your vault is a full Notion-style database, with zero new dependencies. The same data shows up as an editable Table (inline cell editing) and as a Board grouped by a select field; add and switch views freely. Fields are typed — text, number, checkbox, date, select, multi-select, and note link (single or multi) — and support sort, filter, and a raw-CSV toggle, while every row keeps a stable id so external edits round-trip cleanly. Open any row as a real Markdown note — a “record page” in a per-database folder — whose frontmatter mirrors the row’s properties and whose body is a freeform page. Create one with “New Database” in the command palette or by right-clicking a folder → New database.'
+  },
+  {
+    title: 'Databases discover your notes',
+    body:
+      'Database cells can link to the notes you already have instead of hard-coding every value. Typing `[[` in a text cell opens the same note search as the editor and inserts a `[[wikilink]]`. A Note link column (types “Note link” / “Note links” in the field menu) stores wikilinks properly: pick notes from a searchable list, and the saved chips show each note’s title and open it on click. And a Select or Multi-select column can auto-discover its options from your vault: open the column’s `⋯` menu and choose Options: all notes, notes in folder…, or notes with tag… — the cell popover then suggests matching notes live (a meeting database can offer every note in `projects/` as its Project options, say), and anything you pick is saved as an ordinary option so boards and filters keep working. Every picker is fully keyboard-driven: type to search, ↑/↓ or Ctrl+N/P to move, Enter to pick, Escape to close.'
   },
   {
     title: 'The CLI is the bridge to launchers',
@@ -650,6 +655,8 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'g g / G', action: 'Jump to first / last row', detail: 'Fast travel within the current column.' },
       { keys: 'k (into header)', action: 'Rename a field', detail: 'Press k up onto the column-header row, then Enter / i to rename the field, or m to open its column menu.' },
       { keys: 'i / Enter', action: 'Edit the cell', detail: 'On a checkbox cell this toggles it instead of opening an editor.' },
+      { keys: '[[ (in a text cell)', action: 'Link a note from the cell', detail: 'While editing a text cell, `[[` opens the same note search as the editor; ↑/↓ or Ctrl+N/P move, Enter inserts the `[[wikilink]]`, Escape closes the list and keeps typing.' },
+      { keys: '↑ / ↓ · Enter (in a picker)', action: 'Pick options and notes', detail: 'Select, Multi-select, and Note link popovers are searchable lists: type to filter, arrows or Ctrl+N/P move the highlight, Enter picks it (with nothing highlighted, Enter adds the typed text as a new option), Escape closes.' },
       { keys: 'm', action: 'Open the row menu', detail: 'On a cell, open the right-click menu for that record (Open, Delete, and the rest).' },
       { keys: 'Space / x', action: 'Select the row', detail: 'Toggle the row’s selection for bulk actions.' },
       { keys: 'o', action: 'Open the record page', detail: 'Open the row as a Markdown note in the per-database folder.' },

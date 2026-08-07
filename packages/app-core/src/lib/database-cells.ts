@@ -5,9 +5,12 @@
  * through `updateDatabaseSchema`. All cell values are raw CSV strings.
  */
 import { defaultGenId } from '@shared/database-csv'
+import { yamlValue } from '@shared/frontmatter'
 import {
   splitMultiSelect,
   joinMultiSelect,
+  splitNoteLinks,
+  joinNoteLinks,
   isCheckboxTrue
 } from '@shared/database-transforms'
 import type {
@@ -16,10 +19,11 @@ import type {
   DbRow,
   DbView,
   FieldType,
-  SelectOption
+  SelectOption,
+  SelectOptionsSource
 } from '@shared/databases'
 
-export { splitMultiSelect, joinMultiSelect, isCheckboxTrue }
+export { splitMultiSelect, joinMultiSelect, splitNoteLinks, joinNoteLinks, isCheckboxTrue }
 
 const genId = defaultGenId
 
@@ -46,11 +50,6 @@ export function recordTitle(doc: DatabaseDoc, row: DbRow): string {
   return v || 'Untitled'
 }
 
-function yamlScalar(value: string): string {
-  if (value === '') return '""'
-  if (/[:#"'\n]|^\s|\s$/.test(value)) return JSON.stringify(value)
-  return value
-}
 
 /**
  * Compose a record "page" note: the record's properties as flat YAML
@@ -65,7 +64,7 @@ export function composePageBody(doc: DatabaseDoc, row: DbRow, body: string): str
   for (const f of doc.fields) {
     if (f.id === doc.idFieldId || f.id === titleFieldId) continue
     const v = row.cells[f.id] ?? ''
-    lines.push(v ? `${f.name}: ${yamlScalar(v)}` : `${f.name}:`)
+    lines.push(v ? `${f.name}: ${yamlValue(v)}` : `${f.name}:`)
   }
   lines.push('---')
   return `${lines.join('\n')}\n${body.replace(/^\n+/, '')}`
@@ -228,6 +227,26 @@ export function ensureSelectOption(doc: DatabaseDoc, fieldId: string, rawValue: 
       if (options.some((o) => o.value === value)) return f
       const opt: SelectOption = { id: genId(), value }
       return { ...f, options: [...options, opt] }
+    })
+  }
+}
+
+/** Set (or with null, clear) where a select field discovers options. (#500) */
+export function setFieldOptionsSource(
+  doc: DatabaseDoc,
+  fieldId: string,
+  source: SelectOptionsSource | null
+): DatabaseDoc {
+  return {
+    ...doc,
+    fields: doc.fields.map((f) => {
+      if (f.id !== fieldId) return f
+      if (!source) {
+        const { optionsSource: _drop, ...rest } = f
+        void _drop
+        return rest
+      }
+      return { ...f, optionsSource: source }
     })
   }
 }
