@@ -51,6 +51,14 @@ export class CliRemoteClient {
     return this.get<RemoteVaultInfo | null>('/api/vault')
   }
 
+  /** The layout facts database path composition needs (#556). */
+  getVaultSettings(): Promise<{
+    primaryNotesLocation?: string
+    systemFolderPaths?: Record<string, string> | null
+  }> {
+    return this.get('/api/vault/settings')
+  }
+
   listNotes(): Promise<NoteMeta[]> {
     return this.get<NoteMeta[]>('/api/notes')
   }

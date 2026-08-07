@@ -755,6 +755,42 @@ export async function listFolders(root: string): Promise<{ folder: NoteFolder; s
   return out
 }
 
+/** Every `.base` database folder as a (folder, subpath) entry — the companion
+ *  to listFolders, which deliberately hides them from user-folder listings.
+ *  Same walk, opposite filter; a `.base` folder is never descended into. (#556) */
+export async function listDatabaseDirs(
+  root: string
+): Promise<{ folder: NoteFolder; subpath: string }[]> {
+  const hiddenRootNames = hiddenRootNamesWith(await readSystemFolderPaths(root))
+  const out: { folder: NoteFolder; subpath: string }[] = []
+  for (const folder of FOLDERS) {
+    const topAbs = await folderRoot(root, folder)
+    const isPrimaryRoot = folder === 'inbox' && path.resolve(topAbs) === path.resolve(root)
+    const walk = async (dirAbs: string, subpath: string): Promise<void> => {
+      let entries
+      try {
+        entries = await fs.readdir(dirAbs, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        if (!e.isDirectory() || e.name.startsWith('.')) continue
+        if (isPrimaryRoot && dirAbs === topAbs && hiddenRootNames.has(e.name)) {
+          continue
+        }
+        const nextSub = subpath ? `${subpath}/${e.name}` : e.name
+        if (isFormDirName(e.name)) {
+          out.push({ folder, subpath: nextSub })
+          continue
+        }
+        await walk(path.join(dirAbs, e.name), nextSub)
+      }
+    }
+    await walk(topAbs, '')
+  }
+  return out
+}
+
 export async function listAssets(root: string): Promise<
   { path: string; name: string; size: number; updatedAt: number }[]
 > {
@@ -814,6 +850,44 @@ export async function writeNote(root: string, rel: string, body: string): Promis
   const folder = await folderOf(root, abs)
   if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
+}
+
+/** Raw text of any vault file (`.base/` internals included), or null when
+ *  absent. The generic-file sibling of readNote, for surfaces composing
+ *  @shared/database-ops over a local root — the zn `base` commands (#556).
+ *  Absence must be null and every other failure must throw: the database
+ *  composition reads null as "no schema yet" and infers one over it. */
+export async function readVaultFileTextOrNull(root: string, rel: string): Promise<string | null> {
+  const abs = resolveSafe(root, rel)
+  try {
+    return await fs.readFile(abs, 'utf8')
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') return null
+    throw err
+  }
+}
+
+/** Write any vault file's text, creating parent directories. */
+export async function writeVaultFileText(root: string, rel: string, text: string): Promise<void> {
+  const abs = resolveSafe(root, rel)
+  await fs.mkdir(path.dirname(abs), { recursive: true })
+  await fs.writeFile(abs, text, 'utf8')
+}
+
+/** The vault layout facts database path composition depends on (#556). */
+export async function readDatabaseVaultLayout(root: string): Promise<{
+  primaryNotesAtRoot: boolean
+  systemFolderPaths: Partial<Record<NoteFolder, string>> | null
+}> {
+  const [location, folderPaths] = await Promise.all([
+    readPrimaryNotesLocation(root),
+    readSystemFolderPaths(root)
+  ])
+  return {
+    primaryNotesAtRoot: location === 'root',
+    systemFolderPaths: Object.keys(folderPaths).length > 0 ? folderPaths : null
+  }
 }
 
 async function uniqueTitle(dir: string, base: string): Promise<string> {

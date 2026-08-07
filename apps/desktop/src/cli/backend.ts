@@ -26,6 +26,7 @@ import {
   deleteFolder,
   deleteNote,
   duplicateNote,
+  listDatabaseDirs,
   listFolders,
   listNotes,
   moveNote,
@@ -33,7 +34,9 @@ import {
   parseTaskIndex,
   prependToBody,
   prependToNote,
+  readDatabaseVaultLayout,
   readNote,
+  readVaultFileTextOrNull,
   renameFolder,
   renameNote,
   restoreFromTrash,
@@ -45,12 +48,20 @@ import {
   toggleTaskInBody,
   unarchiveNote,
   writeNote,
+  writeVaultFileText,
   type NoteContent,
   type NoteFolder,
   type NoteMeta,
   type VaultTask,
   type VaultTextSearchMatch
 } from '../mcp/vault-ops.js'
+import {
+  createDatabaseOps,
+  type DatabaseOps,
+  type DatabaseVaultLayout
+} from '@shared/database-ops'
+import { createAbsenceAwareReader } from '@shared/remote-absence'
+import { RemoteRequestError } from '../main/remote/connection.js'
 import { CliRemoteClient } from './remote/client.js'
 import type { VaultTarget } from './vault-target.js'
 
@@ -89,6 +100,10 @@ export interface VaultBackend {
   backlinks(rel: string): Promise<NoteMeta[]>
   scanAllTasks(opts?: { includeExcluded?: boolean }): Promise<VaultTask[]>
   toggleTask(taskId: string): Promise<VaultTask | null>
+  /** Database (`.base`) operations, composed from this backend's file IO via
+   *  @shared/database-ops — the same composition the web and desktop remote
+   *  clients use, so `zn base` writes the identical on-disk format. (#556) */
+  databaseOps(): DatabaseOps
 }
 
 export function createBackend(target: VaultTarget): VaultBackend {
@@ -141,6 +156,23 @@ class LocalBackend implements VaultBackend {
   scanAllTasks = (opts?: { includeExcluded?: boolean }): Promise<VaultTask[]> =>
     scanAllTasks(this.root, opts)
   toggleTask = (taskId: string): Promise<VaultTask | null> => toggleTask(this.root, taskId)
+
+  private dbOps: DatabaseOps | null = null
+  databaseOps = (): DatabaseOps => {
+    this.dbOps ??= createDatabaseOps({
+      readFileTextOrNull: (rel) => readVaultFileTextOrNull(this.root, rel),
+      writeFile: (rel, text) => writeVaultFileText(this.root, rel, text),
+      createFolder: (folder, subpath) =>
+        createFolder(this.root, folder, subpath).then(() => undefined),
+      renameFolder: (folder, oldSub, newSub) =>
+        renameFolder(this.root, folder, oldSub, newSub),
+      // listFolders hides `.base` dirs on purpose; database discovery needs
+      // exactly those, so the composition gets the companion walker instead.
+      listFolders: () => listDatabaseDirs(this.root),
+      vaultLayout: () => readDatabaseVaultLayout(this.root)
+    })
+    return this.dbOps
+  }
 }
 
 /** A vault behind a self-hosted server, reached over the same HTTP API the
@@ -244,6 +276,36 @@ class RemoteBackend implements VaultBackend {
         (t) => t.id === taskId
       ) ?? null
     )
+  }
+
+  /** Reads go through /notes/read, which serves any vault file; a 404 means
+   *  absent, anything else is a real failure (the absence reader's probe
+   *  settles servers that answer 500 for both). Mirrors the web bridge's
+   *  binding so the on-disk format is identical everywhere. */
+  private dbOps: DatabaseOps | null = null
+  databaseOps = (): DatabaseOps => {
+    this.dbOps ??= createDatabaseOps({
+      readFileTextOrNull: createAbsenceAwareReader({
+        read: async (rel) => (await this.client.readNote(rel)).body,
+        statusOf: (err) => (err instanceof RemoteRequestError ? err.status : null)
+      }),
+      writeFile: async (rel, text) => {
+        await this.client.writeNote(rel, text)
+      },
+      createFolder: (folder, subpath) => this.client.createFolder(folder, subpath),
+      renameFolder: (folder, oldSub, newSub) =>
+        this.client.renameFolder(folder, oldSub, newSub),
+      listFolders: () => this.client.listFolders(),
+      vaultLayout: async (): Promise<DatabaseVaultLayout> => {
+        const settings = await this.client.getVaultSettings()
+        return {
+          primaryNotesAtRoot: settings.primaryNotesLocation === 'root',
+          systemFolderPaths:
+            (settings.systemFolderPaths as DatabaseVaultLayout['systemFolderPaths']) ?? null
+        }
+      }
+    })
+    return this.dbOps
   }
 }
 

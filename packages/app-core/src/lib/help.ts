@@ -402,7 +402,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'The CLI is the bridge to launchers',
     body:
-      'The `zn` command-line tool can list, read, search, capture, edit, archive, trash, inspect tasks, and start the MCP server without the app running. Raycast uses it for search, then uses `zennotes://open` and `zennotes://open-window` links to bring the selected note back into ZenNotes. On macOS, Settings → CLI can install the bundled Raycast extension locally so users do not need to wait for the Raycast Store version.'
+      'The `zn` command-line tool can list, read, search, capture, edit, archive, trash, inspect tasks, work with databases (`zn base list / rows / get / add / set / create` — add rows with record pages, set fields with the grid’s exact semantics, locally or against a self-hosted server), and start the MCP server without the app running. Raycast uses it for search, then uses `zennotes://open` and `zennotes://open-window` links to bring the selected note back into ZenNotes. On macOS, Settings → CLI can install the bundled Raycast extension locally so users do not need to wait for the Raycast Store version.'
   },
   {
     title: 'Excalidraw drawings are first-class files',
