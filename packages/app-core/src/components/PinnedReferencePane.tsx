@@ -39,6 +39,7 @@ import { autocompletion } from '@codemirror/autocomplete'
 import { useStore } from '../store'
 import type { LineNumberMode } from '../store'
 import { livePreviewPlugin } from '../lib/cm-live-preview'
+import { frontmatterStyle } from '../lib/cm-frontmatter'
 import { headingFolding } from '../lib/cm-heading-fold'
 import { slashCommandSource, slashCommandRender } from '../lib/cm-slash-commands'
 import { calloutTypeSource } from '../lib/cm-callouts'
@@ -211,6 +212,7 @@ export function PinnedReferencePane(): JSX.Element | null {
           customCodeFenceHighlightExtension,
           vimAwareMarkdownKeymap,
           markdownListIndentPlugin,
+          frontmatterStyle,
           headingCompartment.of(
             headingFolding({ showLevelLabels: s0.showHeadingLevelLabels })
           ),
