@@ -13,7 +13,8 @@ import type {
 } from '@codemirror/autocomplete'
 import type { EditorView } from '@codemirror/view'
 import { useStore } from '../store'
-import { extractTags } from './tags'
+import { noteTagsForCount } from './tags'
+import { resolveTypstPreambleFolder } from './typst-preamble'
 import { isTagSkippedContext } from './cm-hashtags'
 
 /** Completion carrying the `_icon` the shared slash renderer reads. */
@@ -46,14 +47,16 @@ function collectTagCounts(): Map<string, number> {
   const state = useStore.getState()
   const activePath = state.activeNote?.path ?? null
   const activeBody = state.activeNote?.body ?? null
+  const preambleFolder = resolveTypstPreambleFolder(
+    state.vaultSettings?.typstPreambles?.folder
+  )
+  const active = activePath && activeBody != null ? { path: activePath, body: activeBody } : null
   const counter = new Map<string, number>()
   for (const note of state.notes) {
     if (note.folder === 'trash') continue
-    const tags =
-      activePath && note.path === activePath && activeBody != null
-        ? extractTags(activeBody)
-        : note.tags
-    for (const t of tags) counter.set(t, (counter.get(t) ?? 0) + 1)
+    for (const t of noteTagsForCount(note, active, preambleFolder)) {
+      counter.set(t, (counter.get(t) ?? 0) + 1)
+    }
   }
   return counter
 }

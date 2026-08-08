@@ -25,6 +25,7 @@ import { Button } from "./ui/Button";
 import { confirmMoveToTrash } from "../lib/confirm-trash";
 import { buildMoveNotePrompt, parseMoveNoteTarget } from "../lib/move-note";
 import { buildTagTree, extractTags, flattenTagTree } from "../lib/tags";
+import { isTypstPreamblePath, resolveTypstPreambleFolder } from "../lib/typst-preamble";
 import type { AssetMeta, FolderColorId, FolderEntry, FolderIconId, NoteFolder, NoteMeta } from "@shared/ipc";
 import type { NoteSortOrder } from "../store";
 import { isArchiveTabPath } from "@shared/archive";
@@ -409,6 +410,9 @@ export function Sidebar(): JSX.Element {
   const sidebarCursorIndex = useStore((s) => s.sidebarCursorIndex);
   const activeNote = useStore((s) => s.activeNote);
   const activeDirty = useStore((s) => s.activeDirty);
+  const preambleFolder = useStore((s) =>
+    resolveTypstPreambleFolder(s.vaultSettings?.typstPreambles?.folder),
+  );
   const vaultSettings = useStore((s) => s.vaultSettings);
   const rootContentHiddenByInboxMode = useStore((s) => s.rootContentHiddenByInboxMode);
   const rootContentBannerDismissed = useStore((s) => s.rootContentBannerDismissed);
@@ -1445,7 +1449,10 @@ export function Sidebar(): JSX.Element {
   useEffect(() => {
     const path = activeNote?.path ?? null;
     const body = activeNote?.body ?? null;
-    if (!path || body == null || !activeDirty) {
+    // Editing a Typst preamble must not put its `#let` / `#var` tokens back
+    // into the tag list that the index deliberately leaves them out of (#562).
+    const isPreamble = path != null && isTypstPreamblePath(path, preambleFolder);
+    if (!path || body == null || !activeDirty || isPreamble) {
       setActiveBodyTagSnapshot((current) => (current === null ? current : null));
       return;
     }
@@ -1496,7 +1503,7 @@ export function Sidebar(): JSX.Element {
         window.cancelIdleCallback(idleId);
       }
     };
-  }, [activeDirty, activeNote?.body, activeNote?.path]);
+  }, [activeDirty, activeNote?.body, activeNote?.path, preambleFolder]);
 
   // Aggregate hashtags across non-trash notes. The active note's live
   // body is parsed only while it has unsaved edits; clean notes use the

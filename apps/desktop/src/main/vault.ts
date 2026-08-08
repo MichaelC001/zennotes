@@ -79,6 +79,11 @@ import {
   type SystemFolderPaths
 } from '@shared/system-folder-paths'
 import { normalizeTasksExcludedFolders } from '@shared/tasks-excluded-folders'
+import {
+  isTypstPreamblePath,
+  normalizeTypstPreambleSettings,
+  resolveTypstPreambleFolder
+} from '@shared/typst-preamble-folder'
 
 const CONFIG_FILE = 'zennotes.config.json'
 const FOLDERS: NoteFolder[] = ['inbox', 'quick', 'archive', 'trash']
@@ -1029,6 +1034,7 @@ function normalizeVaultSettings(
     view?: unknown
     systemFolderPaths?: unknown
     tasks?: unknown
+    typstPreambles?: unknown
   }
   const folderIcons: Record<string, FolderIconId> = {}
   if (candidate.folderIcons && typeof candidate.folderIcons === 'object') {
@@ -1084,7 +1090,8 @@ function normalizeVaultSettings(
     favorites: normalizeFavorites(candidate.favorites),
     view: normalizeVaultViewSettings(candidate.view),
     systemFolderPaths: normalizeSystemFolderPaths(candidate.systemFolderPaths),
-    tasks: normalizeTasksSettings(candidate.tasks)
+    tasks: normalizeTasksSettings(candidate.tasks),
+    typstPreambles: normalizeTypstPreambleSettings(candidate.typstPreambles)
   }
 }
 
@@ -1423,6 +1430,12 @@ export async function setVaultSettings(
     ? DEFAULT_VAULT_SETTINGS.primaryNotesLocation
     : await inferredPrimaryNotesLocation(root, statedSystemFolderPaths(next))
   const normalized = normalizeVaultSettings(next, fallbackPrimary)
+  // A note's tags now depend on the preamble folder (#562), so cached metas
+  // describe the OLD setting the moment it moves: renaming the folder has to
+  // drop them or the vault keeps serving tags it no longer believes in, and
+  // pointing the setting away from `typst` would never give those notes their
+  // tags back. Read before the write, while the cache still holds the old value.
+  const previousPreambleFolder = await typstPreambleFolderFor(root)
   // Temporary folder session (#): never write .zennotes/vault.json into a
   // folder the user only dropped in to read. Keep the change in memory.
   if (isEphemeralRoot(root)) return cloneVaultSettings(normalized)
@@ -1430,6 +1443,9 @@ export async function setVaultSettings(
   await fs.writeFile(vaultSettingsPath(root), JSON.stringify(normalized, null, 2), 'utf8')
   const writeStat = await fs.stat(vaultSettingsPath(root))
   vaultSettingsCache.set(root, { settings: normalized, mtimeMs: writeStat.mtimeMs })
+  if (resolveTypstPreambleFolder(normalized.typstPreambles?.folder) !== previousPreambleFolder) {
+    invalidateNoteMetaCache(root)
+  }
   if (normalized.primaryNotesLocation === 'inbox') {
     // The RESOLVED inbox, not the literal one: creating `<root>/inbox` while
     // the settings point the inbox at `01 - Entry/` left a stray directory
@@ -1448,6 +1464,17 @@ export async function setVaultSettings(
 export function invalidateVaultSettingsCache(root: string): void {
   vaultSettingsCache.delete(root)
   inferredPrimaryCache.delete(root)
+}
+
+/** The vault's Typst preamble folder (#562), resolved without touching disk
+ *  while the settings cache is warm. `readMeta` runs once per note, so reading
+ *  vault.json there would add an open()+stat() per file to every scan; the
+ *  cache is invalidated on write and by the watcher, so the fast path can only
+ *  serve a value someone has already validated. */
+async function typstPreambleFolderFor(root: string): Promise<string> {
+  const cached = vaultSettingsCache.get(root)
+  const settings = cached ? cached.settings : await getVaultSettings(root)
+  return resolveTypstPreambleFolder(settings.typstPreambles?.folder)
 }
 
 /**
@@ -2097,9 +2124,11 @@ async function hydratePersistedNoteMetaCache(root: string): Promise<void> {
     const raw = await fs.readFile(noteMetaCachePath(root), 'utf8')
     const parsed = JSON.parse(raw) as {
       version?: unknown
+      preambleFolder?: unknown
       entries?: unknown
     }
     if (parsed.version !== NOTE_META_CACHE_VERSION || !Array.isArray(parsed.entries)) return
+    if (parsed.preambleFolder !== (await typstPreambleFolderFor(root))) return
 
     for (const entry of parsed.entries) {
       if (!entry || typeof entry !== 'object') continue
@@ -2169,7 +2198,16 @@ async function persistNoteMetaCacheSnapshot(
     await fs.mkdir(path.dirname(target), { recursive: true })
     await fs.writeFile(
       temp,
-      `${JSON.stringify({ version: NOTE_META_CACHE_VERSION, entries })}\n`,
+      `${JSON.stringify({
+        version: NOTE_META_CACHE_VERSION,
+        // A note's tags depend on which folder holds Typst preambles (#562),
+        // so the file records the folder it was built under. Clearing the
+        // in-memory cache is not enough on its own: whole-root invalidation
+        // re-arms hydration, and without this stamp the next scan would load
+        // these very tags straight back off disk.
+        preambleFolder: await typstPreambleFolderFor(root),
+        entries
+      })}\n`,
       'utf8'
     )
     await fs.rename(temp, target)
@@ -2769,6 +2807,13 @@ async function readMeta(
   } catch {
     /* ignore — treat as empty */
   }
+  // A Typst preamble is Typst source, not prose: `#let vec(x) = bold(x)` and
+  // the `#var` references in its formulas are variables, and indexing them
+  // filled the vault's tag list with `let` and every variable name (#562).
+  // Same reasoning as the Excalidraw skip above, but tags ONLY: a preamble
+  // keeps its excerpt, wikilinks and searchability, which is the whole reason
+  // #486 made preambles ordinary notes rather than hidden files.
+  const isPreamble = isTypstPreamblePath(relPath, await typstPreambleFolderFor(root))
   const meta: NoteMeta = {
     path: relPath,
     title: path.basename(abs, path.extname(abs)),
@@ -2777,7 +2822,7 @@ async function readMeta(
     createdAt: stat.birthtimeMs || stat.ctimeMs,
     updatedAt: stat.mtimeMs,
     size: stat.size,
-    tags: extractTags(body),
+    tags: isPreamble ? [] : extractTags(body),
     wikilinks: extractWikilinks(body),
     assetEmbeds: extractAssetEmbeds(body),
     hasAttachments: bodyHasLocalAsset(body),

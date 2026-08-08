@@ -33,11 +33,14 @@ import {
 } from '@shared/excalidraw'
 import { TASKS_TAB_PATH, isTasksTabPath, parseTasksFromBody, toIsoDateLocal } from '@shared/tasks'
 import {
+  TYPST_PREAMBLE_FOLDER,
   isTypstPreamblePath,
   preambleKeyFromTitle,
   resolveTypstPreamble,
+  resolveTypstPreambleFolder,
   type TypstPreambleNote
 } from './lib/typst-preamble'
+import { normalizeTypstPreambleFolder } from '@shared/typst-preamble-folder'
 import {
   composeTaskFile,
   setTaskFileStatus,
@@ -2942,6 +2945,13 @@ interface Store {
    * (`vaultRelativeFolderPath` output, e.g. `inbox/Books`).
    */
   toggleTasksExcludedFolder: (relDir: string) => Promise<void>
+  /**
+   * Point the vault at a different Typst preamble folder (#562). Empty or
+   * invalid input restores the default (`typst`). Notes in the folder are
+   * preambles AND are left out of the tag index, so this moves both at once;
+   * the note list is refreshed because every note's tags may have changed.
+   */
+  setTypstPreambleFolder: (folder: string) => Promise<void>
   setNotes: (notes: NoteMeta[]) => void
   setView: (view: View) => void
   /** Open the Tasks panel as a tab in the active pane. If the tab is
@@ -4562,6 +4572,19 @@ export const useStore = create<Store>((set, get) => {
     // the exclusion without waiting for the next natural refresh.
     await get().refreshTasks()
   },
+  setTypstPreambleFolder: async (folder) => {
+    const settings = get().vaultSettings
+    const cleaned = normalizeTypstPreambleFolder(folder)
+    const next =
+      cleaned && cleaned !== TYPST_PREAMBLE_FOLDER ? { folder: cleaned } : undefined
+    if ((next?.folder ?? null) === (settings.typstPreambles?.folder ?? null)) return
+    await get().setVaultSettings({ ...settings, typstPreambles: next })
+    // Every note's tags may have changed: the old folder's notes get theirs
+    // back, the new folder's lose them. The index was invalidated by the write,
+    // so a plain refresh is enough to repaint the tag list.
+    await get().refreshNotes()
+    if (get().typstTagPreambles) await get().refreshTypstPreambles()
+  },
   toggleFavoriteActiveNote: async () => {
     const path = get().activeNote?.path ?? get().selectedPath
     if (!path) return
@@ -5754,8 +5777,11 @@ export const useStore = create<Store>((set, get) => {
       if (state.typstPreambleNotes.length) set({ typstPreambleNotes: [] })
       return
     }
+    const preambleFolder = resolveTypstPreambleFolder(
+      state.vaultSettings?.typstPreambles?.folder
+    )
     const candidates = state.notes.filter(
-      (note) => note.folder !== 'trash' && isTypstPreamblePath(note.path)
+      (note) => note.folder !== 'trash' && isTypstPreamblePath(note.path, preambleFolder)
     )
     const loaded: TypstPreambleNote[] = []
     for (const note of candidates) {
@@ -6236,7 +6262,13 @@ export const useStore = create<Store>((set, get) => {
       const meta = await window.zen.writeNote(path, writtenBody)
       // Saving a Typst preamble note changes the definitions every note tagged
       // for it compiles against — reload so open panes repaint. (#486)
-      if (get().typstTagPreambles && isTypstPreamblePath(path)) {
+      if (
+        get().typstTagPreambles &&
+        isTypstPreamblePath(
+          path,
+          resolveTypstPreambleFolder(get().vaultSettings?.typstPreambles?.folder)
+        )
+      ) {
         void get().refreshTypstPreambles()
       }
       set((cur) => {

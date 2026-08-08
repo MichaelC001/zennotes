@@ -447,6 +447,16 @@ export interface VaultSettings {
    * can land beside it without another migration.
    */
   tasks?: { excludedFolders?: string[] }
+  /**
+   * Typst preamble settings (#486, #562). `folder` names the directory whose
+   * notes are Typst preambles, matched at any depth; absent means `typst`.
+   * Those notes are Typst source rather than prose, so no scanner reads their
+   * `#let` / `#var` tokens as tags on any runtime. Configurable so a vault that
+   * already keeps ordinary notes in a folder called `typst` can move the
+   * preambles instead of losing those notes' tags. An object rather than a bare
+   * string so later preamble settings land beside it without another migration.
+   */
+  typstPreambles?: { folder?: string }
 }
 
 export const DEFAULT_DAILY_NOTES_DIRECTORY = 'Daily Notes'

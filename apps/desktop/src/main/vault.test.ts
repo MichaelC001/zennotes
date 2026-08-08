@@ -907,6 +907,9 @@ describe('listNotes metadata cache', () => {
       path.join(root, '.zennotes', 'note-meta-cache-v1.json'),
       `${JSON.stringify({
         version: 3,
+        // The folder the snapshot was built under (#562). A snapshot without
+        // it predates the preamble exclusion, so its tags cannot be trusted.
+        preambleFolder: 'typst',
         entries: [
           {
             path: rel,
@@ -940,6 +943,60 @@ describe('listNotes metadata cache', () => {
     expect(note?.title).toBe('Cached Title')
     expect(note?.tags).toEqual(['cached'])
     expect(note?.excerpt).toBe('cached excerpt')
+  })
+
+  // #562: a note's tags depend on which folder holds Typst preambles, so a
+  // snapshot built under a different folder (or by a build that had no such
+  // concept) describes tags this vault no longer believes in. Discarding it is
+  // the upgrade path: without this, existing vaults would keep serving their
+  // polluted `#let` tags out of disk cache until every file changed.
+  it('discards persisted metadata built under a different preamble folder', async () => {
+    const root = await makeTempDir('zennotes-meta-cache-preamble-')
+    await ensureVaultLayout(root)
+    const rel = 'inbox/typst/physics.md'
+    const abs = path.join(root, rel)
+    await mkdir(path.dirname(abs), { recursive: true })
+    await writeFile(abs, '#let vec(x) = bold(x)\n', 'utf8')
+    const info = await stat(abs)
+    await mkdir(path.join(root, '.zennotes'), { recursive: true })
+    await writeFile(
+      path.join(root, '.zennotes', 'note-meta-cache-v1.json'),
+      `${JSON.stringify({
+        version: 3,
+        preambleFolder: 'SomethingElse',
+        entries: [
+          {
+            path: rel,
+            mtimeMs: info.mtimeMs,
+            size: info.size,
+            meta: {
+              path: rel,
+              title: 'physics',
+              folder: 'inbox',
+              siblingOrder: 0,
+              createdAt: info.birthtimeMs || info.ctimeMs,
+              updatedAt: info.mtimeMs,
+              size: info.size,
+              tags: ['let'],
+              wikilinks: [],
+              assetEmbeds: [],
+              hasAttachments: false,
+              excerpt: 'stale'
+            }
+          }
+        ]
+      })}\n`,
+      'utf8'
+    )
+
+    invalidateNoteMetaCache(root)
+
+    const notes = await listNotes(root)
+    const note = notes.find((item) => item.path === rel)
+    // Re-derived against THIS vault's folder (`typst`), so the preamble
+    // contributes nothing rather than the cached `let`.
+    expect(note?.tags).toEqual([])
+    expect(note?.excerpt).not.toBe('stale')
   })
 
   it('ignores stale persisted metadata when file stats no longer match', async () => {

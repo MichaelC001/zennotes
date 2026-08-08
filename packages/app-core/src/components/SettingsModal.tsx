@@ -37,6 +37,11 @@ import {
   type McpServerRuntime,
 } from "@shared/mcp-clients";
 import { normalizeTasksExcludedFolder } from "@shared/tasks-excluded-folders";
+import {
+  DEFAULT_TYPST_PREAMBLE_FOLDER as TYPST_PREAMBLE_FOLDER,
+  normalizeTypstPreambleFolder,
+  resolveTypstPreambleFolder,
+} from "@shared/typst-preamble-folder";
 import { useStore, refreshCustomThemes, refreshOverrides } from "../store";
 import { WORKFLOW_PRESETS, hiddenPresetsInOrder } from "@shared/workflows/presets";
 import { startWorkflowTutorial } from "../lib/workflow-tutorial-flow";
@@ -1863,6 +1868,37 @@ export function SettingsModal(): JSX.Element {
           ],
         },
         {
+          id: "typst-tag-preambles",
+          title: "Typst definitions from tags",
+          description:
+            "Let a note's tags decide which Typst definitions its formulas compile against. Preambles are ordinary notes in the preamble folder.",
+          keywords: [
+            "typst",
+            "preamble",
+            "math",
+            "definitions",
+            "tags",
+            "vec",
+            "notation",
+          ],
+        },
+        {
+          id: "typst-preamble-folder",
+          title: "Typst preamble folder",
+          description:
+            "Which folder holds Typst preamble notes. Its notes are left out of the tag list, so rename it if you keep ordinary tagged notes in a folder called typst.",
+          keywords: [
+            "typst",
+            "preamble",
+            "folder",
+            "tags",
+            "tag list",
+            "let",
+            "variables",
+            "rename",
+          ],
+        },
+        {
           id: "loose-math-delimiters",
           title: "Relaxed $$ math delimiters",
           description:
@@ -2308,11 +2344,14 @@ export function SettingsModal(): JSX.Element {
                 {mathRenderer === "typst" && (
                   <ToggleRow
                     label="Typst definitions from tags"
-                    description="Prepend shared Typst definitions to a note's formulas based on its tags, so the same notation can mean different things per subject. Write a preamble as an ordinary note in a folder named `typst`, titled with the tag path in dots — `typst/physics.md` applies to #physics, `typst/physics.mechanics.md` to #physics/mechanics, layered general to specific. Preamble notes sync and are editable like any other note."
+                    description="Prepend shared Typst definitions to a note's formulas based on its tags, so the same notation can mean different things per subject. Write a preamble as an ordinary note in the preamble folder (`typst` by default), titled with the tag path in dots — `typst/physics.md` applies to #physics, `typst/physics.mechanics.md` to #physics/mechanics, layered general to specific. Preamble notes sync and are editable like any other note, but they never contribute #tags, because their `#let` definitions are Typst variables."
                     value={typstTagPreambles}
                     settingId="typst-tag-preambles"
                     onChange={setTypstTagPreambles}
                   />
+                )}
+                {mathRenderer === "typst" && typstTagPreambles && (
+                  <TypstPreambleFolderRow settingId="typst-preamble-folder" />
                 )}
                 <ToggleRow
                   label="Relaxed $$ math delimiters"
@@ -6817,6 +6856,83 @@ function TasksExcludedFoldersRow({
         >
           Exclude folder
         </button>
+      </div>
+    </div>
+  );
+}
+
+/** Settings editor for the vault's `typstPreambles.folder` name (#562).
+ *  The folder does double duty: its notes are the Typst preambles, and they
+ *  are the notes every tag scanner skips, because `#let vec(x) = …` is a Typst
+ *  variable rather than a tag. Renaming it therefore moves both at once, which
+ *  is the way out for a vault that keeps ordinary tagged notes in a folder it
+ *  happens to have called `typst`. Saved to vault.json, so it travels with the
+ *  vault and applies on every runtime. */
+function TypstPreambleFolderRow({
+  settingId,
+}: {
+  settingId?: string;
+}): JSX.Element {
+  const stored = useStore((s) => s.vaultSettings.typstPreambles?.folder);
+  const setTypstPreambleFolder = useStore((s) => s.setTypstPreambleFolder);
+  const effective = resolveTypstPreambleFolder(stored);
+  const [draft, setDraft] = useState(effective);
+  // Someone else (another window, a hand edit of vault.json) can move the
+  // folder while this row is mounted; follow it rather than showing a stale
+  // name the user never typed.
+  useEffect(() => {
+    setDraft(effective);
+  }, [effective]);
+
+  const commit = (): void => {
+    const cleaned = normalizeTypstPreambleFolder(draft);
+    if (!cleaned) {
+      setDraft(effective);
+      return;
+    }
+    void setTypstPreambleFolder(cleaned);
+  };
+
+  return (
+    <div className="px-5 py-4" {...settingsSearchTargetProps(settingId)}>
+      <div className="text-sm font-medium text-ink-900">
+        Typst preamble folder
+      </div>
+      <div className="mt-1 text-xs leading-5 text-ink-500">
+        Notes in this folder are preambles, and their #tags are left out of the
+        tag list: a preamble is Typst source, where `#let` and `#var` are
+        variables rather than tags. Rename it if you keep ordinary tagged notes
+        in a folder called typst. Saved in the vault itself, so the CLI, MCP,
+        and the self-hosted server agree.
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setDraft(effective);
+            }
+          }}
+          onBlur={commit}
+          placeholder={TYPST_PREAMBLE_FOLDER}
+          aria-label="Typst preamble folder name"
+          className="min-w-0 flex-1 rounded-md border border-paper-300 bg-paper-100 px-2.5 py-1.5 font-mono text-sm text-ink-900 outline-none focus:border-accent/60"
+        />
+        {effective !== TYPST_PREAMBLE_FOLDER && (
+          <button
+            type="button"
+            onClick={() => void setTypstPreambleFolder(TYPST_PREAMBLE_FOLDER)}
+            className="shrink-0 rounded-md px-2 py-1 text-xs text-ink-500 hover:bg-paper-200"
+          >
+            Reset
+          </button>
+        )}
       </div>
     </div>
   );
