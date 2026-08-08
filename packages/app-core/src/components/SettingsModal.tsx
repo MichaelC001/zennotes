@@ -2344,7 +2344,7 @@ export function SettingsModal(): JSX.Element {
                 {mathRenderer === "typst" && (
                   <ToggleRow
                     label="Typst definitions from tags"
-                    description="Prepend shared Typst definitions to a note's formulas based on its tags, so the same notation can mean different things per subject. Write a preamble as an ordinary note in the preamble folder (`typst` by default), titled with the tag path in dots — `typst/physics.md` applies to #physics, `typst/physics.mechanics.md` to #physics/mechanics, layered general to specific. Preamble notes sync and are editable like any other note, but they never contribute #tags, because their `#let` definitions are Typst variables."
+                    description="Prepend shared Typst definitions to a note's formulas based on its tags, so the same notation can mean different things per subject. Write a preamble as an ordinary note in the preamble folder (`typst` by default), titled with the tag path in dots: `typst/physics.md` applies to #physics, `typst/physics.mechanics.md` to #physics/mechanics, layered general to specific. Preamble notes sync and are editable like any other note, but they never contribute #tags, because their `#let` definitions are Typst variables."
                     value={typstTagPreambles}
                     settingId="typst-tag-preambles"
                     onChange={setTypstTagPreambles}
