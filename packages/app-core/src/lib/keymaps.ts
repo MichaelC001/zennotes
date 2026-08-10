@@ -38,6 +38,15 @@ export type KeymapId =
   | "global.historyBack"
   | "global.historyForward"
   | "global.toggleRecentNote"
+  | "tabs.select1"
+  | "tabs.select2"
+  | "tabs.select3"
+  | "tabs.select4"
+  | "tabs.select5"
+  | "tabs.select6"
+  | "tabs.select7"
+  | "tabs.select8"
+  | "tabs.select9"
   | "vim.leaderPrefix"
   | "vim.leaderOpenBuffers"
   | "vim.leaderWorkflows"
@@ -395,6 +404,23 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     defaultBinding: "Mod+Tab",
     defaultBindingMac: "Ctrl+Tab",
   },
+  // Direct tab selection (#497), browser-style. Alt+digit cross-platform; on
+  // macOS Option+digit types characters on many layouts (the #514 trap) and
+  // Cmd+1/2/4/5/6 already mean sidebar, connections, and the pane modes, so
+  // the Mac default is Ctrl+digit (same escape toggleRecentNote uses for
+  // Ctrl+Tab).
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map(
+    (n): KeymapDefinition => ({
+      id: `tabs.select${n}` as KeymapId,
+      kind: "shortcut",
+      scope: "app",
+      group: "global",
+      title: `Go to tab ${n}`,
+      description: `Jump straight to tab ${n}, counted across panes in the same order gt cycles.`,
+      defaultBinding: `Alt+${n}`,
+      defaultBindingMac: `Ctrl+${n}`,
+    }),
+  ),
   {
     id: "vim.leaderPrefix",
     kind: "sequence",
@@ -1144,6 +1170,21 @@ for (const definition of KEYMAP_DEFINITIONS) {
 const KEYMAP_INDEX = new Map<KeymapId, KeymapDefinition>(
   KEYMAP_DEFINITIONS.map((definition) => [definition.id, definition] as const),
 );
+
+/** The nine direct tab-selection shortcuts (#497), index = position in the
+ *  array + 1. Kept as a list so dispatchers can loop instead of hand-writing
+ *  nine matches. */
+export const TAB_SELECT_KEYMAP_IDS: readonly KeymapId[] = [
+  "tabs.select1",
+  "tabs.select2",
+  "tabs.select3",
+  "tabs.select4",
+  "tabs.select5",
+  "tabs.select6",
+  "tabs.select7",
+  "tabs.select8",
+  "tabs.select9",
+];
 
 const KEYMAP_GROUP_LABELS: Record<KeymapGroup, string> = {
   global: "Global shortcuts",

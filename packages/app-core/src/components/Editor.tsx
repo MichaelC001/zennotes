@@ -46,7 +46,7 @@ import {
   type KeymapId,
   type KeymapOverrides
 } from '../lib/keymaps'
-import { navigateActiveBuffer } from '../lib/buffer-navigation'
+import { navigateActiveBuffer, selectActiveBuffer } from '../lib/buffer-navigation'
 import { applyVimInsertEscape } from '../lib/vim-insert-escape'
 import { listContinuationPrefix } from '../lib/list-continuation'
 import { focusEditorNormalMode } from '../lib/editor-focus'
@@ -633,12 +633,26 @@ function registerVimCommands(): void {
   Vim.defineAction('focusPaneRight', () => {
     focusPaneOrEdgePanel('l')
   })
-  Vim.defineAction('previousBuffer', () => {
-    navigateActiveBuffer(useStore.getState(), -1)
-  })
-  Vim.defineAction('nextBuffer', () => {
-    navigateActiveBuffer(useStore.getState(), 1)
-  })
+  // {count}gt goes straight to tab {count}, vim's absolute jump; without a
+  // count it keeps cycling. {count}gT is relative, vim-style: count tabs
+  // back. (#497)
+  Vim.defineAction(
+    'previousBuffer',
+    (_cm: unknown, actionArgs?: { repeat?: number; repeatIsExplicit?: boolean }) => {
+      const repeat = actionArgs?.repeatIsExplicit ? actionArgs.repeat ?? 1 : 1
+      navigateActiveBuffer(useStore.getState(), -repeat)
+    }
+  )
+  Vim.defineAction(
+    'nextBuffer',
+    (_cm: unknown, actionArgs?: { repeat?: number; repeatIsExplicit?: boolean }) => {
+      if (actionArgs?.repeatIsExplicit && actionArgs.repeat) {
+        selectActiveBuffer(useStore.getState(), actionArgs.repeat)
+        return
+      }
+      navigateActiveBuffer(useStore.getState(), 1)
+    }
+  )
 
   registerVimNoteCommands()
   registerCommandPaletteEx()
