@@ -850,10 +850,15 @@ function registerVimNoteCommands(): void {
   }
   Vim.defineEx('qall', 'qa', closeEveryTab)
   Vim.defineEx('quitall', 'quitall', closeEveryTab)
-  // :xa / :wa are just aliases for qall in this context (nothing to flush
-  // that autosave doesn't already handle).
+  // Quit-and-write variants close everything, like vim's :xa / :wqa. But
+  // :wa is a SAVE, not a quit: it used to alias qall here on the theory
+  // that autosave leaves nothing to flush, and every vim user's muscle
+  // memory (":wa after any change") nuked their tab layout instead (#569).
   Vim.defineEx('xall', 'xa', closeEveryTab)
-  Vim.defineEx('wall', 'wa', closeEveryTab)
+  Vim.defineEx('wqall', 'wqa', closeEveryTab)
+  Vim.defineEx('wall', 'wa', () => {
+    void useStore.getState().flushDirtyNotes()
+  })
 
   Vim.defineEx('help', 'h', () => {
     void useStore.getState().openHelpView()
@@ -964,6 +969,8 @@ const MANUAL_EX_NAMES = new Set([
   'quitall',
   'xall',
   'xa',
+  'wqall',
+  'wqa',
   'wall',
   'wa',
   'help',

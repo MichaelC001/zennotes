@@ -771,9 +771,14 @@ export const HELP_VIM_COMMANDS: HelpExCommand[] = [
     detail: 'Keep only the active tab in the current pane.'
   },
   {
-    command: ':qa / :quitall / :xa / :wa',
+    command: ':qa / :quitall / :xa / :wqa',
     summary: 'Close every tab everywhere',
-    detail: 'Closes all tabs across all panes. The write aliases act the same way here.'
+    detail: 'Closes all tabs across all panes. The write-and-quit aliases save on the way out.'
+  },
+  {
+    command: ':wa / :wall',
+    summary: 'Write every unsaved note',
+    detail: 'Saves all dirty notes across all panes without closing anything, like vim.'
   },
   {
     command: ':help / :h',
