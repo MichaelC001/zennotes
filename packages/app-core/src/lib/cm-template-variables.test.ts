@@ -54,6 +54,20 @@ describe('templateVariableApplySpec', () => {
 
     expect(next.doc.toString()).toBe('{{cursor}}}}')
   })
+
+  it('leaves closers that belong to an earlier open construct alone', () => {
+    // Prose documenting Handlebars/Jinja syntax: the `}}` after the caret
+    // closes `{{var`, so accepting the completion must not delete it.
+    const next = applied('{{var{{da}}', 5, 9, '{{date}}')
+
+    expect(next.doc.toString()).toBe('{{var{{date}}}}')
+  })
+
+  it('still swallows closers when an earlier pair on the line is already closed', () => {
+    const next = applied('{{a}} {{cu}}', 6, 10, '{{cursor}}')
+
+    expect(next.doc.toString()).toBe('{{a}} {{cursor}}')
+  })
 })
 
 describe('templateVariableSource', () => {

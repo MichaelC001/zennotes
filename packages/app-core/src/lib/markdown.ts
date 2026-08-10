@@ -99,7 +99,11 @@ function remarkWikilinks() {
         type: 'image',
         url: target,
         title: null,
-        alt: label
+        alt: label,
+        // Marks the label as wikilink-sourced for remarkImageSizeHints: a
+        // bare `600x400` is a size hint there, but ordinary markdown alt
+        // text keeps it as the caption.
+        data: { zenWikilinkEmbed: true }
       }
     }
     if (bang === '!' && assetKind === 'excalidraw') {
@@ -517,7 +521,12 @@ function remarkImageSizeHints() {
       const url = String(image.url ?? '')
       const isRemote = /^(https?:|data:)/i.test(url)
       if (!isRemote && classifyLocalAssetHref(url) !== 'image') return
-      const { alt, size } = splitEmbedLabel(typeof image.alt === 'string' ? image.alt : '')
+      const fromWikilink =
+        (image.data as { zenWikilinkEmbed?: boolean } | undefined)?.zenWikilinkEmbed === true
+      const { alt, size } = splitEmbedLabel(
+        typeof image.alt === 'string' ? image.alt : '',
+        fromWikilink ? 'wikilink' : 'markdown'
+      )
       if (!size) return
       image.alt = alt
       const data = (image.data ??= {}) as { hProperties?: Record<string, unknown> }

@@ -408,7 +408,9 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
   // macOS Option+digit types characters on many layouts (the #514 trap) and
   // Cmd+1/2/4/5/6 already mean sidebar, connections, and the pane modes, so
   // the Mac default is Ctrl+digit (same escape toggleRecentNote uses for
-  // Ctrl+Tab).
+  // Ctrl+Tab). Known limit: with multiple Spaces, macOS auto-enables Mission
+  // Control's Ctrl+digit "Switch to Desktop" shortcuts and consumes the key
+  // before the app sees it; the description tells those users to rebind.
   ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map(
     (n): KeymapDefinition => ({
       id: `tabs.select${n}` as KeymapId,
@@ -416,7 +418,7 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
       scope: "app",
       group: "global",
       title: `Go to tab ${n}`,
-      description: `Jump straight to tab ${n}, counted across panes in the same order gt cycles.`,
+      description: `Jump straight to tab ${n}, counted across panes in the same order gt cycles. On macOS with multiple Spaces, Mission Control claims Ctrl+${n} for Switch to Desktop; rebind here (or free the key in System Settings) if nothing happens.`,
       defaultBinding: `Alt+${n}`,
       defaultBindingMac: `Ctrl+${n}`,
     }),
@@ -1532,17 +1534,38 @@ export function normalizeKeymapOverrides(input: unknown): KeymapOverrides {
   return overrides;
 }
 
-export function shortcutBindingFromEvent(event: KeyboardEvent): string | null {
+function shortcutModifiersFromEvent(event: KeyboardEvent): string[] {
   const mac = isMacPlatform();
-  const resolved = resolveKeyFromEvent(event);
-  const key = resolved ?? normalizeKeyName(event.key);
-  if (!key) return null;
   const modifiers: string[] = [];
   if (event.ctrlKey) modifiers.push(mac ? "Ctrl" : "Mod");
   if (event.metaKey) modifiers.push(mac ? "Mod" : "Meta");
   if (event.altKey) modifiers.push("Alt");
   if (event.shiftKey) modifiers.push("Shift");
-  return normalizeShortcutBinding([...modifiers, key].join("+"));
+  return modifiers;
+}
+
+export function shortcutBindingFromEvent(event: KeyboardEvent): string | null {
+  // Alt+numpad digits are the Windows Alt-code input method (hold Alt, type
+  // 0233 on the numpad for an accented character). Numpad digits resolve to
+  // the bare digit, so with Alt+1..9 shipped as tab defaults (#497) every
+  // Alt-code keystroke would switch tabs mid-entry: on Windows those chords
+  // belong to the OS and never resolve to a binding.
+  if (
+    event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    /^Numpad\d$/.test(event.code) &&
+    !isMacPlatform() &&
+    !isLinuxPlatform()
+  ) {
+    return null;
+  }
+  const resolved = resolveKeyFromEvent(event);
+  const key = resolved ?? normalizeKeyName(event.key);
+  if (!key) return null;
+  return normalizeShortcutBinding(
+    [...shortcutModifiersFromEvent(event), key].join("+"),
+  );
 }
 
 export function sequenceTokenFromEvent(event: KeyboardEvent): string | null {
@@ -1575,7 +1598,19 @@ export function matchesShortcutBinding(
   binding: string,
 ): boolean {
   const normalized = shortcutBindingFromEvent(event);
-  return !!normalized && normalized === binding;
+  if (!!normalized && normalized === binding) return true;
+  // Layouts with shifted digits (French AZERTY, Czech) type punctuation on
+  // the digit row, so a digit binding like the Alt+1..9 tab defaults (#497)
+  // would never fire by typed character (Alt+1 arrives as "Alt+&"). Fall
+  // back to the physical digit-row position, the same shield class the Mac
+  // Option+printable defaults needed (#514). Numpad digits stay out of this
+  // fallback on purpose: see the Alt-code guard in shortcutBindingFromEvent.
+  const digit = /^Digit(\d)$/.exec(event.code)?.[1];
+  if (!digit) return false;
+  const physical = normalizeShortcutBinding(
+    [...shortcutModifiersFromEvent(event), digit].join("+"),
+  );
+  return !!physical && physical !== normalized && physical === binding;
 }
 
 export function matchesShortcut(
@@ -1584,6 +1619,30 @@ export function matchesShortcut(
   id: KeymapId,
 ): boolean {
   return matchesShortcutBinding(event, getKeymapBinding(overrides, id));
+}
+
+/**
+ * True when the event lands on a combination the user has explicitly rebound
+ * to some other action. The #497 tab shortcuts shipped nine new defaults into
+ * the middle of an ordered dispatch chain, so without this check a
+ * pre-existing override on e.g. Alt+3 (checked later in the chain) would
+ * silently lose to the new default. An explicit rebind outranks a shipped
+ * default; callers skip their default binding when this returns true.
+ */
+export function eventMatchesUserOverride(
+  event: KeyboardEvent,
+  overrides: KeymapOverrides | null | undefined,
+  excludeId: KeymapId,
+): boolean {
+  if (!overrides) return false;
+  for (const [id, binding] of Object.entries(overrides)) {
+    if (id === excludeId || typeof binding !== "string") continue;
+    const definition = KEYMAP_INDEX.get(id as KeymapId);
+    if (!definition || definition.kind !== "shortcut") continue;
+    if (definition.scope !== "app") continue;
+    if (matchesShortcutBinding(event, binding)) return true;
+  }
+  return false;
 }
 
 export function matchesSequenceToken(

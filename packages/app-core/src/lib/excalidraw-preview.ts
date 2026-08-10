@@ -20,22 +20,36 @@ export function parseEmbedSizeHint(hint: string | null | undefined): EmbedSize |
   if (!hint) return null
   const m = hint.trim().match(SIZE_HINT_RE)
   if (!m) return null
-  return { width: Number(m[1]), height: m[2] ? Number(m[2]) : undefined }
+  const width = Number(m[1])
+  const height = m[2] ? Number(m[2]) : undefined
+  // A zero dimension is not a resize. Treating `|0` or `|0x300` as a hint
+  // used to eat the caption and then skip the zero at the falsy checks
+  // downstream, distorting the image; an invalid hint stays a caption.
+  if (width < 1 || (height !== undefined && height < 1)) return null
+  return { width, height }
 }
 
 /** Split an embed label into its caption and a trailing size hint, covering
- *  every Obsidian spelling: `600x400` (hint only, from `![[img|600x400]]`),
- *  `caption|600` (from `![caption|600](img)` alt text), and plain captions
- *  with no hint. Pipes inside the caption survive; only a LAST segment that
- *  parses as a size is consumed. (#570) */
-export function splitEmbedLabel(label: string | null | undefined): {
+ *  every Obsidian spelling: `caption|600` (from `![caption|600](img)` alt
+ *  text or `![[img|caption|600]]`), and plain captions with no hint. Pipes
+ *  inside the caption survive; only a LAST segment that parses as a size is
+ *  consumed. The whole-label form (`600x400` from `![[img|600x400]]`) is a
+ *  hint only for `source: 'wikilink'`: in standard markdown the alt is the
+ *  author's caption, so `![2024](chart.png)` keeps its numeric alt instead
+ *  of being resized to 2024px (write `![|2024](chart.png)` to size). (#570) */
+export function splitEmbedLabel(
+  label: string | null | undefined,
+  source: 'wikilink' | 'markdown'
+): {
   alt: string
   size: EmbedSize | null
 } {
   const raw = (label ?? '').trim()
   if (!raw) return { alt: '', size: null }
-  const wholeSize = parseEmbedSizeHint(raw)
-  if (wholeSize) return { alt: '', size: wholeSize }
+  if (source === 'wikilink') {
+    const wholeSize = parseEmbedSizeHint(raw)
+    if (wholeSize) return { alt: '', size: wholeSize }
+  }
   const pipeAt = raw.lastIndexOf('|')
   if (pipeAt < 0) return { alt: raw, size: null }
   const size = parseEmbedSizeHint(raw.slice(pipeAt + 1))

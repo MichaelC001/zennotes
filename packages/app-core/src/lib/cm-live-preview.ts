@@ -244,7 +244,7 @@ function parseStandaloneLocalImage(lineText: string): ParsedImage | null {
     if (classifyLocalAssetHref(href) !== 'image') return null
     const resolvedUrl = resolveLocalAssetUrl(state.vault?.root, state.activeNote?.path, href)
     if (!resolvedUrl) return null
-    const { alt, size } = splitEmbedLabel(fromMarkdown[1])
+    const { alt, size } = splitEmbedLabel(fromMarkdown[1], 'markdown')
     return {
       alt,
       href,
@@ -261,7 +261,7 @@ function parseStandaloneLocalImage(lineText: string): ParsedImage | null {
   if (classifyLocalAssetHref(href) !== 'image') return null
   const resolvedUrl = resolveLocalAssetUrl(state.vault?.root, state.activeNote?.path, href)
   if (!resolvedUrl) return null
-  const { alt, size } = splitEmbedLabel(fromEmbed[2])
+  const { alt, size } = splitEmbedLabel(fromEmbed[2], 'wikilink')
   return {
     alt,
     href,
@@ -420,14 +420,23 @@ class LocalImageWidget extends WidgetType {
     // size, but the embed class stretches images to width: 100% and
     // presentational attributes lose to any CSS rule, so the hint also goes
     // on as inline style. The class's max-width: 100% still caps a hint
-    // wider than the pane.
+    // wider than the pane. The cache key above is url|mtime, not the hint,
+    // so a reused element may still carry the size of a previous render
+    // (hint edited away, or the same file embedded elsewhere with another
+    // hint): clear whatever this widget does not set.
     if (this.width) {
       image.width = this.width
       image.style.width = `${this.width}px`
+    } else {
+      image.removeAttribute('width')
+      image.style.removeProperty('width')
     }
     if (this.height) {
       image.height = this.height
       image.style.height = `${this.height}px`
+    } else {
+      image.removeAttribute('height')
+      image.style.removeProperty('height')
     }
 
     const topControls = document.createElement('div')

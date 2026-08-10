@@ -15,7 +15,6 @@ import {
   resolveNextPanel,
   shouldYieldToHomeNav
 } from '../lib/vim-nav'
-import { vimAwaitsNextKey } from '../lib/cm-vim-pending-input'
 import { isCalendarToggleAvailable } from '../lib/vault-layout'
 import { focusPanel, focusPaneInDirection } from '../lib/pane-nav'
 import {
@@ -1070,7 +1069,7 @@ export function VimNav(): JSX.Element | null {
         !editorInsertMode &&
         !state.editorViewRef?.state.selection.main.empty &&
         ((matchesSequenceToken(e, overrides, 'nav.contextMenu') &&
-          !vimAwaitsNextKey(state.editorViewRef)) ||
+          !isVimAwaitingArgument(state.editorViewRef)) ||
           wantsNativeContextMenuKey(e))
       if (wantsEditorTextContextMenu) {
         e.preventDefault()
@@ -1147,7 +1146,7 @@ export function VimNav(): JSX.Element | null {
           !isEditorInsertMode(state.editorViewRef, state.vimMode) &&
           // Same #568 guard as above: a pending f/t/r owns the character.
           ((matchesSequenceToken(e, overrides, 'nav.contextMenu') &&
-            !vimAwaitsNextKey(state.editorViewRef)) ||
+            !isVimAwaitingArgument(state.editorViewRef)) ||
             wantsNativeContextMenuKey(e))
         if (wantsTextContextMenu) {
           e.preventDefault()

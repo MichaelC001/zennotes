@@ -28,8 +28,12 @@ export const TEMPLATE_VARIABLES: TemplateVariable[] = [
  * its own `}}`, so the replaced range swallows up to two closing braces
  * already sitting at the caret: with auto-pair brackets on, typing `{{`
  * produced `{{}}` around the caret, and completing inside an existing
- * `{{…}}` pair hits the same leftover (#566). Kept separate from the
- * completion option so it can be tested without a mounted editor.
+ * `{{…}}` pair hits the same leftover (#566). The closers are only swallowed
+ * when they can belong to this variable's own `{{`: if an earlier `{{` on
+ * the line is still open (prose documenting Handlebars/Jinja syntax), the
+ * braces after the caret are its closers, literal note content that must
+ * survive the completion. Kept separate from the completion option so it can
+ * be tested without a mounted editor.
  */
 export function templateVariableApplySpec(
   state: EditorState,
@@ -37,8 +41,13 @@ export function templateVariableApplySpec(
   to: number,
   insert: string
 ): TransactionSpec {
+  const line = state.doc.lineAt(from)
+  const prefix = state.doc.sliceString(line.from, from)
+  const openBefore = (prefix.match(/\{\{/g) ?? []).length
+  const closedBefore = (prefix.match(/\}\}/g) ?? []).length
+  const ownsClosers = openBefore <= closedBefore
   const after = state.doc.sliceString(to, to + 2)
-  const consumed = after.startsWith('}}') ? 2 : after.startsWith('}') ? 1 : 0
+  const consumed = !ownsClosers ? 0 : after.startsWith('}}') ? 2 : after.startsWith('}') ? 1 : 0
   return {
     changes: { from, to: to + consumed, insert },
     selection: { anchor: from + insert.length }

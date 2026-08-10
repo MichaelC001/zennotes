@@ -62,7 +62,7 @@ import { hopMarkerBackward, hopMarkerForward } from '../lib/cm-marker-hop'
 import { toggleCheckbox } from '../lib/cm-toggle-checkbox'
 import { completionKeymapForEditor, completionNavKeymap } from '../lib/cm-completion-nav'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
-import { vimAwaitsNextKey } from '../lib/cm-vim-pending-input'
+import { isVimAwaitingArgument } from '../lib/vim-nav'
 import { toCodeMirrorKey, vimHalfPageKeymap } from '../lib/vim-half-page-keymap'
 import { scrollOff } from '../lib/cm-scrolloff'
 import { followLinkTarget } from '../lib/follow-link'
@@ -1868,7 +1868,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
                 const sel = view.state.selection.main
                 // A pending sequence owns the next key: `v f m` jumps to the
                 // next `m`, it does not open the menu (#568).
-                if (!insertMode && !sel.empty && !vimAwaitsNextKey(view)) {
+                if (!insertMode && !sel.empty && !isVimAwaitingArgument(view)) {
                   event.preventDefault()
                   event.stopPropagation()
                   openEditorContextMenu()

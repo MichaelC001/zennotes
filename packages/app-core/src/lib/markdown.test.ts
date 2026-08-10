@@ -105,6 +105,24 @@ describe('renderMarkdown', () => {
     expect(plain).not.toContain('width=')
   })
 
+  it('#570: a purely numeric markdown alt stays a caption, not a resize', () => {
+    // Only the wikilink form treats a bare number as a size hint; `![2024]`
+    // is the author's alt text (a year), and `![|2024]` is the sized form.
+    const html = renderMarkdown('![2024](assets/chart.png)')
+    expect(html).toContain('alt="2024"')
+    expect(html).not.toContain('width=')
+
+    const sized = renderMarkdown('![|2024](assets/chart.png)')
+    expect(sized).toContain('width="2024"')
+    expect(sized).toContain('alt=""')
+  })
+
+  it('#570: a zero dimension is not a hint and keeps the label', () => {
+    const html = renderMarkdown('![[assets/pic.png|0x300]]')
+    expect(html).toContain('alt="0x300"')
+    expect(html).not.toContain('height=')
+  })
+
   it('renders excalidraw embeds as placeholder divs', () => {
     const html = renderMarkdown('![[diagram.excalidraw]]')
 

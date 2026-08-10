@@ -4340,8 +4340,36 @@ export const useStore = create<Store>((set, get) => {
   const openVaultWorkspace = async (vault: VaultInfo): Promise<void> => {
     await restoreWorkspaceForVault(vault)
     await refreshVaultIndexes()
+    if (get().vault?.root !== vault.root) return
+    // The snapshot was trusted before the index existed; now that the real
+    // listing is here, run the strict check the pre-2.27 restore order gave
+    // for free: every restored tab whose note never materialized is closed,
+    // active or not. refreshNotes cannot do this on its own (its mid-save
+    // exemption and the #384 transient-wipe guard both assume the tabs they
+    // keep were verified once), so a snapshot synced from another machine
+    // would otherwise leave ghost tabs alive for the whole session. Dirty
+    // tabs stay (unsaved edits beat a stale listing), and an empty listing
+    // skips the pass: it is indistinguishable from a failed one (#384).
+    set((s) => {
+      if (s.notes.length === 0) return {}
+      const existing = new Set(s.notes.map((note) => note.path))
+      const keepTab = (path: string): boolean =>
+        existing.has(path) || isWorkspaceVirtualTabPath(path) || s.noteDirty[path] === true
+      const stale = allLeaves(s.paneLayout)
+        .flatMap((leaf) => leaf.tabs)
+        .filter((tab) => !keepTab(tab))
+      if (stale.length === 0) return {}
+      const validated = rewritePathsInTree(s.paneLayout, (path) =>
+        keepTab(path) ? path : null
+      )
+      const ensured = ensureActivePane(validated, s.activePaneId)
+      return {
+        paneLayout: ensured.layout,
+        activePaneId: ensured.activePaneId,
+        ...activeFieldsFrom(ensured.layout, ensured.activePaneId, s.noteContents, s.noteDirty)
+      }
+    })
     const s = get()
-    if (s.vault?.root !== vault.root) return
     // Folder rows did not exist while the workspace painted, so collapse the
     // ones the index just discovered. Quick Notes and Inbox were decided at
     // restore time (and may have been toggled since), so they stay untouched.
@@ -5866,12 +5894,17 @@ export const useStore = create<Store>((set, get) => {
         const applyStartedAt = performance.now()
         const noteMetaByPath = new Map(notes.map((note) => [note.path, note] as const))
         const existingPaths = new Set(notes.map((n) => n.path))
-        // Drop tabs whose notes no longer exist — except keep the currently
-        // focused selectedPath so the editor doesn't blank out mid-save.
+        // Drop tabs whose notes no longer exist. The currently focused
+        // selectedPath is exempt so the editor doesn't blank out mid-save,
+        // but only when its note actually loaded (or holds unsaved edits):
+        // a tab restored from a stale snapshot and promoted to active after
+        // its read failed has nothing to blank, and the exemption would keep
+        // that ghost alive through every refresh (#564).
         const keep = (path: string): boolean =>
           existingPaths.has(path) ||
           isWorkspaceVirtualTabPath(path) ||
-          path === s.selectedPath
+          (path === s.selectedPath &&
+            (s.noteContents[path] !== undefined || s.noteDirty[path] === true))
         const prunedLayout = rewritePathsInTree(s.paneLayout, (path) =>
           keep(path) ? path : null
         )
