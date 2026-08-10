@@ -16,7 +16,7 @@ import type { Root as HastRoot, Element as HastElement } from 'hast'
 import type { VFile } from 'vfile'
 import { recordRendererPerf } from './perf'
 import { classifyLocalAssetHref } from './local-assets'
-import { parseEmbedSizeHint } from './excalidraw-preview'
+import { parseEmbedSizeHint, splitEmbedLabel } from './excalidraw-preview'
 import { parseColWidthsComment } from './markdown-table'
 import { scanTaskMetadata, type TaskMetaToken } from './task-metadata-tokens'
 import { rollupChildDone, rollupCountsChild, rollupLabel, type ChildTaskState } from './task-rollup'
@@ -502,6 +502,32 @@ function remarkTaskMetadata() {
  * which maps to the default highlight color. Inline code is a separate mdast
  * node (not a `text` child), so code spans are skipped automatically.
  */
+/** Honor Obsidian-style size hints on image embeds (#570). Both spellings
+ *  arrive here as image nodes with the hint in their alt: `![[img|600x400]]`
+ *  via remarkWikilinks (the whole label is the hint) and `![alt|600](img)`
+ *  straight from the markdown alt text. The hint is stripped from the alt and
+ *  applied through hProperties so remarkRehype writes real width/height
+ *  attributes. Attachment chips (non-image files riding the image node type)
+ *  keep their labels untouched: only image-classified and remote urls
+ *  participate. */
+function remarkImageSizeHints() {
+  return (tree: MdRoot): void => {
+    visit(tree, 'image', (node) => {
+      const image = node as unknown as AnyNode
+      const url = String(image.url ?? '')
+      const isRemote = /^(https?:|data:)/i.test(url)
+      if (!isRemote && classifyLocalAssetHref(url) !== 'image') return
+      const { alt, size } = splitEmbedLabel(typeof image.alt === 'string' ? image.alt : '')
+      if (!size) return
+      image.alt = alt
+      const data = (image.data ??= {}) as { hProperties?: Record<string, unknown> }
+      const hProperties = (data.hProperties ??= {})
+      if (size.width) hProperties.width = size.width
+      if (size.height) hProperties.height = size.height
+    })
+  }
+}
+
 function remarkHighlight() {
   return (tree: MdRoot): void => {
     visit(tree, 'text', (node, index, parent) => {
@@ -965,6 +991,7 @@ function createProcessor(mathRenderer: 'katex' | 'typst') {
     .use(remarkTaskStates)
     .use(remarkTaskRollup)
     .use(remarkWikilinks)
+    .use(remarkImageSizeHints)
     .use(remarkHashtags)
     .use(remarkTaskMetadata)
     .use(remarkHighlight)

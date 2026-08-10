@@ -382,7 +382,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Links are actionable',
     body:
-      'Use [[wikilinks]] or markdown links. Following a link — click it, Cmd/Ctrl-click it, or use the follow-link motion (`gd`) in normal mode — opens the note under the cursor and pins PDFs into the reference pane. If the note does not exist yet, following the link offers to create it (after you confirm) rather than leaving a dead link. Prefix a wikilink with `!` to embed rather than link: `![[Note]]` inlines the target note content in the reading view and PDF export — recursively, with cycle protection — so a master note can pull in sub-notes and export to PDF as one document. `![[image.png]]` embeds an image, and `![[drawing.excalidraw]]` embeds an Excalidraw drawing as a PNG preview.'
+      'Use [[wikilinks]] or markdown links. Following a link — click it, Cmd/Ctrl-click it, or use the follow-link motion (`gd`) in normal mode — opens the note under the cursor and pins PDFs into the reference pane. If the note does not exist yet, following the link offers to create it (after you confirm) rather than leaving a dead link. Prefix a wikilink with `!` to embed rather than link: `![[Note]]` inlines the target note content in the reading view and PDF export — recursively, with cycle protection — so a master note can pull in sub-notes and export to PDF as one document. `![[image.png]]` embeds an image and `![[drawing.excalidraw]]` embeds an Excalidraw drawing as a PNG preview; both take optional `|width` or `|WxH` size hints (`![[image.png|300]]`, `![[image.png|600x400]]`), and the markdown form carries the same hint after the alt text (`![caption|300](image.png)`).'
   },
   {
     title: 'Files stay local',

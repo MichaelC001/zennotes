@@ -23,6 +23,7 @@ import { openVaultAssetExternally } from './external-file-link'
 import {
   getExcalidrawPreview,
   parseEmbedSizeHint,
+  splitEmbedLabel,
   resolveExcalidrawEmbedPath
 } from './excalidraw-preview'
 
@@ -80,6 +81,9 @@ type ParsedImage = {
   resolvedUrl: string
   /** Asset mtime, part of the image cache key so an edited file reloads. (#472) */
   version: number
+  /** Obsidian-style `|600` / `|600x400` size hint from the label. (#570) */
+  width?: number
+  height?: number
 }
 
 type ParsedPdf = {
@@ -240,11 +244,14 @@ function parseStandaloneLocalImage(lineText: string): ParsedImage | null {
     if (classifyLocalAssetHref(href) !== 'image') return null
     const resolvedUrl = resolveLocalAssetUrl(state.vault?.root, state.activeNote?.path, href)
     if (!resolvedUrl) return null
+    const { alt, size } = splitEmbedLabel(fromMarkdown[1])
     return {
-      alt: (fromMarkdown[1] ?? '').trim(),
+      alt,
       href,
       resolvedUrl,
-      version: assetVersionFor(href)
+      version: assetVersionFor(href),
+      width: size?.width,
+      height: size?.height
     }
   }
 
@@ -254,11 +261,14 @@ function parseStandaloneLocalImage(lineText: string): ParsedImage | null {
   if (classifyLocalAssetHref(href) !== 'image') return null
   const resolvedUrl = resolveLocalAssetUrl(state.vault?.root, state.activeNote?.path, href)
   if (!resolvedUrl) return null
+  const { alt, size } = splitEmbedLabel(fromEmbed[2])
   return {
-    alt: (fromEmbed[2] ?? '').trim(),
+    alt,
     href,
     resolvedUrl,
-    version: assetVersionFor(href)
+    version: assetVersionFor(href),
+    width: size?.width,
+    height: size?.height
   }
 }
 
@@ -338,7 +348,9 @@ class LocalImageWidget extends WidgetType {
     private readonly alt: string,
     private readonly href: string,
     private readonly resolvedUrl: string,
-    private readonly version: number
+    private readonly version: number,
+    private readonly width?: number,
+    private readonly height?: number
   ) {
     super()
   }
@@ -352,7 +364,9 @@ class LocalImageWidget extends WidgetType {
       other.alt === this.alt &&
       other.href === this.href &&
       other.resolvedUrl === this.resolvedUrl &&
-      other.version === this.version
+      other.version === this.version &&
+      other.width === this.width &&
+      other.height === this.height
     )
   }
 
@@ -402,6 +416,19 @@ class LocalImageWidget extends WidgetType {
     image.alt = this.alt
     image.loading = 'lazy'
     image.draggable = false
+    // Obsidian-style size hints (#570). The attribute carries the semantic
+    // size, but the embed class stretches images to width: 100% and
+    // presentational attributes lose to any CSS rule, so the hint also goes
+    // on as inline style. The class's max-width: 100% still caps a hint
+    // wider than the pane.
+    if (this.width) {
+      image.width = this.width
+      image.style.width = `${this.width}px`
+    }
+    if (this.height) {
+      image.height = this.height
+      image.style.height = `${this.height}px`
+    }
 
     const topControls = document.createElement('div')
     topControls.className = 'local-image-embed-controls local-image-embed-controls-top'
@@ -993,7 +1020,9 @@ function computeDecorations(view: EditorView): DecorationSet {
               parsedImage.alt,
               parsedImage.href,
               parsedImage.resolvedUrl,
-              parsedImage.version
+              parsedImage.version,
+              parsedImage.width,
+              parsedImage.height
             )
           })
         })

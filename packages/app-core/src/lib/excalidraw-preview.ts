@@ -11,7 +11,9 @@ export interface EmbedSize {
   height?: number
 }
 
-/** Parse an Obsidian-style embed size hint: `600`, `600x400`. */
+/** Parse an Obsidian-style embed size hint: `600`, `600x400`. Shared by
+ *  Excalidraw AND image embeds (#570); it just happens to live here because
+ *  drawings grew size hints first. */
 const SIZE_HINT_RE = /^(\d+)(?:x(\d+))?$/
 
 export function parseEmbedSizeHint(hint: string | null | undefined): EmbedSize | null {
@@ -19,6 +21,26 @@ export function parseEmbedSizeHint(hint: string | null | undefined): EmbedSize |
   const m = hint.trim().match(SIZE_HINT_RE)
   if (!m) return null
   return { width: Number(m[1]), height: m[2] ? Number(m[2]) : undefined }
+}
+
+/** Split an embed label into its caption and a trailing size hint, covering
+ *  every Obsidian spelling: `600x400` (hint only, from `![[img|600x400]]`),
+ *  `caption|600` (from `![caption|600](img)` alt text), and plain captions
+ *  with no hint. Pipes inside the caption survive; only a LAST segment that
+ *  parses as a size is consumed. (#570) */
+export function splitEmbedLabel(label: string | null | undefined): {
+  alt: string
+  size: EmbedSize | null
+} {
+  const raw = (label ?? '').trim()
+  if (!raw) return { alt: '', size: null }
+  const wholeSize = parseEmbedSizeHint(raw)
+  if (wholeSize) return { alt: '', size: wholeSize }
+  const pipeAt = raw.lastIndexOf('|')
+  if (pipeAt < 0) return { alt: raw, size: null }
+  const size = parseEmbedSizeHint(raw.slice(pipeAt + 1))
+  if (!size) return { alt: raw, size: null }
+  return { alt: raw.slice(0, pipeAt).trim(), size }
 }
 
 interface CacheEntry {

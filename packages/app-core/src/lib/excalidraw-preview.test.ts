@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { parseEmbedSizeHint, resolveExcalidrawEmbedPath } from './excalidraw-preview'
+import {
+  parseEmbedSizeHint,
+  resolveExcalidrawEmbedPath,
+  splitEmbedLabel
+} from './excalidraw-preview'
 
 describe('parseEmbedSizeHint', () => {
   it('parses a bare width', () => {
@@ -23,6 +27,32 @@ describe('parseEmbedSizeHint', () => {
 
   it('trims whitespace before matching', () => {
     expect(parseEmbedSizeHint('  800  ')).toEqual({ width: 800, height: undefined })
+  })
+})
+
+describe('splitEmbedLabel (#570)', () => {
+  it('treats a pure size label as hint only', () => {
+    expect(splitEmbedLabel('100x50')).toEqual({ alt: '', size: { width: 100, height: 50 } })
+  })
+
+  it('splits a trailing hint off a caption', () => {
+    expect(splitEmbedLabel('cognitive web|300')).toEqual({
+      alt: 'cognitive web',
+      size: { width: 300, height: undefined }
+    })
+  })
+
+  it('keeps pipes inside the caption and consumes only the last segment', () => {
+    expect(splitEmbedLabel('a|b|600x400')).toEqual({
+      alt: 'a|b',
+      size: { width: 600, height: 400 }
+    })
+  })
+
+  it('leaves captions without a valid hint alone', () => {
+    expect(splitEmbedLabel('just a caption')).toEqual({ alt: 'just a caption', size: null })
+    expect(splitEmbedLabel('trailing|600x')).toEqual({ alt: 'trailing|600x', size: null })
+    expect(splitEmbedLabel('')).toEqual({ alt: '', size: null })
   })
 })
 

@@ -78,6 +78,33 @@ describe('renderMarkdown', () => {
     expect(html).toContain('alt="CleanShot 2026-04-13 at 14.31.31@2x.png"')
   })
 
+  it('#570: an Obsidian image embed honors its |WxH size hint', () => {
+    const html = renderMarkdown('![[assets/cognitive_web.jpg|100x50]]')
+
+    expect(html).toContain('<img')
+    expect(html).toContain('width="100"')
+    expect(html).toContain('height="50"')
+    expect(html).toContain('alt=""')
+  })
+
+  it('#570: a markdown image honors the alt-pipe size hint and keeps its caption', () => {
+    const html = renderMarkdown('![cognitive web|100x50](../../assets/cognitive_web.jpg)')
+
+    expect(html).toContain('width="100"')
+    expect(html).toContain('height="50"')
+    expect(html).toContain('alt="cognitive web"')
+  })
+
+  it('#570: a width-only hint sets no height, and plain alts stay untouched', () => {
+    const sized = renderMarkdown('![[assets/pic.png|300]]')
+    expect(sized).toContain('width="300"')
+    expect(sized).not.toContain('height=')
+
+    const plain = renderMarkdown('![[assets/pic.png|a nice caption]]')
+    expect(plain).toContain('alt="a nice caption"')
+    expect(plain).not.toContain('width=')
+  })
+
   it('renders excalidraw embeds as placeholder divs', () => {
     const html = renderMarkdown('![[diagram.excalidraw]]')
 
