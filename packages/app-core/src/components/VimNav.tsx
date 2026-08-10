@@ -15,6 +15,7 @@ import {
   resolveNextPanel,
   shouldYieldToHomeNav
 } from '../lib/vim-nav'
+import { vimAwaitsNextKey } from '../lib/cm-vim-pending-input'
 import { isCalendarToggleAvailable } from '../lib/vault-layout'
 import { focusPanel, focusPaneInDirection } from '../lib/pane-nav'
 import {
@@ -1059,11 +1060,18 @@ export function VimNav(): JSX.Element | null {
         }
       }
 
+      // A pending Vim sequence owns the next character: after `f`/`t`/`r` (or
+      // a count or register prefix), `m` is the operand, not the menu key.
+      // This runs on window capture, so without the guard Vim never even saw
+      // the key and the orphaned motion swallowed the next one (#568). The
+      // native context-menu key is not a character and stays available.
       const wantsEditorTextContextMenu =
         isEditorFocused(state.editorViewRef) &&
         !editorInsertMode &&
         !state.editorViewRef?.state.selection.main.empty &&
-        (matchesSequenceToken(e, overrides, 'nav.contextMenu') || wantsNativeContextMenuKey(e))
+        ((matchesSequenceToken(e, overrides, 'nav.contextMenu') &&
+          !vimAwaitsNextKey(state.editorViewRef)) ||
+          wantsNativeContextMenuKey(e))
       if (wantsEditorTextContextMenu) {
         e.preventDefault()
         e.stopImmediatePropagation()
@@ -1137,7 +1145,10 @@ export function VimNav(): JSX.Element | null {
         const wantsTextContextMenu =
           hasEditorSelection &&
           !isEditorInsertMode(state.editorViewRef, state.vimMode) &&
-          (matchesSequenceToken(e, overrides, 'nav.contextMenu') || wantsNativeContextMenuKey(e))
+          // Same #568 guard as above: a pending f/t/r owns the character.
+          ((matchesSequenceToken(e, overrides, 'nav.contextMenu') &&
+            !vimAwaitsNextKey(state.editorViewRef)) ||
+            wantsNativeContextMenuKey(e))
         if (wantsTextContextMenu) {
           e.preventDefault()
           e.stopImmediatePropagation()
