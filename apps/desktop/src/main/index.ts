@@ -670,12 +670,16 @@ function handleStartupMarkdownArgs(
   reuseMainWindow: boolean,
 ): void {
   // Candidates include directories (temporary folder session); the opener stats
-  // each path and ignores anything that isn't a markdown file or a folder.
+  // each path and ignores anything that isn't a markdown file or a folder. The
+  // app's own path is filtered by value (#579): launchers that run
+  // `electron <appdir>` can put Chromium switches before the app directory, so
+  // skipping by index alone let the app dir through as a folder to open.
   const isUnpackagedElectronLaunch =
     (process as NodeJS.Process & { defaultApp?: boolean }).defaultApp === true;
   for (const candidate of candidatePathsFromArgv(
     argv,
     isUnpackagedElectronLaunch,
+    app.getAppPath(),
   )) {
     queueMarkdownFileOpen(candidate, reuseMainWindow);
   }
