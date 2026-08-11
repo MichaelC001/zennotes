@@ -1,7 +1,10 @@
 import type {
   CloudAccountStatus,
+  CloudBackupNoteRestoreResult,
   CloudBackupRestoreResult,
+  CloudBackupSchedule,
   CloudBackupSnapshot,
+  CloudBackupSnapshotItem,
   CloudServiceAccount,
   CloudSyncRunSummary,
   CloudSyncVault,
@@ -26,10 +29,14 @@ type SyncClient = Pick<
   | 'changes'
   | 'mutate'
   | 'listBackups'
+  | 'backupSchedule'
+  | 'updateBackupSchedule'
+  | 'listBackupItems'
   | 'createBackup'
   | 'deleteBackup'
   | 'createBackupRestore'
   | 'backupRestore'
+  | 'restoreBackupNote'
 >
 
 export interface CloudSyncHostVault {
@@ -118,6 +125,27 @@ export class CloudSyncHostService {
     return (await client.listBackups(link.vault_id)).data
   }
 
+  async backupSchedule(vault: CloudSyncHostVault): Promise<CloudBackupSchedule> {
+    const { client, link } = await this.linkedConnection(vault)
+    return (await client.backupSchedule(link.vault_id)).data
+  }
+
+  async updateBackupSchedule(
+    vault: CloudSyncHostVault,
+    enabled: boolean
+  ): Promise<CloudBackupSchedule> {
+    const { client, link } = await this.linkedConnection(vault)
+    return (await client.updateBackupSchedule(link.vault_id, enabled)).data
+  }
+
+  async listBackupItems(
+    vault: CloudSyncHostVault,
+    backupId: string
+  ): Promise<CloudBackupSnapshotItem[]> {
+    const { client, link } = await this.linkedConnection(vault)
+    return (await client.listBackupItems(link.vault_id, backupId)).data
+  }
+
   async createBackup(
     vault: CloudSyncHostVault,
     label?: string
@@ -145,6 +173,25 @@ export class CloudSyncHostService {
       idempotencyKey: this.ids.operationId,
       sync: () => this.sync(vault)
     })
+  }
+
+  async restoreBackupNote(
+    vault: CloudSyncHostVault,
+    backupId: string,
+    snapshotItemId: number
+  ): Promise<CloudBackupNoteRestoreResult> {
+    const beforeRestore = await this.sync(vault)
+    assertBackupReady(beforeRestore)
+    const { client, link } = await this.linkedConnection(vault)
+    const restore = (
+      await client.restoreBackupNote(link.vault_id, backupId, snapshotItemId, {
+        idempotency_key: this.ids.operationId(),
+        expected_cursor: beforeRestore.cursor
+      })
+    ).data
+    const sync = await this.sync(vault)
+
+    return { restore, sync }
   }
 
   sync(vault: CloudSyncHostVault): Promise<CloudSyncRunSummary> {

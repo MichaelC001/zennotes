@@ -474,6 +474,18 @@ describe("CloudSettings", () => {
         expires_at: "2026-09-09T12:00:00.000Z",
         created_at: "2026-08-10T12:00:00.000Z",
       },
+      {
+        id: "backup-earlier",
+        label: "Earlier recovery point",
+        trigger: "automatic",
+        status: "ready",
+        cursor: 8,
+        item_count: 6,
+        total_bytes: 1536,
+        archive_bytes: 768,
+        expires_at: "2026-09-07T18:00:00.000Z",
+        created_at: "2026-08-08T18:00:00.000Z",
+      },
     ]);
     mocks.createCloudBackup.mockResolvedValue({
       id: "backup-2",
@@ -525,6 +537,16 @@ describe("CloudSettings", () => {
         byte_length: 512,
         revision: 3,
         content_hash: "abc",
+        media_type: "text/markdown",
+      },
+      {
+        id: 43,
+        item_id: "note-2",
+        path: "Projects/Launch plan.md",
+        kind: "text",
+        byte_length: 768,
+        revision: 2,
+        content_hash: "def",
         media_type: "text/markdown",
       },
     ]);
@@ -600,6 +622,33 @@ describe("CloudSettings", () => {
     await act(async () => browse!.click());
     expect(mocks.listCloudBackupItems).toHaveBeenCalledWith("backup-1");
     expect(host.textContent).toContain("Journal/Monday.md");
+    expect(host.textContent).toContain("Projects/Launch plan.md");
+
+    const search = host.querySelector<HTMLInputElement>(
+      'input[aria-label="Search notes in this backup"]',
+    );
+    expect(search).toBeTruthy();
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    await act(async () => {
+      valueSetter?.call(search, "monday");
+      search!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(host.textContent).toContain("Journal/Monday.md");
+    expect(host.textContent).not.toContain("Projects/Launch plan.md");
+
+    await act(async () => {
+      valueSetter?.call(search, "missing note");
+      search!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(host.textContent).toContain('No notes match "missing note".');
+
+    await act(async () => {
+      valueSetter?.call(search, "");
+      search!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
 
     const restoreNote = [...host.querySelectorAll("button")].find(
       (button) => button.textContent?.trim() === "Restore note",
@@ -611,5 +660,72 @@ describe("CloudSettings", () => {
       }),
     );
     expect(mocks.restoreCloudBackupNote).toHaveBeenCalledWith("backup-1", 42);
+
+    const restoreDate = host.querySelector<HTMLInputElement>(
+      'input[aria-label="Restore from date"]',
+    );
+    expect(restoreDate).toBeTruthy();
+    const earlierDate = new Date("2026-08-08T18:00:00.000Z");
+    const exactDate = [
+      earlierDate.getFullYear(),
+      String(earlierDate.getMonth() + 1).padStart(2, "0"),
+      String(earlierDate.getDate()).padStart(2, "0"),
+    ].join("-");
+    const followingDate = new Date(
+      earlierDate.getFullYear(),
+      earlierDate.getMonth(),
+      earlierDate.getDate() + 1,
+    );
+    const fallbackDate = [
+      followingDate.getFullYear(),
+      String(followingDate.getMonth() + 1).padStart(2, "0"),
+      String(followingDate.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    await act(async () => {
+      valueSetter?.call(restoreDate, exactDate);
+      restoreDate!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(host.textContent).toContain("Earlier recovery point");
+    expect(host.textContent).not.toContain("Before migration");
+
+    await act(async () => {
+      valueSetter?.call(restoreDate, fallbackDate);
+      restoreDate!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(host.textContent).toContain(
+      "No backup was created on this date. Showing the closest earlier recovery point",
+    );
+    expect(host.textContent).toContain("Earlier recovery point");
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const futureDate = [
+      tomorrow.getFullYear(),
+      String(tomorrow.getMonth() + 1).padStart(2, "0"),
+      String(tomorrow.getDate()).padStart(2, "0"),
+    ].join("-");
+    await act(async () => {
+      valueSetter?.call(restoreDate, futureDate);
+      restoreDate!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(restoreDate?.getAttribute("aria-invalid")).toBe("true");
+    expect(host.textContent).toContain("Choose today or an earlier date.");
+    expect(host.textContent).not.toContain("Earlier recovery point");
+
+    await act(async () => {
+      valueSetter?.call(restoreDate, "2020-01-01");
+      restoreDate!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(host.textContent).toContain(
+      "No backup is available on or before this date.",
+    );
+
+    const showAll = [...host.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Show all",
+    );
+    await act(async () => showAll!.click());
+    expect(host.textContent).toContain("Earlier recovery point");
+    expect(host.textContent).toContain("Before migration");
   });
 });

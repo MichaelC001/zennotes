@@ -201,4 +201,71 @@ describe('CloudSyncApiClient', () => {
     expect((asset as File).name).toBe('photo.png')
     expect([...new Uint8Array(await (asset as File).arrayBuffer())]).toEqual([1, 2, 3])
   })
+
+  it('serializes published appearance and a replacement logo', async () => {
+    const requests: CloudSyncHttpRequest[] = []
+    const client = new CloudSyncApiClient({
+      async request<Response>(request: CloudSyncHttpRequest): Promise<Response> {
+        requests.push(request)
+        return {} as Response
+      }
+    })
+
+    await client.publishNote({
+      note_path: 'inbox/Styled.md',
+      title: 'Styled',
+      markdown: '# Styled',
+      appearance: {
+        theme: 'rose-pine-moon',
+        logo: {
+          ref: 'brand-logo',
+          name: 'brand.png',
+          mime: 'image/png',
+          base64: 'AQID'
+        }
+      }
+    })
+
+    const form = requests[0]?.body as FormData
+    expect(form).toBeInstanceOf(FormData)
+    expect(JSON.parse(String(form.get('payload')))).toEqual({
+      note_path: 'inbox/Styled.md',
+      title: 'Styled',
+      markdown: '# Styled',
+      appearance: { theme: 'rose-pine-moon', logo_action: 'replace' },
+      tikz_svgs: [],
+      asset_refs: []
+    })
+    const logo = form.get('brand_logo') as File
+    expect(logo.name).toBe('brand.png')
+    expect([...new Uint8Array(await logo.arrayBuffer())]).toEqual([1, 2, 3])
+  })
+
+  it('can remove a published logo without multipart data', async () => {
+    const requests: CloudSyncHttpRequest[] = []
+    const client = new CloudSyncApiClient({
+      async request<Response>(request: CloudSyncHttpRequest): Promise<Response> {
+        requests.push(request)
+        return {} as Response
+      }
+    })
+
+    await client.updatePublishedNote(42, {
+      note_path: 'inbox/Styled.md',
+      title: 'Styled',
+      markdown: '# Styled',
+      appearance: { theme: 'system', logo: null }
+    })
+
+    expect(requests[0]?.body).toEqual({
+      payload: JSON.stringify({
+        note_path: 'inbox/Styled.md',
+        title: 'Styled',
+        markdown: '# Styled',
+        appearance: { theme: 'system', logo_action: 'remove' },
+        tikz_svgs: [],
+        asset_refs: []
+      })
+    })
+  })
 })

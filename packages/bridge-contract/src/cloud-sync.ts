@@ -309,6 +309,7 @@ export interface CloudPublishedNote {
   title: string;
   note_path: string | null;
   view_count: number;
+  appearance?: CloudPublishedNoteAppearance;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -324,6 +325,18 @@ export interface CloudPublishNoteInput {
   title: string;
   markdown: string;
   assets?: CloudPublishAssetInput[];
+  appearance?: CloudPublishAppearanceInput;
+}
+
+export interface CloudPublishedNoteAppearance {
+  theme: string;
+  logo_url: string | null;
+}
+
+export interface CloudPublishAppearanceInput {
+  theme: string;
+  /** Omitted preserves the current logo, null removes it, and a file replaces it. */
+  logo?: CloudPublishAssetInput | null;
 }
 
 export interface CloudPublishAssetInput {

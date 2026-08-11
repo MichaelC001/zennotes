@@ -20,6 +20,7 @@ import { NoteList } from './components/NoteList'
 import { TitleBar } from './components/TitleBar'
 import { PromptHost } from './components/PromptHost'
 import { ConfirmHost } from './components/ConfirmHost'
+import { PublishNoteHost } from './components/PublishNoteHost'
 import { ServerDirectoryPickerHost } from './components/ServerDirectoryPickerHost'
 import { ToastHost } from './components/ui'
 import { ExcalidrawEmbedMenuHost } from './components/ExcalidrawEmbedMenuHost'
@@ -1067,6 +1068,7 @@ function App(): JSX.Element {
         </Suspense>
         <PromptHost />
         <ConfirmHost />
+        <PublishNoteHost />
         <ToastHost />
         <ExcalidrawEmbedMenuHost />
         <ServerDirectoryPickerHost />
@@ -1084,6 +1086,7 @@ function App(): JSX.Element {
         </Suspense>
         <PromptHost />
         <ConfirmHost />
+        <PublishNoteHost />
         <ToastHost />
         <ExcalidrawEmbedMenuHost />
         <ServerDirectoryPickerHost />
@@ -1156,6 +1159,7 @@ function App(): JSX.Element {
       )}
       <PromptHost />
       <ConfirmHost />
+      <PublishNoteHost />
       <ToastHost />
       <ExcalidrawEmbedMenuHost />
       <ServerDirectoryPickerHost />

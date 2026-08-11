@@ -22,7 +22,7 @@ import { dispatchKeyboardContextMenu, findTabContextMenuTarget } from './keyboar
 import { resolveSystemFolderLabels } from './system-folder-labels'
 import { isCalendarToggleAvailable, noteFolderSubpath } from './vault-layout'
 import { runWorkflowById } from './workflow-trigger'
-import { publishActiveCloudNote, showCloudPublishingError } from './cloud-publishing'
+import { requestPublishNote } from './publish-note-requests'
 import { DEMO_TOUR_START_PATH } from '@shared/demo-tour'
 
 const APP_WEBSITE_URL = 'https://zennotes.org'
@@ -216,12 +216,9 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
           && note !== null
           && note.folder !== 'trash'
       },
-      run: async () => {
-        try {
-          await publishActiveCloudNote()
-        } catch (error) {
-          showCloudPublishingError(error)
-        }
+      run: () => {
+        const note = getState().activeNote
+        if (note) requestPublishNote(note)
       }
     },
     {

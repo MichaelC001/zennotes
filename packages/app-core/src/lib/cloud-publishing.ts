@@ -1,6 +1,7 @@
 import type { ZenBridge } from '@zennotes/bridge-contract/bridge'
 import { getZenBridge } from '@zennotes/bridge-contract/bridge'
 import type {
+  CloudPublishAppearanceInput,
   CloudPublishAssetInput,
   CloudPublishedNoteResult,
   CloudPublishNoteInput
@@ -32,7 +33,8 @@ export interface CloudPublishOutcome extends CloudPublishedNoteResult {
 export async function publishCloudNote(
   note: PublishableCloudNote,
   bridge: CloudPublishingBridge,
-  assets: CloudPublishAssetInput[] = []
+  assets: CloudPublishAssetInput[] = [],
+  appearance?: CloudPublishAppearanceInput
 ): Promise<CloudPublishOutcome> {
   const account = await bridge.getCloudServiceAccount()
   if (!account.features.publish.active) {
@@ -49,7 +51,8 @@ export async function publishCloudNote(
     note_path: note.path,
     title: note.title,
     markdown: note.body,
-    ...(assets.length > 0 ? { assets } : {})
+    ...(assets.length > 0 ? { assets } : {}),
+    ...(appearance === undefined ? {} : { appearance })
   }
   const result = existing
     ? await bridge.updateCloudPublishedNote(existing.id, input)
@@ -71,11 +74,12 @@ export async function publishActiveCloudNote(
 
 export async function publishCloudNoteWithFeedback(
   note: PublishableCloudNote,
-  bridge: ZenBridge = getZenBridge()
+  bridge: ZenBridge = getZenBridge(),
+  appearance?: CloudPublishAppearanceInput
 ): Promise<CloudPublishOutcome> {
   const vaultRoot = useStore.getState().vault?.root ?? ''
   const assets = await collectCloudPublishAssets(note, vaultRoot, bridge)
-  const outcome = await publishCloudNote(note, bridge, assets)
+  const outcome = await publishCloudNote(note, bridge, assets, appearance)
   bridge.clipboardWriteText(outcome.url)
   useToastStore.getState().addToast(
     outcome.updated ? 'Public note updated. Link copied.' : 'Note published. Link copied.',
@@ -84,6 +88,32 @@ export async function publishCloudNoteWithFeedback(
     7000
   )
   return outcome
+}
+
+const PUBLISH_LOGO_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/avif'])
+const MAX_PUBLISH_LOGO_BYTES = 1024 * 1024
+
+export async function prepareCloudPublishLogo(file: File): Promise<CloudPublishAssetInput> {
+  if (!PUBLISH_LOGO_MIMES.has(file.type)) {
+    throw new Error('Choose a PNG, JPEG, WebP, or AVIF logo.')
+  }
+  if (file.size > MAX_PUBLISH_LOGO_BYTES) {
+    throw new Error('The logo may not be larger than 1 MB.')
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+
+  return {
+    ref: 'brand-logo',
+    name: file.name || 'brand-logo',
+    mime: file.type,
+    base64: btoa(binary)
+  }
 }
 
 const MAX_PUBLISH_ASSET_BYTES = 10 * 1024 * 1024

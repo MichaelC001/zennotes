@@ -208,13 +208,25 @@ export class CloudSyncApiClient {
 }
 
 function publishedNoteBody(input: CloudPublishNoteInput): { payload: string } | FormData {
-  const { assets = [], ...note } = input
+  const { assets = [], appearance, ...note } = input
+  const brandLogo = appearance?.logo
+  const serializedAppearance = appearance === undefined
+    ? undefined
+    : {
+        theme: appearance.theme,
+        logo_action: appearance.logo === undefined
+          ? 'keep'
+          : appearance.logo === null
+            ? 'remove'
+            : 'replace'
+      }
   const payload = JSON.stringify({
     ...note,
+    ...(serializedAppearance === undefined ? {} : { appearance: serializedAppearance }),
     tikz_svgs: [],
     asset_refs: assets.map((asset) => asset.ref)
   })
-  if (assets.length === 0) {
+  if (assets.length === 0 && (brandLogo === undefined || brandLogo === null)) {
     return { payload }
   }
 
@@ -223,6 +235,10 @@ function publishedNoteBody(input: CloudPublishNoteInput): { payload: string } | 
   for (const asset of assets) {
     const bytes = Uint8Array.from(atob(asset.base64), (character) => character.charCodeAt(0))
     form.append('assets[]', new Blob([bytes], { type: asset.mime }), asset.name)
+  }
+  if (brandLogo !== undefined && brandLogo !== null) {
+    const bytes = Uint8Array.from(atob(brandLogo.base64), (character) => character.charCodeAt(0))
+    form.append('brand_logo', new Blob([bytes], { type: brandLogo.mime }), brandLogo.name)
   }
   return form
 }

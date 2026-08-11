@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CloudServiceAccount } from '@zennotes/bridge-contract/cloud-sync'
 import {
   collectCloudPublishAssets,
+  prepareCloudPublishLogo,
   publishCloudNote,
   type CloudPublishingBridge
 } from './cloud-publishing'
@@ -117,5 +118,34 @@ describe('cloud publishing', () => {
 
     await expect(publishCloudNote(note, bridge)).rejects.toThrow('plan')
     expect(createPublishedNote).not.toHaveBeenCalled()
+  })
+
+  it('publishes appearance without changing the existing content flow', async () => {
+    const { bridge, updateCloudPublishedNote } = setup(true)
+    const appearance = { theme: 'rose-pine-moon', logo: null }
+
+    await publishCloudNote(note, bridge, [], appearance)
+
+    expect(updateCloudPublishedNote).toHaveBeenCalledWith(42, {
+      note_path: note.path,
+      title: note.title,
+      markdown: note.body,
+      appearance
+    })
+  })
+
+  it('prepares only small safe raster logos', async () => {
+    const logo = new File([new Uint8Array([1, 2, 3])], 'brand.png', { type: 'image/png' })
+
+    await expect(prepareCloudPublishLogo(logo)).resolves.toEqual({
+      ref: 'brand-logo',
+      name: 'brand.png',
+      mime: 'image/png',
+      base64: 'AQID'
+    })
+
+    await expect(prepareCloudPublishLogo(
+      new File(['<svg/>'], 'brand.svg', { type: 'image/svg+xml' })
+    )).rejects.toThrow('PNG')
   })
 })

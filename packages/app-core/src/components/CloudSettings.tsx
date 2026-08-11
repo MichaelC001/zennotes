@@ -1210,6 +1210,28 @@ function CloudBackupPanel({
   ) => void;
   onScheduleChange: (enabled: boolean) => void;
 }): JSX.Element {
+  const [noteSearch, setNoteSearch] = useState("");
+  const [recoveryDate, setRecoveryDate] = useState("");
+
+  useEffect(() => {
+    setNoteSearch("");
+  }, [expandedBackupId]);
+
+  const normalizedNoteSearch = noteSearch.trim().toLowerCase();
+  const filteredBackupItems = normalizedNoteSearch
+    ? backupItems.filter((item) =>
+        item.path.toLowerCase().includes(normalizedNoteSearch),
+      )
+    : backupItems;
+  const latestRecoveryDate = localDateKey(new Date().toISOString());
+  const recoveryDateIsFuture = recoveryDate > latestRecoveryDate;
+  const recoverySelection = recoveryDateIsFuture
+    ? {
+        backups: [],
+        notice: "Choose today or an earlier date.",
+      }
+    : selectBackupsForDate(backups, recoveryDate);
+
   if (!backupIncluded) {
     return (
       <CloudNotice>Backups are not included in this subscription.</CloudNotice>
@@ -1319,13 +1341,69 @@ function CloudBackupPanel({
           </div>
         </div>
 
+        {backups.length > 0 && (
+          <div className="border-b border-paper-300/45 px-5 py-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <label
+                  htmlFor="cloud-backup-recovery-date"
+                  className="text-sm font-medium text-ink-900"
+                >
+                  Restore from date
+                </label>
+                <p className="mt-1 text-xs leading-5 text-ink-500">
+                  Choose a recovery date, then restore the vault or browse its
+                  notes.
+                </p>
+              </div>
+              <div className="flex w-full items-center gap-2 sm:w-auto">
+                <input
+                  id="cloud-backup-recovery-date"
+                  type="date"
+                  aria-label="Restore from date"
+                  value={recoveryDate}
+                  max={latestRecoveryDate}
+                  aria-invalid={recoveryDateIsFuture}
+                  onChange={(event) => setRecoveryDate(event.target.value)}
+                  className={`min-w-0 flex-1 rounded-lg border bg-paper-50 px-3 py-2 text-sm text-ink-900 outline-none sm:w-44 ${
+                    recoveryDateIsFuture
+                      ? "border-danger/60 focus:border-danger"
+                      : "border-paper-300 focus:border-accent"
+                  }`}
+                />
+                {recoveryDate && (
+                  <Button variant="ghost" onClick={() => setRecoveryDate("")}>
+                    Show all
+                  </Button>
+                )}
+              </div>
+            </div>
+            {recoverySelection.notice && (
+              <p
+                role="status"
+                className={`mt-3 rounded-lg border px-3 py-2 text-xs leading-5 ${
+                  recoveryDateIsFuture
+                    ? "border-danger/35 bg-danger/10 text-danger"
+                    : "border-paper-300/50 bg-paper-100/55 text-ink-600"
+                }`}
+              >
+                {recoverySelection.notice}
+              </p>
+            )}
+          </div>
+        )}
+
         {backups.length === 0 ? (
           <div className="px-5 py-8 text-center text-sm text-ink-500">
             {loading ? "Loading backups…" : "No backups yet."}
           </div>
+        ) : recoverySelection.backups.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-ink-500">
+            Choose another date or show all backups.
+          </div>
         ) : (
           <div className="divide-y divide-paper-300/45">
-            {backups.map((backup) => {
+            {recoverySelection.backups.map((backup) => {
               const expanded = expandedBackupId === backup.id;
 
               return (
@@ -1398,16 +1476,36 @@ function CloudBackupPanel({
 
                   {expanded && (
                     <div className="border-t border-paper-300/45 bg-paper-100/35 px-5 py-4">
-                      <div className="mb-3 text-xs font-medium uppercase tracking-[0.16em] text-ink-500">
-                        Notes in this backup
+                      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-ink-500">
+                          Notes in this backup
+                        </div>
+                        {backupItems.length > 0 && (
+                          <input
+                            type="search"
+                            aria-label="Search notes in this backup"
+                            value={noteSearch}
+                            autoComplete="off"
+                            spellCheck={false}
+                            onChange={(event) =>
+                              setNoteSearch(event.target.value)
+                            }
+                            className="w-full rounded-lg border border-paper-300 bg-paper-50 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent sm:w-72"
+                            placeholder="Search by name or path"
+                          />
+                        )}
                       </div>
                       {backupItems.length === 0 ? (
                         <div className="text-sm text-ink-500">
                           This backup contains no notes.
                         </div>
+                      ) : filteredBackupItems.length === 0 ? (
+                        <div className="rounded-xl border border-paper-300/50 bg-paper-50/70 px-4 py-8 text-center text-sm text-ink-500">
+                          No notes match &quot;{noteSearch.trim()}&quot;.
+                        </div>
                       ) : (
                         <div className="divide-y divide-paper-300/45 overflow-hidden rounded-xl border border-paper-300/50 bg-paper-50/70">
-                          {backupItems.map((item) => (
+                          {filteredBackupItems.map((item) => (
                             <div
                               key={item.id}
                               className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
@@ -1417,7 +1515,8 @@ function CloudBackupPanel({
                                   {item.path}
                                 </div>
                                 <div className="mt-0.5 text-xs text-ink-500">
-                                  {formatBytes(item.byte_length)} · Revision {item.revision}
+                                  {formatBytes(item.byte_length)} · Revision{" "}
+                                  {item.revision}
                                 </div>
                               </div>
                               <Button
@@ -1502,6 +1601,56 @@ function CloudRestoreResult({
 function formatBackupDate(value: string): string {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : value;
+}
+
+function localDateKey(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function selectBackupsForDate(
+  backups: CloudBackupSnapshot[],
+  recoveryDate: string,
+): { backups: CloudBackupSnapshot[]; notice: string | null } {
+  if (!recoveryDate) return { backups, notice: null };
+
+  const readyBackups = backups.filter((backup) => backup.status === "ready");
+  const exactBackups = readyBackups.filter(
+    (backup) => localDateKey(backup.created_at) === recoveryDate,
+  );
+  if (exactBackups.length > 0) {
+    return { backups: exactBackups, notice: null };
+  }
+
+  const [year, month, day] = recoveryDate.split("-").map(Number);
+  const endOfSelectedDay = new Date(year, month - 1, day + 1).getTime() - 1;
+  const closestEarlierBackup = readyBackups
+    .filter(
+      (backup) => new Date(backup.created_at).getTime() <= endOfSelectedDay,
+    )
+    .sort(
+      (left, right) =>
+        new Date(right.created_at).getTime() -
+        new Date(left.created_at).getTime(),
+    )[0];
+
+  if (!closestEarlierBackup) {
+    return {
+      backups: [],
+      notice: "No backup is available on or before this date.",
+    };
+  }
+
+  return {
+    backups: [closestEarlierBackup],
+    notice: `No backup was created on this date. Showing the closest earlier recovery point from ${formatBackupDate(closestEarlierBackup.created_at)}.`,
+  };
 }
 
 function formatCloudVaultDate(value: string): string {

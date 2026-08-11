@@ -132,10 +132,7 @@ import { selectTypstPreambleFor } from '../lib/typst-preamble-select'
 import { CommentsPanel, type CommentDraft } from './CommentsPanel'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { promptApp } from '../lib/prompt-requests'
-import {
-  publishCloudNoteWithFeedback,
-  showCloudPublishingError
-} from '../lib/cloud-publishing'
+import { requestPublishNote } from '../lib/publish-note-requests'
 import { TasksView } from './TasksView'
 import { DatabaseView } from './DatabaseView'
 import { LazyExcalidrawView } from './LazyExcalidrawView'
@@ -3190,13 +3187,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     [comments]
   )
 
-  const publishContent = useCallback(async (): Promise<void> => {
-    if (!content) return
-    try {
-      await publishCloudNoteWithFeedback(content)
-    } catch (error) {
-      showCloudPublishingError(error)
-    }
+  const publishContent = useCallback((): void => {
+    if (content) requestPublishNote(content)
   }, [content])
 
   const toolbar = useMemo(() => {

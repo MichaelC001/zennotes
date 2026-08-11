@@ -82,6 +82,36 @@ function setup(vaults: CloudSyncVault[] = []) {
       cursor: body.mutations.length
     })),
     listBackups: vi.fn(async () => ({ data: [] })),
+    backupSchedule: vi.fn(async () => ({
+      data: {
+        enabled: false,
+        frequency: 'daily' as const,
+        next_backup_at: null,
+        last_backup_at: null
+      }
+    })),
+    updateBackupSchedule: vi.fn(async (_vaultId: string, enabled: boolean) => ({
+      data: {
+        enabled,
+        frequency: 'daily' as const,
+        next_backup_at: enabled ? '2026-08-11T03:15:00.000Z' : null,
+        last_backup_at: null
+      }
+    })),
+    listBackupItems: vi.fn(async () => ({
+      data: [
+        {
+          id: 42,
+          item_id: 'item-1',
+          path: 'Notes/Launch.md',
+          kind: 'text',
+          byte_length: 8,
+          revision: 3,
+          content_hash: 'abc123',
+          media_type: 'text/markdown'
+        }
+      ]
+    })),
     createBackup: vi.fn(async (_vaultId: string, label?: string) => ({
       data: {
         id: 'backup-1',
@@ -112,7 +142,19 @@ function setup(vaults: CloudSyncVault[] = []) {
         updated_at: '2026-08-10T12:00:00.000Z'
       }
     })),
-    backupRestore: vi.fn()
+    backupRestore: vi.fn(),
+    restoreBackupNote: vi.fn(async () => ({
+      data: {
+        id: 'note-restore-1',
+        status: 'completed' as const,
+        item_id: 'item-1',
+        path: 'Notes/Launch.md',
+        revision: 4,
+        cursor: 1,
+        error_code: null,
+        created_at: '2026-08-10T12:00:00.000Z'
+      }
+    }))
   }
   const service = new CloudSyncHostService({
     persistence,
@@ -176,7 +218,7 @@ describe('CloudSyncHostService', () => {
     await expect(service.sync(hostVault)).rejects.toThrow('different ZenNotes Cloud account')
   })
 
-  it('creates, lists, deletes, and restores backups for the linked vault', async () => {
+  it('creates, lists, schedules, deletes, and restores backups for the linked vault', async () => {
     const remoteVault: CloudSyncVault = {
       id: 'vault-1',
       name: 'Notes',
@@ -188,6 +230,13 @@ describe('CloudSyncHostService', () => {
     await service.link(hostVault, remoteVault.id)
 
     await expect(service.listBackups(hostVault)).resolves.toEqual([])
+    await expect(service.backupSchedule(hostVault)).resolves.toMatchObject({ enabled: false })
+    await expect(service.updateBackupSchedule(hostVault, true)).resolves.toMatchObject({
+      enabled: true
+    })
+    await expect(service.listBackupItems(hostVault, 'backup-1')).resolves.toEqual([
+      expect.objectContaining({ id: 42, path: 'Notes/Launch.md' })
+    ])
     await expect(service.createBackup(hostVault, 'Before travel')).resolves.toMatchObject({
       id: 'backup-1',
       label: 'Before travel'
@@ -197,13 +246,23 @@ describe('CloudSyncHostService', () => {
       restore: { status: 'completed' },
       sync: { cursor: 0 }
     })
+    await expect(service.restoreBackupNote(hostVault, 'backup-1', 42)).resolves.toMatchObject({
+      restore: { status: 'completed', path: 'Notes/Launch.md' },
+      sync: { cursor: 0 }
+    })
 
     expect(client.createBackup).toHaveBeenCalledWith('vault-1', 'Before travel')
     expect(client.deleteBackup).toHaveBeenCalledWith('vault-1', 'backup-1')
+    expect(client.updateBackupSchedule).toHaveBeenCalledWith('vault-1', true)
+    expect(client.listBackupItems).toHaveBeenCalledWith('vault-1', 'backup-1')
     expect(client.createBackupRestore).toHaveBeenCalledWith('vault-1', 'backup-1', {
       idempotency_key: 'operation-1',
       expected_cursor: 0,
       mode: 'replace'
+    })
+    expect(client.restoreBackupNote).toHaveBeenCalledWith('vault-1', 'backup-1', 42, {
+      idempotency_key: 'operation-1',
+      expected_cursor: 0
     })
   })
 
