@@ -59,6 +59,36 @@ type VimMotionState = {
   inputState?: { operator?: unknown }
 }
 
+let pixelMotionFailureWarned = false
+
+/**
+ * Run a pixel-measurement-based motion, falling back to a logical position if
+ * it throws (#574). codemirror-vim rethrows a motion exception after clearing
+ * its state, which skips the keydown's preventDefault, so the pressed key
+ * would land in the note as a literal character: a normal-mode `j` typed
+ * "j" into the text. CM6's coordinate queries do throw on some geometries
+ * (seen on Linux fractional display scaling at certain zoom levels once a
+ * line soft-wraps into 5+ display rows), so no exception may escape a motion.
+ * The fallback keeps the cursor moving and the next press re-measures.
+ */
+function pixelMotionFallback(
+  run: () => { line: number; ch: number },
+  fallback: () => { line: number; ch: number }
+): { line: number; ch: number } {
+  try {
+    return run()
+  } catch (err) {
+    if (!pixelMotionFailureWarned) {
+      pixelMotionFailureWarned = true
+      console.warn(
+        '[zen:vim] display-line measurement failed; using logical movement for this press',
+        err
+      )
+    }
+    return fallback()
+  }
+}
+
 /**
  * `j`/`k` motion that moves by *visual* (display) line through soft-wrapped
  * content instead of skipping to the next logical line (#290). With wrapping on
@@ -84,6 +114,10 @@ type VimMotionState = {
  *    normal display-line movement applies.
  * `gj`/`gk` are untouched. Mirrors codemirror-vim's own `moveByDisplayLines`,
  * including maintaining the horizontal goal column across consecutive presses.
+ * The whole pixel path runs inside `pixelMotionFallback` (#574): if any CM6
+ * coordinate query throws, the motion degrades to the plain logical step
+ * instead of letting the exception escape, which would type the pressed key
+ * into the note.
  */
 export function zenMoveByDisplayLine(
   cm: VimMotionCm,
@@ -131,38 +165,43 @@ export function zenMoveByDisplayLine(
       return new CodeMirror.Pos(logicalTarget, head.ch)
     }
   }
-  // Keep the horizontal goal column stable across consecutive j/k, like gj/gk.
-  if (vim.lastMotion !== zenMoveByDisplayLine) {
-    vim.lastHSPos = cm.charCoords(head, 'div').left
-  }
-  const res = cm.findPosV(head, forward ? repeat : -repeat, 'line', vim.lastHSPos)
-  if (mathRanges.length && Math.abs(res.line - head.line) > repeat) {
-    // The pixel motion overshot (e.g. launched from a line with large CSS
-    // margins straight over a block widget). If a math block sits in the
-    // skipped span, snap back to the plain logical step so the cursor
-    // approaches the block one line at a time instead of leaping past it.
-    const lo = Math.min(head.line, res.line) + 1
-    const hi = Math.max(head.line, res.line) + 1
-    if (mathRanges.some((r) => r.fromLine < hi && r.toLine > lo)) {
-      return new CodeMirror.Pos(logicalTarget, head.ch)
-    }
-  }
-  // The pixel-based `findPosV` can fail to advance across a soft-wrap boundary
-  // when `coordsAtPos`/`posAtCoords` are sub-pixel-imprecise — e.g. under a
-  // compositor's fractional display scaling — which left `k` (and in principle
-  // `j`) stuck even though there were more lines that way (#423). If the motion
-  // didn't move in the requested direction but a logical line IS available that
-  // way, step there so the cursor always makes progress. In a pixel-accurate
-  // environment this never fires (the display-line motion advances every press),
-  // so wrapped-row movement is unchanged.
-  const advanced = forward
-    ? res.line > head.line || (res.line === head.line && res.ch > head.ch)
-    : res.line < head.line || (res.line === head.line && res.ch < head.ch)
-  if (!advanced && logicalTarget !== head.line) {
-    return new CodeMirror.Pos(logicalTarget, head.ch)
-  }
-  vim.lastHPos = res.ch
-  return res
+  return pixelMotionFallback(
+    () => {
+      // Keep the horizontal goal column stable across consecutive j/k, like gj/gk.
+      if (vim.lastMotion !== zenMoveByDisplayLine) {
+        vim.lastHSPos = cm.charCoords(head, 'div').left
+      }
+      const res = cm.findPosV(head, forward ? repeat : -repeat, 'line', vim.lastHSPos)
+      if (mathRanges.length && Math.abs(res.line - head.line) > repeat) {
+        // The pixel motion overshot (e.g. launched from a line with large CSS
+        // margins straight over a block widget). If a math block sits in the
+        // skipped span, snap back to the plain logical step so the cursor
+        // approaches the block one line at a time instead of leaping past it.
+        const lo = Math.min(head.line, res.line) + 1
+        const hi = Math.max(head.line, res.line) + 1
+        if (mathRanges.some((r) => r.fromLine < hi && r.toLine > lo)) {
+          return new CodeMirror.Pos(logicalTarget, head.ch)
+        }
+      }
+      // The pixel-based `findPosV` can fail to advance across a soft-wrap boundary
+      // when `coordsAtPos`/`posAtCoords` are sub-pixel-imprecise — e.g. under a
+      // compositor's fractional display scaling — which left `k` (and in principle
+      // `j`) stuck even though there were more lines that way (#423). If the motion
+      // didn't move in the requested direction but a logical line IS available that
+      // way, step there so the cursor always makes progress. In a pixel-accurate
+      // environment this never fires (the display-line motion advances every press),
+      // so wrapped-row movement is unchanged.
+      const advanced = forward
+        ? res.line > head.line || (res.line === head.line && res.ch > head.ch)
+        : res.line < head.line || (res.line === head.line && res.ch < head.ch)
+      if (!advanced && logicalTarget !== head.line) {
+        return new CodeMirror.Pos(logicalTarget, head.ch)
+      }
+      vim.lastHPos = res.ch
+      return res
+    },
+    () => new CodeMirror.Pos(logicalTarget, head.ch)
+  )
 }
 
 /**
@@ -183,15 +222,29 @@ export function zenMoveToDisplayLineBoundary(
     return new CodeMirror.Pos(line, Infinity)
   }
 
-  if (!motionArgs.forward && cm.charCoords && cm.coordsChar) {
-    const row = cm.charCoords(head, 'div')
-    return cm.coordsChar({ left: 0, top: (row.top + row.bottom) / 2 }, 'div')
+  const { charCoords, coordsChar } = cm
+  if (!motionArgs.forward && charCoords && coordsChar) {
+    return pixelMotionFallback(
+      () => {
+        const row = charCoords(head, 'div')
+        return coordsChar({ left: 0, top: (row.top + row.bottom) / 2 }, 'div')
+      },
+      () => new CodeMirror.Pos(head.line, 0)
+    )
   }
 
-  cm.execCommand(motionArgs.forward ? 'goLineRight' : 'goLineLeft')
-  const target = cm.getCursor()
-  const ch = motionArgs.forward && target.sticky === 'before' ? target.ch - 1 : target.ch
-  return new CodeMirror.Pos(target.line, Math.max(0, ch))
+  return pixelMotionFallback(
+    () => {
+      cm.execCommand(motionArgs.forward ? 'goLineRight' : 'goLineLeft')
+      const target = cm.getCursor()
+      const ch = motionArgs.forward && target.sticky === 'before' ? target.ch - 1 : target.ch
+      return new CodeMirror.Pos(target.line, Math.max(0, ch))
+    },
+    () =>
+      motionArgs.forward
+        ? new CodeMirror.Pos(head.line, Infinity)
+        : new CodeMirror.Pos(head.line, 0)
+  )
 }
 
 function firstNonWhitespace(text: string): number {
@@ -212,22 +265,27 @@ export function zenMoveToViewportEdge(
 ): { line: number; ch: number } {
   const forward = !!motionArgs.forward
   const repeat = motionArgs.repeat || 1
-  const scroll = cm.getScrollInfo()
-  const visibleTop = cm.coordsChar({ left: 0, top: scroll.top + 6 }, 'local').line
-  const visibleBottom = cm.coordsChar(
-    { left: 0, top: scroll.top + Math.max(0, scroll.clientHeight - 10) },
-    'local'
-  ).line
-  const rawLine = forward ? visibleBottom - repeat + 1 : visibleTop + repeat - 1
-  const line = Math.max(cm.firstLine(), Math.min(cm.lastLine(), rawLine))
-  const edge = new CodeMirror.Pos(line, firstNonWhitespace(cm.getLine(line)))
+  return pixelMotionFallback(
+    () => {
+      const scroll = cm.getScrollInfo()
+      const visibleTop = cm.coordsChar({ left: 0, top: scroll.top + 6 }, 'local').line
+      const visibleBottom = cm.coordsChar(
+        { left: 0, top: scroll.top + Math.max(0, scroll.clientHeight - 10) },
+        'local'
+      ).line
+      const rawLine = forward ? visibleBottom - repeat + 1 : visibleTop + repeat - 1
+      const line = Math.max(cm.firstLine(), Math.min(cm.lastLine(), rawLine))
+      const edge = new CodeMirror.Pos(line, firstNonWhitespace(cm.getLine(line)))
 
-  if (head.line !== edge.line || head.ch !== edge.ch) return edge
+      if (head.line !== edge.line || head.ch !== edge.ch) return edge
 
-  const stepped = cm.findPosV(edge, forward ? 1 : -1, 'line')
-  if (stepped.line === edge.line && stepped.ch === edge.ch) return edge
-  if (stepped.line === edge.line) return new CodeMirror.Pos(stepped.line, stepped.ch)
-  return new CodeMirror.Pos(stepped.line, firstNonWhitespace(cm.getLine(stepped.line)))
+      const stepped = cm.findPosV(edge, forward ? 1 : -1, 'line')
+      if (stepped.line === edge.line && stepped.ch === edge.ch) return edge
+      if (stepped.line === edge.line) return new CodeMirror.Pos(stepped.line, stepped.ch)
+      return new CodeMirror.Pos(stepped.line, firstNonWhitespace(cm.getLine(stepped.line)))
+    },
+    () => new CodeMirror.Pos(head.line, head.ch)
+  )
 }
 
 let displayLineMotionRegistered = false
@@ -280,8 +338,13 @@ export function registerDisplayLineMotion(): void {
       if (actionArgs.forward) {
         // Insert at the raw display boundary. The normal-mode `$` motion
         // backs up to the last visible character, but `A` belongs after it.
-        cm.execCommand('goLineRight')
-        target = cm.getCursor()
+        target = pixelMotionFallback(
+          () => {
+            cm.execCommand('goLineRight')
+            return cm.getCursor()
+          },
+          () => cm.getCursor()
+        )
       } else {
         target = zenMoveToDisplayLineBoundary(cm, cm.getCursor(), { forward: false })
       }

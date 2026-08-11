@@ -203,6 +203,91 @@ describe('zenMoveByDisplayLine no-progress fallback (#423)', () => {
   })
 })
 
+describe('measurement-crash fallback (#574)', () => {
+  // codemirror-vim rethrows a motion exception after clearing its state, and
+  // the un-preventDefault-ed keydown then types the pressed key into the note.
+  // A throw anywhere in the pixel path must therefore degrade to the logical
+  // step, never escape.
+
+  it('j falls back to one logical line down when findPosV throws', () => {
+    const cm = {
+      firstLine: () => 0,
+      lastLine: () => 100,
+      findPosV: () => {
+        throw new TypeError("Cannot read properties of null (reading 'top')")
+      },
+      charCoords: () => ({ left: 42 })
+    } as unknown as Cm
+    const res = zenMoveByDisplayLine(cm, { line: 50, ch: 10 }, { forward: true, repeat: 1 }, {})
+    expect(res).toEqual({ line: 51, ch: 10 })
+  })
+
+  it('k falls back to one logical line up when charCoords throws', () => {
+    const cm = {
+      firstLine: () => 0,
+      lastLine: () => 100,
+      findPosV: () => ({ line: 49, ch: 10 }),
+      charCoords: () => {
+        throw new TypeError('measure failed')
+      }
+    } as unknown as Cm
+    const res = zenMoveByDisplayLine(cm, { line: 50, ch: 10 }, { forward: false, repeat: 1 }, {})
+    expect(res).toEqual({ line: 49, ch: 10 })
+  })
+
+  it('the fallback still clamps to the document bounds', () => {
+    const cm = {
+      firstLine: () => 0,
+      lastLine: () => 100,
+      findPosV: () => {
+        throw new Error('boom')
+      },
+      charCoords: () => ({ left: 42 })
+    } as unknown as Cm
+    const res = zenMoveByDisplayLine(cm, { line: 0, ch: 5 }, { forward: false, repeat: 1 }, {})
+    expect(res).toEqual({ line: 0, ch: 5 })
+  })
+
+  it('a bare $ falls back to the logical line end when goLineRight throws', () => {
+    const cm = {
+      execCommand: () => {
+        throw new Error('boom')
+      },
+      getCursor: vi.fn()
+    }
+    const res = zenMoveToDisplayLineBoundary(cm, { line: 4, ch: 7 }, { forward: true, repeat: 1 })
+    expect(res).toEqual({ line: 4, ch: Infinity })
+  })
+
+  it('g0 falls back to column 0 when the row measurement throws', () => {
+    const cm = {
+      execCommand: vi.fn(),
+      getCursor: vi.fn(),
+      charCoords: () => {
+        throw new Error('boom')
+      },
+      coordsChar: vi.fn()
+    }
+    const res = zenMoveToDisplayLineBoundary(cm, { line: 4, ch: 30 }, { forward: false, repeat: 1 })
+    expect(res).toEqual({ line: 4, ch: 0 })
+  })
+
+  it('H stays put instead of throwing when the viewport measurement fails', () => {
+    const cm = {
+      firstLine: () => 0,
+      lastLine: () => 99,
+      getScrollInfo: () => {
+        throw new Error('boom')
+      },
+      coordsChar: vi.fn(),
+      getLine: () => '',
+      findPosV: vi.fn()
+    }
+    const res = zenMoveToViewportEdge(cm, { line: 15, ch: 4 }, { forward: false, repeat: 1 })
+    expect(res).toEqual({ line: 15, ch: 4 })
+  })
+})
+
 describe('wrapped display-row boundaries (#536)', () => {
   it('moves $ to the end of the current display row', () => {
     let cursor = { line: 4, ch: 7, sticky: 'before' }
