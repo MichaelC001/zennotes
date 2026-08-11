@@ -891,24 +891,10 @@ function App(): JSX.Element {
         window.dispatchEvent(new Event('zen:add-comment'))
         return
       }
-      // Pane-focus shortcuts (⌥h/j/k/l by default) are handled by a separate
-      // capture-phase listener so a remap onto an editor key still wins over
-      // CodeMirror — see focusPaneHandler below. (#124)
-      if (matchesShortcut(e, overrides, 'global.modeEdit')) {
-        e.preventDefault()
-        requestPaneMode('edit')
-        return
-      }
-      if (matchesShortcut(e, overrides, 'global.modeSplit')) {
-        e.preventDefault()
-        requestPaneMode('split')
-        return
-      }
-      if (matchesShortcut(e, overrides, 'global.modePreview')) {
-        e.preventDefault()
-        requestPaneMode('preview')
-        return
-      }
+      // Pane-focus shortcuts (⌥h/j/k/l by default) and the pane-mode
+      // shortcuts (⌘4/5/6 by default) are handled by a separate capture-phase
+      // listener so a remap onto an editor key still wins over CodeMirror —
+      // see focusPaneHandler below. (#124, #579)
       // ⌘. — toggle Zen mode
       if (matchesShortcut(e, overrides, 'global.toggleZenMode')) {
         e.preventDefault()
@@ -988,6 +974,26 @@ function App(): JSX.Element {
         e.preventDefault()
         e.stopImmediatePropagation()
         focusPaneOrEdgePanel(paneDir)
+        return
+      }
+
+      // Pane-mode shortcuts need the same capture treatment (#579): remapped
+      // onto an editor chord (Ctrl+P, Ctrl+E, …), the bubble-phase handler ran
+      // only after CodeMirror had already consumed the key, so the shortcuts
+      // went dead exactly when the editor held focus — which split mode
+      // guarantees. The defaults (⌘4/5/6) collide with nothing, so for them
+      // this is just a phase change.
+      const paneMode = matchesShortcut(e, overrides, 'global.modeEdit')
+        ? ('edit' as const)
+        : matchesShortcut(e, overrides, 'global.modeSplit')
+          ? ('split' as const)
+          : matchesShortcut(e, overrides, 'global.modePreview')
+            ? ('preview' as const)
+            : null
+      if (paneMode) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        requestPaneMode(paneMode)
         return
       }
 
