@@ -67,6 +67,36 @@ describe('createCloudSyncClient', () => {
     )
   })
 
+  it('surfaces field details from the cloud API validation envelope', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'VALIDATION_FAILED',
+            message: 'The request data is invalid.'
+          },
+          errors: {
+            markdown: ['The markdown field must be present.']
+          }
+        }),
+        { status: 422, headers: { 'Content-Type': 'application/json' } }
+      )
+    )
+    const client = createCloudSyncClient('https://zennotes.org', 'token', fetchImplementation)
+
+    await expect(client.publishNote({
+      note_path: 'Empty.md',
+      title: 'Empty',
+      markdown: ''
+    })).rejects.toEqual(
+      expect.objectContaining<Partial<CloudServiceRequestError>>({
+        status: 422,
+        code: 'VALIDATION_FAILED',
+        message: 'The markdown field must be present.'
+      })
+    )
+  })
+
   it('lets fetch set the multipart boundary for published-note assets', async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ id: 42, slug: 'photo', url: 'https://zennotes.org/s/photo' }), {

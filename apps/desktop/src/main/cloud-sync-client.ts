@@ -84,14 +84,37 @@ async function parseJson(response: globalThis.Response): Promise<unknown> {
 
 function asErrorPayload(payload: unknown): { code?: string; message?: string } | null {
   if (!payload || typeof payload !== 'object') return null
-  const response = payload as { code?: unknown; error?: unknown; message?: unknown }
+  const response = payload as {
+    code?: unknown
+    error?: unknown
+    errors?: unknown
+    message?: unknown
+  }
   const candidate =
     response.error && typeof response.error === 'object'
       ? (response.error as { code?: unknown; message?: unknown })
       : response
+  const validationMessage = firstValidationMessage(response.errors)
 
   return {
     ...(typeof candidate.code === 'string' ? { code: candidate.code } : {}),
-    ...(typeof candidate.message === 'string' ? { message: candidate.message } : {})
+    ...(validationMessage !== null
+      ? { message: validationMessage }
+      : typeof candidate.message === 'string'
+        ? { message: candidate.message }
+        : {})
   }
+}
+
+function firstValidationMessage(errors: unknown): string | null {
+  if (!errors || typeof errors !== 'object') return null
+
+  for (const messages of Object.values(errors)) {
+    if (Array.isArray(messages)) {
+      const message = messages.find((candidate): candidate is string => typeof candidate === 'string')
+      if (message) return message
+    }
+  }
+
+  return null
 }
