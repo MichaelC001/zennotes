@@ -3236,9 +3236,6 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             <IconBtn title="Export as PDF (⇧⌘E)" onClick={() => void exportActiveNotePdf()}>
               <FileDownIcon />
             </IconBtn>
-            {supportsCloudPublishing && folder !== 'trash' && (
-              <PublishedNoteButton key={content.path} note={content} />
-            )}
           </>
         )}
         {folder === 'trash' ? (
@@ -3277,8 +3274,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     archiveActive,
     restoreActive,
     unarchiveActive,
-    exportActiveNotePdf,
-    supportsCloudPublishing
+    exportActiveNotePdf
   ])
 
   const showEditor = !!content && mode !== 'preview'
@@ -3660,6 +3656,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
                 if (next && next !== content.title) void renameActive(next)
               }}
             />
+            {supportsCloudPublishing && content.folder !== 'trash' && (
+              <PublishedNoteButton key={content.path} note={content} />
+            )}
             {isDirty && (
               <span
                 aria-label="Unsaved changes"

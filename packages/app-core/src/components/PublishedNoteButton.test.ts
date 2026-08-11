@@ -33,7 +33,7 @@ describe('PublishedNoteButton', () => {
     host.remove()
   })
 
-  it('shows a persistent published label and opens the manage dialog', async () => {
+  it('shows a minimal published icon and opens the manage dialog', async () => {
     const bridge = {
       listCloudPublishedNotes: vi.fn(async () => [{
         id: 42,
@@ -53,8 +53,9 @@ describe('PublishedNoteButton', () => {
 
     const button = host.querySelector('button')!
     expect(button.dataset.published).toBe('true')
-    expect(button.textContent).toContain('Published')
     expect(button.getAttribute('aria-label')).toBe('Published · Manage public note')
+    expect(button.querySelector('svg')).not.toBeNull()
+    expect(button.textContent).toBe('Published · Manage public note')
 
     act(() => button.click())
     expect(getPublishNoteRequest()?.note).toEqual(note)
@@ -78,7 +79,9 @@ describe('PublishedNoteButton', () => {
     }))
 
     expect(host.querySelector('button')?.dataset.published).toBe('true')
-    expect(host.textContent).toContain('Published')
+    expect(host.querySelector('button')?.getAttribute('aria-label')).toBe(
+      'Published · Manage public note'
+    )
 
     act(() => notifyPublishedNoteChanged({ notePath: note.path, url: null }))
     expect(host.querySelector('button')?.dataset.published).toBe('false')

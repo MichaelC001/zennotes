@@ -63,14 +63,13 @@ export function PublishedNoteButton({
       aria-busy={loading}
       data-published={published ? 'true' : 'false'}
       className={[
-        'group relative flex h-7 shrink-0 items-center justify-center rounded-md transition-colors',
+        'group relative ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors',
         published
-          ? 'gap-1.5 border border-accent/25 bg-accent/10 px-2 text-xs font-medium text-accent hover:bg-accent/15'
-          : 'w-7 text-ink-500 hover:bg-paper-200 hover:text-ink-900'
+          ? 'bg-accent/12 text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/18'
+          : 'text-ink-400 hover:bg-paper-200/70 hover:text-ink-800'
       ].join(' ')}
     >
-      <LinkIcon width={14} height={14} />
-      {published && <span>Published</span>}
+      <LinkIcon width={13} height={13} />
       <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-paper-300 bg-paper-50 px-2 py-1 text-xs font-medium text-ink-800 shadow-panel group-hover:block group-focus-visible:block">
         {label}
       </span>
