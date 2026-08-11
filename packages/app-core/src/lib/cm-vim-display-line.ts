@@ -33,6 +33,8 @@ type VimDisplayBoundaryCm = {
     coords: { left: number; top: number },
     mode: string
   ) => { line: number; ch: number }
+  /** The underlying CodeMirror 6 view (set by the codemirror-vim adapter). */
+  cm6?: EditorView
 }
 
 type VimViewportCm = {
@@ -61,6 +63,15 @@ type VimMotionState = {
 
 let pixelMotionFailureWarned = false
 
+function warnPixelMotionFailure(err: unknown): void {
+  if (pixelMotionFailureWarned) return
+  pixelMotionFailureWarned = true
+  console.warn(
+    '[zen:vim] display-line measurement failed; using logical movement for this press',
+    err
+  )
+}
+
 /**
  * Run a pixel-measurement-based motion, falling back to a logical position if
  * it throws (#574). codemirror-vim rethrows a motion exception after clearing
@@ -78,15 +89,72 @@ function pixelMotionFallback(
   try {
     return run()
   } catch (err) {
-    if (!pixelMotionFailureWarned) {
-      pixelMotionFailureWarned = true
-      console.warn(
-        '[zen:vim] display-line measurement failed; using logical movement for this press',
-        err
-      )
-    }
+    warnPixelMotionFailure(err)
     return fallback()
   }
+}
+
+/**
+ * The wrap point ending the display row that contains `pos` (forward), or the
+ * offset starting that row (backward). Forward returns `line.to` when the
+ * cursor sits on the line's last row.
+ *
+ * Found by binary-searching `coordsAtPos` row midpoints instead of hit-testing
+ * an x coordinate at the viewport edge, which is what `goLineRight` does and
+ * what #575 broke: under fractional display scaling the x resolution walks
+ * sub-pixel glyph rects and lands several characters short of the wrap point,
+ * or on a neighboring row entirely. Vertical midpoints move a full row height
+ * per row, so a half-row tolerance absorbs that imprecision. Returns null when
+ * coordinates are unavailable (unrendered or widget-only spans); callers fall
+ * back to the pixel path.
+ */
+function displayRowEdge(view: EditorView, pos: number, forward: boolean): number | null {
+  const line = view.state.doc.lineAt(pos)
+  const rowCoords = (offset: number) => {
+    const side: 1 | -1 = offset >= line.to ? -1 : 1
+    const other: 1 | -1 = side === 1 ? -1 : 1
+    return view.coordsAtPos(offset, side) ?? view.coordsAtPos(offset, other)
+  }
+  const rowMid = (offset: number): number | null => {
+    const coords = rowCoords(offset)
+    return coords ? (coords.top + coords.bottom) / 2 : null
+  }
+  const anchorCoords = rowCoords(pos)
+  if (!anchorCoords) return null
+  const anchorMid = (anchorCoords.top + anchorCoords.bottom) / 2
+  const halfRow = Math.max(2, (anchorCoords.bottom - anchorCoords.top) / 2)
+  const sameRow = (offset: number): boolean | null => {
+    const mid = rowMid(offset)
+    return mid == null ? null : Math.abs(mid - anchorMid) < halfRow
+  }
+  if (forward) {
+    let lo = pos
+    let hi = line.to
+    const atEnd = sameRow(hi)
+    if (atEnd == null) return null
+    if (atEnd) return line.to
+    while (lo + 1 < hi) {
+      const mid = (lo + hi) >> 1
+      const same = sameRow(mid)
+      if (same == null) return null
+      if (same) lo = mid
+      else hi = mid
+    }
+    return hi
+  }
+  let lo = line.from
+  let hi = pos
+  const atStart = sameRow(lo)
+  if (atStart == null) return null
+  if (atStart) return line.from
+  while (lo + 1 < hi) {
+    const mid = (lo + hi) >> 1
+    const same = sameRow(mid)
+    if (same == null) return null
+    if (same) hi = mid
+    else lo = mid
+  }
+  return hi
 }
 
 /**
@@ -207,7 +275,10 @@ export function zenMoveByDisplayLine(
 /**
  * Move to a wrapped display-row boundary. A counted `$` keeps Vim's logical
  * line behavior, while a bare `$` and the insert actions built on this helper
- * stay on the row the user can currently see (#536).
+ * stay on the row the user can currently see (#536). The boundary itself
+ * comes from `displayRowEdge` when the CM6 view is reachable; the
+ * goLineRight/goLineLeft commands are only the fallback, because their
+ * viewport-edge hit-testing mislands under fractional display scaling (#575).
  */
 export function zenMoveToDisplayLineBoundary(
   cm: VimDisplayBoundaryCm,
@@ -220,6 +291,31 @@ export function zenMoveToDisplayLineBoundary(
     const last = cm.lastLine?.() ?? head.line + repeat - 1
     const line = Math.max(first, Math.min(last, head.line + repeat - 1))
     return new CodeMirror.Pos(line, Infinity)
+  }
+
+  // Preferred path: find the wrap point from row midpoints (#575). The
+  // goLineRight/goLineLeft commands below locate it by hit-testing an x
+  // coordinate at the viewport edge, which under fractional display scaling
+  // lands several characters short of the row end, or on a neighboring row.
+  const view = cm.cm6
+  if (view) {
+    try {
+      const doc = view.state.doc
+      if (head.line + 1 <= doc.lines) {
+        const line = doc.line(head.line + 1)
+        const pos = Math.min(line.to, line.from + Math.max(0, head.ch))
+        const edge = displayRowEdge(view, pos, !!motionArgs.forward)
+        if (edge != null) {
+          // Forward lands ON the row's last character, mirroring Vim's
+          // inclusive `$`; backward lands on the row's first.
+          return motionArgs.forward
+            ? new CodeMirror.Pos(head.line, Math.max(0, edge - line.from - 1))
+            : new CodeMirror.Pos(head.line, edge - line.from)
+        }
+      }
+    } catch (err) {
+      warnPixelMotionFailure(err)
+    }
   }
 
   const { charCoords, coordsChar } = cm
@@ -340,6 +436,14 @@ export function registerDisplayLineMotion(): void {
         // backs up to the last visible character, but `A` belongs after it.
         target = pixelMotionFallback(
           () => {
+            const view = cm.cm6
+            const cursor = cm.getCursor()
+            if (view && cursor.line + 1 <= view.state.doc.lines) {
+              const line = view.state.doc.line(cursor.line + 1)
+              const pos = Math.min(line.to, line.from + Math.max(0, cursor.ch))
+              const edge = displayRowEdge(view, pos, true)
+              if (edge != null) return new CodeMirror.Pos(cursor.line, edge - line.from)
+            }
             cm.execCommand('goLineRight')
             return cm.getCursor()
           },

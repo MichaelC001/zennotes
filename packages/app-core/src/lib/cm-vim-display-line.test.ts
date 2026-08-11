@@ -334,6 +334,84 @@ describe('wrapped display-row boundaries (#536)', () => {
   })
 })
 
+describe('display-row boundaries from row midpoints (#575)', () => {
+  // Simulated layout: line 2 (0-based line 1) holds 100 chars wrapping into
+  // rows of 30 (offsets 6-35, 36-65, 66-95, 96-106). coordsAtPos reports a
+  // top per row; `jitter` adds sub-pixel noise like the fractional-scaling
+  // environments where x hit-testing mislands.
+  const DOC = `alpha\n${'x'.repeat(100)}\nomega`
+
+  function boundaryCm(jitter = false) {
+    const state = EditorState.create({ doc: DOC })
+    const coordsAtPos = (offset: number) => {
+      if (offset < 6 || offset > 106) return null
+      const row = Math.min(3, Math.floor((offset - 6) / 30))
+      const noise = jitter ? ((offset * 7) % 5) - 2 : 0
+      const top = 100 + row * 20 + noise
+      return { left: 0, right: 0, top, bottom: top + 18 }
+    }
+    return {
+      execCommand: vi.fn(),
+      getCursor: vi.fn(),
+      cm6: { state, coordsAtPos } as unknown as EditorView
+    }
+  }
+
+  it('$ from a row start lands on the last character of that row', () => {
+    const cm = boundaryCm()
+    const res = zenMoveToDisplayLineBoundary(cm, { line: 1, ch: 0 }, { forward: true, repeat: 1 })
+    expect(res).toEqual({ line: 1, ch: 29 })
+    expect(cm.execCommand).not.toHaveBeenCalled()
+  })
+
+  it('$ from the middle of an inner row lands on the last character of that row', () => {
+    const cm = boundaryCm()
+    const res = zenMoveToDisplayLineBoundary(cm, { line: 1, ch: 70 }, { forward: true, repeat: 1 })
+    expect(res).toEqual({ line: 1, ch: 89 })
+  })
+
+  it('$ on the last row reaches the actual line end', () => {
+    const cm = boundaryCm()
+    const res = zenMoveToDisplayLineBoundary(cm, { line: 1, ch: 97 }, { forward: true, repeat: 1 })
+    expect(res).toEqual({ line: 1, ch: 99 })
+  })
+
+  it('g0 lands on the first character of the current row', () => {
+    const cm = boundaryCm()
+    const res = zenMoveToDisplayLineBoundary(cm, { line: 1, ch: 70 }, { forward: false, repeat: 1 })
+    expect(res).toEqual({ line: 1, ch: 60 })
+  })
+
+  it('sub-pixel jitter in the row coordinates changes nothing', () => {
+    const cm = boundaryCm(true)
+    expect(
+      zenMoveToDisplayLineBoundary(cm, { line: 1, ch: 0 }, { forward: true, repeat: 1 })
+    ).toEqual({ line: 1, ch: 29 })
+    expect(
+      zenMoveToDisplayLineBoundary(cm, { line: 1, ch: 97 }, { forward: true, repeat: 1 })
+    ).toEqual({ line: 1, ch: 99 })
+    expect(
+      zenMoveToDisplayLineBoundary(cm, { line: 1, ch: 70 }, { forward: false, repeat: 1 })
+    ).toEqual({ line: 1, ch: 60 })
+  })
+
+  it('falls back to goLineRight when coordinates are unavailable', () => {
+    const state = EditorState.create({ doc: DOC })
+    let cursor = { line: 1, ch: 34, sticky: 'before' }
+    const cm = {
+      execCommand: vi.fn((command: string) => {
+        expect(command).toBe('goLineRight')
+        cursor = { line: 1, ch: 30, sticky: 'before' }
+      }),
+      getCursor: () => cursor,
+      cm6: { state, coordsAtPos: () => null } as unknown as EditorView
+    }
+    const res = zenMoveToDisplayLineBoundary(cm, { line: 1, ch: 0 }, { forward: true, repeat: 1 })
+    expect(cm.execCommand).toHaveBeenCalledTimes(1)
+    expect(res).toEqual({ line: 1, ch: 29 })
+  })
+})
+
 describe('repeatable viewport H/L (#513)', () => {
   function viewportCm() {
     return {
