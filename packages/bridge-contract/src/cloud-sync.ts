@@ -117,10 +117,12 @@ export interface CloudSyncVaultCollection {
 }
 
 export type CloudBackupStatus = "pending" | "building" | "ready" | "failed";
+export type CloudBackupTrigger = "manual" | "automatic";
 
 export interface CloudBackupSnapshot {
   id: string;
   label: string | null;
+  trigger?: CloudBackupTrigger;
   status: CloudBackupStatus;
   cursor: number;
   item_count: number;
@@ -136,6 +138,57 @@ export interface CloudBackupSnapshotResponse {
 
 export interface CloudBackupSnapshotCollection {
   data: CloudBackupSnapshot[];
+}
+
+export interface CloudBackupSchedule {
+  enabled: boolean;
+  frequency: "daily";
+  next_backup_at: string | null;
+  last_backup_at: string | null;
+}
+
+export interface CloudBackupScheduleResponse {
+  data: CloudBackupSchedule;
+}
+
+export interface CloudBackupSnapshotItem {
+  id: number;
+  item_id: string;
+  path: string;
+  kind: string;
+  byte_length: number;
+  revision: number;
+  content_hash: string | null;
+  media_type: string | null;
+}
+
+export interface CloudBackupSnapshotItemCollection {
+  data: CloudBackupSnapshotItem[];
+}
+
+export interface CloudBackupNoteRestoreRequest {
+  idempotency_key: string;
+  expected_cursor: number;
+}
+
+export interface CloudBackupNoteRestore {
+  id: string;
+  status: "completed" | "conflict";
+  item_id: string;
+  path: string;
+  revision: number | null;
+  cursor: number;
+  error_code: string | null;
+  created_at: string;
+}
+
+export interface CloudBackupNoteRestoreResponse {
+  data: CloudBackupNoteRestore;
+}
+
+export interface CloudBackupNoteRestoreResult {
+  restore: CloudBackupNoteRestore;
+  sync: CloudSyncRunSummary;
 }
 
 export type CloudBackupRestoreStatus =

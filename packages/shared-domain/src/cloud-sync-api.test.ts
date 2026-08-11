@@ -96,6 +96,48 @@ describe('CloudSyncApiClient', () => {
     )
   })
 
+  it('addresses backup schedules, snapshot items, and one-note restores', async () => {
+    const requests: CloudSyncHttpRequest[] = []
+    const client = new CloudSyncApiClient({
+      async request<Response>(request: CloudSyncHttpRequest): Promise<Response> {
+        requests.push(request)
+        return {} as Response
+      }
+    })
+
+    await client.backupSchedule('vault/1')
+    await client.updateBackupSchedule('vault/1', true)
+    await client.listBackupItems('vault/1', 'backup/1')
+    await client.restoreBackupNote('vault/1', 'backup/1', 42, {
+      idempotency_key: '4b66f4b4-08f9-4e5a-a300-686ed4ef7e92',
+      expected_cursor: 12
+    })
+
+    expect(requests).toEqual([
+      {
+        method: 'GET',
+        path: '/api/v1/vaults/vault%2F1/backup-schedule'
+      },
+      {
+        method: 'PUT',
+        path: '/api/v1/vaults/vault%2F1/backup-schedule',
+        body: { enabled: true }
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/vaults/vault%2F1/backups/backup%2F1/items'
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/vaults/vault%2F1/backups/backup%2F1/items/42/restore',
+        body: {
+          idempotency_key: '4b66f4b4-08f9-4e5a-a300-686ed4ef7e92',
+          expected_cursor: 12
+        }
+      }
+    ])
+  })
+
   it('lists, publishes, updates, and unpublishes notes', async () => {
     const requests: CloudSyncHttpRequest[] = []
     const client = new CloudSyncApiClient({

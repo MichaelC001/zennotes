@@ -13,8 +13,11 @@ import type {
 import type {
   CloudAccountConnectResult,
   CloudAccountStatus,
+  CloudBackupNoteRestoreResult,
   CloudBackupRestoreResult,
+  CloudBackupSchedule,
   CloudBackupSnapshot,
+  CloudBackupSnapshotItem,
   CloudPublishedNote,
   CloudPublishedNoteResult,
   CloudPublishNoteInput,
@@ -244,6 +247,12 @@ const api: ZenBridge = {
   syncCloudVault: (): Promise<CloudSyncRunSummary> => ipcRenderer.invoke(IPC.CLOUD_VAULT_SYNC),
   listCloudBackups: (): Promise<CloudBackupSnapshot[]> =>
     ipcRenderer.invoke(IPC.CLOUD_BACKUPS_LIST),
+  getCloudBackupSchedule: (): Promise<CloudBackupSchedule> =>
+    ipcRenderer.invoke(IPC.CLOUD_BACKUP_SCHEDULE_GET),
+  updateCloudBackupSchedule: (enabled: boolean): Promise<CloudBackupSchedule> =>
+    ipcRenderer.invoke(IPC.CLOUD_BACKUP_SCHEDULE_UPDATE, enabled),
+  listCloudBackupItems: (backupId: string): Promise<CloudBackupSnapshotItem[]> =>
+    ipcRenderer.invoke(IPC.CLOUD_BACKUP_ITEMS_LIST, backupId),
   createCloudBackup: (label?: string): Promise<CloudBackupSnapshot> =>
     ipcRenderer.invoke(IPC.CLOUD_BACKUP_CREATE, label),
   downloadCloudBackup: (backupId: string): Promise<void> =>
@@ -252,6 +261,11 @@ const api: ZenBridge = {
     ipcRenderer.invoke(IPC.CLOUD_BACKUP_DELETE, backupId),
   restoreCloudBackup: (backupId: string): Promise<CloudBackupRestoreResult> =>
     ipcRenderer.invoke(IPC.CLOUD_BACKUP_RESTORE, backupId),
+  restoreCloudBackupNote: (
+    backupId: string,
+    snapshotItemId: number,
+  ): Promise<CloudBackupNoteRestoreResult> =>
+    ipcRenderer.invoke(IPC.CLOUD_BACKUP_NOTE_RESTORE, backupId, snapshotItemId),
   getServerCapabilities: async (): Promise<ServerCapabilities | null> =>
     (await refreshRemoteWorkspaceInfo())?.capabilities ?? null,
   getServerSession: async (): Promise<ServerSessionStatus> => ({

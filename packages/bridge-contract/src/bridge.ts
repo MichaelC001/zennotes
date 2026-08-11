@@ -38,8 +38,11 @@ import type { CustomTemplateFile, WriteTemplateInput } from './templates'
 import type {
   CloudAccountConnectResult,
   CloudAccountStatus,
+  CloudBackupNoteRestoreResult,
   CloudBackupRestoreResult,
+  CloudBackupSchedule,
   CloudBackupSnapshot,
+  CloudBackupSnapshotItem,
   CloudPublishedNote,
   CloudPublishedNoteResult,
   CloudPublishNoteInput,
@@ -137,10 +140,17 @@ export interface ZenBridge {
   unlinkCloudVault(): Promise<void>
   syncCloudVault(): Promise<CloudSyncRunSummary>
   listCloudBackups(): Promise<CloudBackupSnapshot[]>
+  getCloudBackupSchedule(): Promise<CloudBackupSchedule>
+  updateCloudBackupSchedule(enabled: boolean): Promise<CloudBackupSchedule>
+  listCloudBackupItems(backupId: string): Promise<CloudBackupSnapshotItem[]>
   createCloudBackup(label?: string): Promise<CloudBackupSnapshot>
   downloadCloudBackup(backupId: string): Promise<void>
   deleteCloudBackup(backupId: string): Promise<void>
   restoreCloudBackup(backupId: string): Promise<CloudBackupRestoreResult>
+  restoreCloudBackupNote(
+    backupId: string,
+    snapshotItemId: number
+  ): Promise<CloudBackupNoteRestoreResult>
   getServerCapabilities(): Promise<ServerCapabilities | null>
   getServerSession(): Promise<ServerSessionStatus>
   loginServerSession(token: string): Promise<ServerSessionStatus>

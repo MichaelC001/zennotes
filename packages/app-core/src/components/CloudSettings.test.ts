@@ -26,6 +26,10 @@ const mocks = vi.hoisted(() => ({
   unlinkCloudVault: vi.fn(),
   syncCloudVault: vi.fn(),
   listCloudBackups: vi.fn(),
+  getCloudBackupSchedule: vi.fn(),
+  updateCloudBackupSchedule: vi.fn(),
+  listCloudBackupItems: vi.fn(),
+  restoreCloudBackupNote: vi.fn(),
   createCloudBackup: vi.fn(),
   downloadCloudBackup: vi.fn(),
   deleteCloudBackup: vi.fn(),
@@ -110,6 +114,12 @@ describe("CloudSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listCloudPublishedNotes.mockResolvedValue([]);
+    mocks.getCloudBackupSchedule.mockResolvedValue({
+      enabled: false,
+      frequency: "daily",
+      next_backup_at: null,
+      last_backup_at: null,
+    });
     mocks.syncCloudVaultWithStatus.mockImplementation(() =>
       mocks.syncCloudVault(),
     );
@@ -455,6 +465,7 @@ describe("CloudSettings", () => {
       {
         id: "backup-1",
         label: "Before migration",
+        trigger: "manual",
         status: "ready",
         cursor: 12,
         item_count: 8,
@@ -467,6 +478,7 @@ describe("CloudSettings", () => {
     mocks.createCloudBackup.mockResolvedValue({
       id: "backup-2",
       label: null,
+      trigger: "manual",
       status: "pending",
       cursor: 12,
       item_count: 8,
@@ -498,6 +510,43 @@ describe("CloudSettings", () => {
         bootstrap_conflicts: [],
       },
     });
+    mocks.updateCloudBackupSchedule.mockResolvedValue({
+      enabled: true,
+      frequency: "daily",
+      next_backup_at: "2026-08-11T12:00:00.000Z",
+      last_backup_at: null,
+    });
+    mocks.listCloudBackupItems.mockResolvedValue([
+      {
+        id: 42,
+        item_id: "note-1",
+        path: "Journal/Monday.md",
+        kind: "text",
+        byte_length: 512,
+        revision: 3,
+        content_hash: "abc",
+        media_type: "text/markdown",
+      },
+    ]);
+    mocks.restoreCloudBackupNote.mockResolvedValue({
+      restore: {
+        id: "note-restore-1",
+        status: "completed",
+        item_id: "note-1",
+        path: "Journal/Monday.md",
+        revision: 5,
+        cursor: 19,
+        error_code: null,
+        created_at: "2026-08-10T12:07:00.000Z",
+      },
+      sync: {
+        cursor: 19,
+        pulled: 1,
+        pushed: 0,
+        conflicts: [],
+        bootstrap_conflicts: [],
+      },
+    });
 
     await act(async () =>
       root.render(
@@ -509,6 +558,8 @@ describe("CloudSettings", () => {
     );
 
     expect(host.textContent).toContain("Before migration");
+    expect(host.textContent).toContain("Manual");
+    expect(host.textContent).toContain("Automatic daily backups");
     expect(host.textContent).toContain("8 items · 2.0 KB source");
     expect(host.textContent).toContain("1.0 KB archive");
     expect(host.textContent).toContain("Expires");
@@ -518,6 +569,12 @@ describe("CloudSettings", () => {
     );
     await act(async () => download!.click());
     expect(mocks.downloadCloudBackup).toHaveBeenCalledWith("backup-1");
+
+    const automatic = host.querySelector<HTMLButtonElement>(
+      'button[role="switch"]',
+    );
+    await act(async () => automatic!.click());
+    expect(mocks.updateCloudBackupSchedule).toHaveBeenCalledWith(true);
 
     const create = [...host.querySelectorAll("button")].find(
       (button) => button.textContent?.trim() === "Create backup",
@@ -536,5 +593,23 @@ describe("CloudSettings", () => {
     );
     expect(mocks.restoreCloudBackup).toHaveBeenCalledWith("backup-1");
     expect(host.textContent).toContain("Restored 8 items");
+
+    const browse = [...host.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Browse notes",
+    );
+    await act(async () => browse!.click());
+    expect(mocks.listCloudBackupItems).toHaveBeenCalledWith("backup-1");
+    expect(host.textContent).toContain("Journal/Monday.md");
+
+    const restoreNote = [...host.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Restore note",
+    );
+    await act(async () => restoreNote!.click());
+    expect(mocks.confirmApp).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        description: expect.stringContaining("Other notes are unchanged"),
+      }),
+    );
+    expect(mocks.restoreCloudBackupNote).toHaveBeenCalledWith("backup-1", 42);
   });
 });

@@ -1,7 +1,11 @@
 import type {
+  CloudBackupNoteRestoreRequest,
+  CloudBackupNoteRestoreResponse,
   CloudBackupRestoreRequest,
   CloudBackupRestoreResponse,
+  CloudBackupScheduleResponse,
   CloudBackupSnapshotCollection,
+  CloudBackupSnapshotItemCollection,
   CloudBackupSnapshotResponse,
   CloudPublishedNoteCollection,
   CloudPublishedNoteResult,
@@ -112,6 +116,47 @@ export class CloudSyncApiClient {
     return this.http.request({
       method: 'GET',
       path: `/api/v1/vaults/${encodeURIComponent(vaultId)}/backups`
+    })
+  }
+
+  async backupSchedule(vaultId: string): Promise<CloudBackupScheduleResponse> {
+    return this.http.request({
+      method: 'GET',
+      path: `/api/v1/vaults/${encodeURIComponent(vaultId)}/backup-schedule`
+    })
+  }
+
+  async updateBackupSchedule(
+    vaultId: string,
+    enabled: boolean
+  ): Promise<CloudBackupScheduleResponse> {
+    return this.http.request({
+      method: 'PUT',
+      path: `/api/v1/vaults/${encodeURIComponent(vaultId)}/backup-schedule`,
+      body: { enabled }
+    })
+  }
+
+  async listBackupItems(
+    vaultId: string,
+    backupId: string
+  ): Promise<CloudBackupSnapshotItemCollection> {
+    return this.http.request({
+      method: 'GET',
+      path: `${this.backupPath(vaultId, backupId)}/items`
+    })
+  }
+
+  async restoreBackupNote(
+    vaultId: string,
+    backupId: string,
+    snapshotItemId: number,
+    body: CloudBackupNoteRestoreRequest
+  ): Promise<CloudBackupNoteRestoreResponse> {
+    return this.http.request({
+      method: 'POST',
+      path: `${this.backupPath(vaultId, backupId)}/items/${encodeURIComponent(String(snapshotItemId))}/restore`,
+      body
     })
   }
 

@@ -2628,6 +2628,21 @@ function registerIpc(): void {
   handle(IPC.CLOUD_BACKUPS_LIST, () =>
     getCloudSyncService().listBackups(requireLocalCloudVaultRoot()),
   );
+  handle(IPC.CLOUD_BACKUP_SCHEDULE_GET, () =>
+    getCloudSyncService().backupSchedule(requireLocalCloudVaultRoot()),
+  );
+  handle(IPC.CLOUD_BACKUP_SCHEDULE_UPDATE, (_event, enabled: boolean) =>
+    getCloudSyncService().updateBackupSchedule(
+      requireLocalCloudVaultRoot(),
+      enabled,
+    ),
+  );
+  handle(IPC.CLOUD_BACKUP_ITEMS_LIST, (_event, backupId: string) =>
+    getCloudSyncService().listBackupItems(
+      requireLocalCloudVaultRoot(),
+      backupId,
+    ),
+  );
   handle(IPC.CLOUD_BACKUP_CREATE, (_event, label?: string) =>
     getCloudSyncService().createBackup(requireLocalCloudVaultRoot(), label),
   );
@@ -2654,6 +2669,15 @@ function registerIpc(): void {
   );
   handle(IPC.CLOUD_BACKUP_RESTORE, (_event, backupId: string) =>
     getCloudSyncService().restoreBackup(requireLocalCloudVaultRoot(), backupId),
+  );
+  handle(
+    IPC.CLOUD_BACKUP_NOTE_RESTORE,
+    (_event, backupId: string, snapshotItemId: number) =>
+      getCloudSyncService().restoreBackupNote(
+        requireLocalCloudVaultRoot(),
+        backupId,
+        snapshotItemId,
+      ),
   );
 
   handle(IPC.APP_LIST_FONTS, async () => {

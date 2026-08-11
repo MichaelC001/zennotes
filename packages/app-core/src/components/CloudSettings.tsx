@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   CloudAccountStatus,
+  CloudBackupNoteRestoreResult,
   CloudBackupRestoreResult,
+  CloudBackupSchedule,
   CloudBackupSnapshot,
+  CloudBackupSnapshotItem,
   CloudPublishedNote,
   CloudServiceAccount,
   CloudSyncRunSummary,
@@ -26,6 +29,9 @@ type CloudAction =
   | "unlink"
   | "sync"
   | "backup-create"
+  | "backup-schedule"
+  | "backup-browse"
+  | "backup-note-restore"
   | "backup-download"
   | "backup-delete"
   | "backup-restore"
@@ -51,6 +57,10 @@ export function CloudSettings({
   const [newVaultName, setNewVaultName] = useState(localVaultName);
   const [summary, setSummary] = useState<CloudSyncRunSummary | null>(null);
   const [backups, setBackups] = useState<CloudBackupSnapshot[]>([]);
+  const [backupSchedule, setBackupSchedule] =
+    useState<CloudBackupSchedule | null>(null);
+  const [expandedBackupId, setExpandedBackupId] = useState<string | null>(null);
+  const [backupItems, setBackupItems] = useState<CloudBackupSnapshotItem[]>([]);
   const [publishedNotes, setPublishedNotes] = useState<CloudPublishedNote[]>(
     [],
   );
@@ -75,6 +85,9 @@ export function CloudSettings({
         setLink(null);
         setSummary(null);
         setBackups([]);
+        setBackupSchedule(null);
+        setExpandedBackupId(null);
+        setBackupItems([]);
         setPublishedNotes([]);
         setRestoreResult(null);
         return;
@@ -162,12 +175,20 @@ export function CloudSettings({
   const loadBackups = useCallback(async (): Promise<void> => {
     if (!backupIncluded || !activeLink) {
       setBackups([]);
+      setBackupSchedule(null);
+      setExpandedBackupId(null);
+      setBackupItems([]);
       return;
     }
 
     setLoadingBackups(true);
     try {
-      setBackups(await bridge.listCloudBackups());
+      const [nextBackups, nextSchedule] = await Promise.all([
+        bridge.listCloudBackups(),
+        bridge.getCloudBackupSchedule(),
+      ]);
+      setBackups(nextBackups);
+      setBackupSchedule(nextSchedule);
       await refreshServiceAccount();
     } catch (cause) {
       setError(errorMessage(cause, "Could not load cloud backups."));
@@ -255,6 +276,9 @@ export function CloudSettings({
       setLink(null);
       setSummary(null);
       setBackups([]);
+      setBackupSchedule(null);
+      setExpandedBackupId(null);
+      setBackupItems([]);
       setRestoreResult(null);
     });
 
@@ -278,6 +302,24 @@ export function CloudSettings({
 
   const refreshBackups = (): Promise<void> =>
     runAction("backup-refresh", loadBackups);
+
+  const updateBackupSchedule = (enabled: boolean): Promise<void> =>
+    runAction("backup-schedule", async () => {
+      setBackupSchedule(await bridge.updateCloudBackupSchedule(enabled));
+    });
+
+  const browseBackup = (backup: CloudBackupSnapshot): Promise<void> => {
+    if (expandedBackupId === backup.id) {
+      setExpandedBackupId(null);
+      setBackupItems([]);
+      return Promise.resolve();
+    }
+
+    return runAction("backup-browse", async () => {
+      setBackupItems(await bridge.listCloudBackupItems(backup.id));
+      setExpandedBackupId(backup.id);
+    });
+  };
 
   const refreshPublishedNotes = (): Promise<void> =>
     runAction("publish-refresh", loadPublishedNotes);
@@ -345,6 +387,28 @@ export function CloudSettings({
       const result = await bridge.restoreCloudBackup(backup.id);
       setRestoreResult(result);
       if (result.sync) setSummary(result.sync);
+      await loadBackups();
+    });
+  };
+
+  const restoreBackupNote = async (
+    backup: CloudBackupSnapshot,
+    item: CloudBackupSnapshotItem,
+  ): Promise<void> => {
+    const confirmed = await confirmApp({
+      title: `Restore ${item.path}?`,
+      description:
+        "This creates a new synced version of this note from the selected backup. Other notes are unchanged.",
+      confirmLabel: "Restore note",
+      danger: false,
+    });
+    if (!confirmed) return;
+
+    await runAction("backup-note-restore", async () => {
+      const result: CloudBackupNoteRestoreResult =
+        await bridge.restoreCloudBackupNote(backup.id, item.id);
+      setSummary(result.sync);
+      useToastStore.getState().addToast(`${item.path} restored.`, "success");
       await loadBackups();
     });
   };
@@ -447,17 +511,27 @@ export function CloudSettings({
                 action={action}
                 backupIncluded={backupIncluded}
                 backupLabel={backupLabel}
+                backupItems={backupItems}
                 backups={backups}
+                expandedBackupId={expandedBackupId}
                 limits={serviceAccount.features.backup.limits}
                 link={activeLink}
                 loading={loadingBackups}
                 restoreResult={restoreResult}
+                schedule={backupSchedule}
                 onBackupLabelChange={setBackupLabel}
                 onCreate={() => void createBackup()}
+                onBrowse={(backup) => void browseBackup(backup)}
                 onDelete={(backup) => void deleteBackup(backup)}
                 onDownload={(backup) => void downloadBackup(backup)}
                 onRefresh={() => void refreshBackups()}
                 onRestore={(backup) => void restoreBackup(backup)}
+                onRestoreNote={(backup, item) =>
+                  void restoreBackupNote(backup, item)
+                }
+                onScheduleChange={(enabled) =>
+                  void updateBackupSchedule(enabled)
+                }
               />
             </>
           ) : null}
@@ -1094,32 +1168,47 @@ function CloudBackupPanel({
   action,
   backupIncluded,
   backupLabel,
+  backupItems,
   backups,
+  expandedBackupId,
   limits,
   link,
   loading,
   restoreResult,
+  schedule,
   onBackupLabelChange,
+  onBrowse,
   onCreate,
   onDelete,
   onDownload,
   onRefresh,
   onRestore,
+  onRestoreNote,
+  onScheduleChange,
 }: {
   action: CloudAction;
   backupIncluded: boolean;
   backupLabel: string;
+  backupItems: CloudBackupSnapshotItem[];
   backups: CloudBackupSnapshot[];
+  expandedBackupId: string | null;
   limits: Record<string, unknown> | null;
   link: CloudVaultLink | null;
   loading: boolean;
   restoreResult: CloudBackupRestoreResult | null;
+  schedule: CloudBackupSchedule | null;
   onBackupLabelChange: (value: string) => void;
+  onBrowse: (backup: CloudBackupSnapshot) => void;
   onCreate: () => void;
   onDelete: (backup: CloudBackupSnapshot) => void;
   onDownload: (backup: CloudBackupSnapshot) => void;
   onRefresh: () => void;
   onRestore: (backup: CloudBackupSnapshot) => void;
+  onRestoreNote: (
+    backup: CloudBackupSnapshot,
+    item: CloudBackupSnapshotItem,
+  ) => void;
+  onScheduleChange: (enabled: boolean) => void;
 }): JSX.Element {
   if (!backupIncluded) {
     return (
@@ -1175,19 +1264,59 @@ function CloudBackupPanel({
       {restoreResult && <CloudRestoreResult result={restoreResult} />}
 
       <div className="overflow-hidden rounded-3xl border border-paper-300/60 bg-paper-50/45">
-        <div className="flex flex-col gap-2 border-b border-paper-300/45 px-5 py-5 sm:flex-row">
-          <input
-            aria-label="Backup label"
-            value={backupLabel}
-            maxLength={120}
-            disabled={action !== null}
-            onChange={(event) => onBackupLabelChange(event.target.value)}
-            className="min-w-0 flex-1 rounded-lg border border-paper-300 bg-paper-50 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent disabled:opacity-50"
-            placeholder="Before a major edit"
-          />
-          <Button disabled={action !== null} onClick={onCreate}>
-            {action === "backup-create" ? "Creating…" : "Create backup"}
-          </Button>
+        <div className="flex items-center justify-between gap-4 border-b border-paper-300/45 px-5 py-5">
+          <div>
+            <div className="text-sm font-medium text-ink-900">
+              Automatic daily backups
+            </div>
+            <p className="mt-1 text-xs leading-5 text-ink-500">
+              Creates a backup each day when this vault changed.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={schedule?.enabled ?? false}
+            aria-label="Automatic daily backups"
+            disabled={action !== null || schedule === null}
+            onClick={() => onScheduleChange(!(schedule?.enabled ?? false))}
+            className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-50 ${
+              schedule?.enabled
+                ? "border-accent bg-accent"
+                : "border-paper-400 bg-paper-200"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-paper-50 shadow-sm transition-transform ${
+                schedule?.enabled ? "translate-x-5" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="border-b border-paper-300/45 px-5 py-5">
+          <div className="mb-3">
+            <div className="text-sm font-medium text-ink-900">
+              Create a backup now
+            </div>
+            <p className="mt-1 text-xs leading-5 text-ink-500">
+              Add a label so this recovery point is easy to find later.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              aria-label="Backup label"
+              value={backupLabel}
+              maxLength={120}
+              disabled={action !== null}
+              onChange={(event) => onBackupLabelChange(event.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-paper-300 bg-paper-50 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent disabled:opacity-50"
+              placeholder="Before a major edit"
+            />
+            <Button disabled={action !== null} onClick={onCreate}>
+              {action === "backup-create" ? "Creating…" : "Create backup"}
+            </Button>
+          </div>
         </div>
 
         {backups.length === 0 ? (
@@ -1196,58 +1325,119 @@ function CloudBackupPanel({
           </div>
         ) : (
           <div className="divide-y divide-paper-300/45">
-            {backups.map((backup) => (
-              <div
-                key={backup.id}
-                className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-sm font-medium text-ink-900">
-                      {backup.label ||
-                        `Backup from ${formatBackupDate(backup.created_at)}`}
-                    </span>
-                    <CloudBackupStatus status={backup.status} />
+            {backups.map((backup) => {
+              const expanded = expandedBackupId === backup.id;
+
+              return (
+                <div key={backup.id}>
+                  <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate text-sm font-medium text-ink-900">
+                          {backup.label ||
+                            `Backup from ${formatBackupDate(backup.created_at)}`}
+                        </span>
+                        <span className="rounded-full bg-paper-200 px-2 py-0.5 text-[11px] font-medium text-ink-500">
+                          {backup.trigger === "automatic"
+                            ? "Automatic"
+                            : "Manual"}
+                        </span>
+                        <CloudBackupStatus status={backup.status} />
+                      </div>
+                      <div className="mt-1 text-xs leading-5 text-ink-500">
+                        {backup.item_count} items ·{" "}
+                        {formatBytes(backup.total_bytes)} source
+                        {backup.archive_bytes !== null && (
+                          <> · {formatBytes(backup.archive_bytes)} archive</>
+                        )}
+                      </div>
+                      <div className="text-xs leading-5 text-ink-400">
+                        Created {formatBackupDate(backup.created_at)}
+                        {backup.expires_at && (
+                          <> · Expires {formatBackupDate(backup.expires_at)}</>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        disabled={action !== null || backup.status !== "ready"}
+                        onClick={() => onBrowse(backup)}
+                      >
+                        {action === "backup-browse" && expanded
+                          ? "Loading…"
+                          : expanded
+                            ? "Hide notes"
+                            : "Browse notes"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={action !== null || backup.status !== "ready"}
+                        onClick={() => onDownload(backup)}
+                      >
+                        {action === "backup-download"
+                          ? "Saving…"
+                          : "Save archive"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={action !== null || backup.status !== "ready"}
+                        onClick={() => onRestore(backup)}
+                      >
+                        {action === "backup-restore" ? "Restoring…" : "Restore"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={action !== null}
+                        onClick={() => onDelete(backup)}
+                      >
+                        {action === "backup-delete" ? "Deleting…" : "Delete"}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="mt-1 text-xs leading-5 text-ink-500">
-                    {backup.item_count} items ·{" "}
-                    {formatBytes(backup.total_bytes)} source
-                    {backup.archive_bytes !== null && (
-                      <> · {formatBytes(backup.archive_bytes)} archive</>
-                    )}
-                  </div>
-                  <div className="text-xs leading-5 text-ink-400">
-                    Created {formatBackupDate(backup.created_at)}
-                    {backup.expires_at && (
-                      <> · Expires {formatBackupDate(backup.expires_at)}</>
-                    )}
-                  </div>
+
+                  {expanded && (
+                    <div className="border-t border-paper-300/45 bg-paper-100/35 px-5 py-4">
+                      <div className="mb-3 text-xs font-medium uppercase tracking-[0.16em] text-ink-500">
+                        Notes in this backup
+                      </div>
+                      {backupItems.length === 0 ? (
+                        <div className="text-sm text-ink-500">
+                          This backup contains no notes.
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-paper-300/45 overflow-hidden rounded-xl border border-paper-300/50 bg-paper-50/70">
+                          {backupItems.map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-medium text-ink-800">
+                                  {item.path}
+                                </div>
+                                <div className="mt-0.5 text-xs text-ink-500">
+                                  {formatBytes(item.byte_length)} · Revision {item.revision}
+                                </div>
+                              </div>
+                              <Button
+                                variant="secondary"
+                                disabled={action !== null}
+                                onClick={() => onRestoreNote(backup, item)}
+                              >
+                                {action === "backup-note-restore"
+                                  ? "Restoring…"
+                                  : "Restore note"}
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    disabled={action !== null || backup.status !== "ready"}
-                    onClick={() => onDownload(backup)}
-                  >
-                    {action === "backup-download" ? "Saving…" : "Save archive"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={action !== null || backup.status !== "ready"}
-                    onClick={() => onRestore(backup)}
-                  >
-                    {action === "backup-restore" ? "Restoring…" : "Restore"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={action !== null}
-                    onClick={() => onDelete(backup)}
-                  >
-                    {action === "backup-delete" ? "Deleting…" : "Delete"}
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

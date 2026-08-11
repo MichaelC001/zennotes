@@ -77,6 +77,23 @@ async function setup(
       cursor: body.mutations.length
     })),
     listBackups: vi.fn(async () => ({ data: [] })),
+    backupSchedule: vi.fn(async () => ({
+      data: {
+        enabled: false,
+        frequency: 'daily' as const,
+        next_backup_at: null,
+        last_backup_at: null
+      }
+    })),
+    updateBackupSchedule: vi.fn(async (_vaultId: string, enabled: boolean) => ({
+      data: {
+        enabled,
+        frequency: 'daily' as const,
+        next_backup_at: enabled ? '2026-08-11T12:00:00.000Z' : null,
+        last_backup_at: null
+      }
+    })),
+    listBackupItems: vi.fn(async () => ({ data: [] })),
     createBackup: vi.fn(async (_vaultId: string, label?: string) => ({
       data: {
         id: 'backup-1',
@@ -108,6 +125,18 @@ async function setup(
       }
     })),
     backupRestore: vi.fn(),
+    restoreBackupNote: vi.fn(async () => ({
+      data: {
+        id: 'note-restore-1',
+        status: 'completed' as const,
+        item_id: 'item-1',
+        path: 'note.md',
+        revision: 2,
+        cursor: 1,
+        error_code: null,
+        created_at: '2026-08-10T12:00:00.000Z'
+      }
+    })),
     backupDownloadPath: vi.fn(
       (vaultId: string, backupId: string) =>
         `/api/v1/vaults/${vaultId}/backups/${backupId}/download`
@@ -223,6 +252,11 @@ describe('DesktopCloudSyncService', () => {
     await service.link(localRoot, remoteVault.id)
 
     await expect(service.listBackups(localRoot)).resolves.toEqual([])
+    await expect(service.backupSchedule(localRoot)).resolves.toMatchObject({ enabled: false })
+    await expect(service.updateBackupSchedule(localRoot, true)).resolves.toMatchObject({
+      enabled: true
+    })
+    await expect(service.listBackupItems(localRoot, 'backup-1')).resolves.toEqual([])
     await expect(service.createBackup(localRoot, 'Release day')).resolves.toMatchObject({
       id: 'backup-1',
       label: 'Release day'
@@ -232,9 +266,21 @@ describe('DesktopCloudSyncService', () => {
       restore: { status: 'completed' },
       sync: { cursor: 0 }
     })
+    await expect(service.restoreBackupNote(localRoot, 'backup-1', 42)).resolves.toMatchObject({
+      restore: { status: 'completed' },
+      sync: { cursor: 0 }
+    })
 
     expect(client.createBackup).toHaveBeenCalledWith('vault-1', 'Release day')
     expect(client.deleteBackup).toHaveBeenCalledWith('vault-1', 'backup-1')
+    expect(client.updateBackupSchedule).toHaveBeenCalledWith('vault-1', true)
+    expect(client.listBackupItems).toHaveBeenCalledWith('vault-1', 'backup-1')
+    expect(client.restoreBackupNote).toHaveBeenCalledWith(
+      'vault-1',
+      'backup-1',
+      42,
+      expect.objectContaining({ expected_cursor: 0 })
+    )
   })
 
   it('streams an authenticated backup archive to the selected file', async () => {

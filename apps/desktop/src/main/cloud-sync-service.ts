@@ -3,8 +3,11 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type {
   CloudAccountStatus,
+  CloudBackupNoteRestoreResult,
   CloudBackupRestoreResult,
+  CloudBackupSchedule,
   CloudBackupSnapshot,
+  CloudBackupSnapshotItem,
   CloudPublishedNote,
   CloudPublishedNoteResult,
   CloudPublishNoteInput,
@@ -30,10 +33,14 @@ type SyncClient = Pick<
   | 'changes'
   | 'mutate'
   | 'listBackups'
+  | 'backupSchedule'
+  | 'updateBackupSchedule'
+  | 'listBackupItems'
   | 'createBackup'
   | 'deleteBackup'
   | 'createBackupRestore'
   | 'backupRestore'
+  | 'restoreBackupNote'
   | 'backupDownloadPath'
 >
 
@@ -133,6 +140,27 @@ export class DesktopCloudSyncService {
     return (await client.listBackups(link.vault_id)).data
   }
 
+  async backupSchedule(localRoot: string): Promise<CloudBackupSchedule> {
+    const { client, link } = await this.linkedConnection(localRoot)
+    return (await client.backupSchedule(link.vault_id)).data
+  }
+
+  async updateBackupSchedule(
+    localRoot: string,
+    enabled: boolean
+  ): Promise<CloudBackupSchedule> {
+    const { client, link } = await this.linkedConnection(localRoot)
+    return (await client.updateBackupSchedule(link.vault_id, enabled)).data
+  }
+
+  async listBackupItems(
+    localRoot: string,
+    backupId: string
+  ): Promise<CloudBackupSnapshotItem[]> {
+    const { client, link } = await this.linkedConnection(localRoot)
+    return (await client.listBackupItems(link.vault_id, backupId)).data
+  }
+
   async createBackup(localRoot: string, label?: string): Promise<CloudBackupSnapshot> {
     const summary = await this.sync(localRoot)
     assertBackupReady(summary)
@@ -210,6 +238,25 @@ export class DesktopCloudSyncService {
       idempotencyKey: randomUUID,
       sync: () => this.sync(localRoot)
     })
+  }
+
+  async restoreBackupNote(
+    localRoot: string,
+    backupId: string,
+    snapshotItemId: number
+  ): Promise<CloudBackupNoteRestoreResult> {
+    const beforeRestore = await this.sync(localRoot)
+    assertBackupReady(beforeRestore)
+    const { client, link } = await this.linkedConnection(localRoot)
+    const restore = (
+      await client.restoreBackupNote(link.vault_id, backupId, snapshotItemId, {
+        idempotency_key: randomUUID(),
+        expected_cursor: beforeRestore.cursor
+      })
+    ).data
+    const sync = await this.sync(localRoot)
+
+    return { restore, sync }
   }
 
   sync(localRoot: string): Promise<CloudSyncRunSummary> {
