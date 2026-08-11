@@ -1,0 +1,1424 @@
+import { useCallback, useEffect, useState } from "react";
+import type {
+  CloudAccountStatus,
+  CloudBackupRestoreResult,
+  CloudBackupSnapshot,
+  CloudPublishedNote,
+  CloudServiceAccount,
+  CloudSyncRunSummary,
+  CloudSyncVault,
+  CloudUsage,
+  CloudVaultLink,
+} from "@zennotes/bridge-contract/cloud-sync";
+import { getZenBridge } from "@zennotes/bridge-contract/bridge";
+import { confirmApp } from "../lib/confirm-requests";
+import {
+  requestCloudAutoSync,
+  syncCloudVaultWithStatus,
+} from "../lib/cloud-auto-sync";
+import { useToastStore } from "../lib/toast";
+import { Button } from "./ui/Button";
+
+type CloudAction =
+  | "connect"
+  | "logout"
+  | "link"
+  | "unlink"
+  | "sync"
+  | "backup-create"
+  | "backup-download"
+  | "backup-delete"
+  | "backup-restore"
+  | "backup-refresh"
+  | "publish-refresh"
+  | "publish-delete"
+  | null;
+
+export function CloudSettings({
+  localVaultAvailable,
+  localVaultName,
+}: {
+  localVaultAvailable: boolean;
+  localVaultName: string;
+}): JSX.Element {
+  const [bridge] = useState(() => getZenBridge());
+  const [status, setStatus] = useState<CloudAccountStatus | null>(null);
+  const [serviceAccount, setServiceAccount] =
+    useState<CloudServiceAccount | null>(null);
+  const [cloudVaults, setCloudVaults] = useState<CloudSyncVault[]>([]);
+  const [link, setLink] = useState<CloudVaultLink | null>(null);
+  const [selectedVaultId, setSelectedVaultId] = useState("");
+  const [newVaultName, setNewVaultName] = useState(localVaultName);
+  const [summary, setSummary] = useState<CloudSyncRunSummary | null>(null);
+  const [backups, setBackups] = useState<CloudBackupSnapshot[]>([]);
+  const [publishedNotes, setPublishedNotes] = useState<CloudPublishedNote[]>(
+    [],
+  );
+  const [backupLabel, setBackupLabel] = useState("");
+  const [restoreResult, setRestoreResult] =
+    useState<CloudBackupRestoreResult | null>(null);
+  const [loadingBackups, setLoadingBackups] = useState(false);
+  const [loadingPublishedNotes, setLoadingPublishedNotes] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [action, setAction] = useState<CloudAction>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadStatus = useCallback(
+    async (nextStatus?: CloudAccountStatus): Promise<void> => {
+      const next = nextStatus ?? (await bridge.getCloudAccountStatus());
+      setStatus(next);
+      setError(null);
+
+      if (next.state !== "connected") {
+        setServiceAccount(null);
+        setCloudVaults([]);
+        setLink(null);
+        setSummary(null);
+        setBackups([]);
+        setPublishedNotes([]);
+        setRestoreResult(null);
+        return;
+      }
+
+      setLoadingDetails(true);
+      try {
+        const account = await bridge.getCloudServiceAccount();
+        setServiceAccount(account);
+
+        if (!account.features.sync.active || !localVaultAvailable) {
+          setCloudVaults([]);
+          setLink(null);
+          return;
+        }
+
+        const [availableVaults, currentLink] = await Promise.all([
+          bridge.listCloudVaults(),
+          bridge.getCloudVaultLink(),
+        ]);
+        setCloudVaults(availableVaults);
+        setLink(currentLink);
+        setSelectedVaultId((current) =>
+          availableVaults.some((vault) => vault.id === current)
+            ? current
+            : (availableVaults[0]?.id ?? ""),
+        );
+      } catch (cause) {
+        setError(errorMessage(cause, "Could not load ZenNotes Cloud."));
+      } finally {
+        setLoadingDetails(false);
+      }
+    },
+    [bridge, localVaultAvailable],
+  );
+
+  useEffect(() => {
+    void loadStatus().catch((cause) => {
+      setError(errorMessage(cause, "Could not load ZenNotes Cloud."));
+    });
+    return bridge.onCloudAccountChange((next) => {
+      void loadStatus(next);
+    });
+  }, [bridge, loadStatus]);
+
+  const refreshServiceAccount = useCallback(async (): Promise<void> => {
+    try {
+      setServiceAccount(await bridge.getCloudServiceAccount());
+    } catch {
+      // Usage is supplementary; the next account refresh will retry it.
+    }
+  }, [bridge]);
+
+  const backupIncluded = serviceAccount?.features.backup.active === true;
+  const publishIncluded = serviceAccount?.features.publish.active === true;
+  const connectedBaseUrl =
+    status?.state === "connected" ? (status.account?.base_url ?? null) : null;
+  const linkMismatch =
+    link !== null &&
+    connectedBaseUrl !== null &&
+    link.base_url !== connectedBaseUrl;
+  const activeLink = linkMismatch ? null : link;
+
+  const loadPublishedNotes = useCallback(async (): Promise<void> => {
+    if (!publishIncluded) {
+      setPublishedNotes([]);
+      return;
+    }
+
+    setLoadingPublishedNotes(true);
+    try {
+      setPublishedNotes(await bridge.listCloudPublishedNotes());
+      await refreshServiceAccount();
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not load published notes."));
+    } finally {
+      setLoadingPublishedNotes(false);
+    }
+  }, [bridge, publishIncluded, refreshServiceAccount]);
+
+  useEffect(() => {
+    void loadPublishedNotes();
+  }, [loadPublishedNotes]);
+
+  const loadBackups = useCallback(async (): Promise<void> => {
+    if (!backupIncluded || !activeLink) {
+      setBackups([]);
+      return;
+    }
+
+    setLoadingBackups(true);
+    try {
+      setBackups(await bridge.listCloudBackups());
+      await refreshServiceAccount();
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not load cloud backups."));
+    } finally {
+      setLoadingBackups(false);
+    }
+  }, [activeLink, backupIncluded, bridge, refreshServiceAccount]);
+
+  useEffect(() => {
+    void loadBackups();
+  }, [loadBackups]);
+
+  useEffect(() => {
+    if (
+      !backups.some(
+        (backup) => backup.status === "pending" || backup.status === "building",
+      )
+    ) {
+      return;
+    }
+    const timeout = window.setTimeout(() => void loadBackups(), 3_000);
+    return () => window.clearTimeout(timeout);
+  }, [backups, loadBackups]);
+
+  const runAction = async (
+    nextAction: Exclude<CloudAction, null>,
+    operation: () => Promise<void>,
+  ): Promise<void> => {
+    setAction(nextAction);
+    setError(null);
+    try {
+      await operation();
+    } catch (cause) {
+      setError(
+        errorMessage(cause, "ZenNotes Cloud could not complete that action."),
+      );
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const connect = (): Promise<void> =>
+    runAction("connect", async () => {
+      await bridge.connectCloudAccount();
+      await loadStatus();
+    });
+
+  const logout = (): Promise<void> =>
+    runAction("logout", async () => {
+      await loadStatus(await bridge.logoutCloudAccount());
+    });
+
+  const linkSelectedVault = (): Promise<void> =>
+    runAction("link", async () => {
+      if (!selectedVaultId) return;
+      setLink(await bridge.linkCloudVault(selectedVaultId));
+      setSummary(null);
+      requestCloudAutoSync("vault-link");
+    });
+
+  const createAndLinkVault = (): Promise<void> =>
+    runAction("link", async () => {
+      const name = newVaultName.trim();
+      if (!name) throw new Error("Enter a name for the cloud vault.");
+      const createdLink = await bridge.createAndLinkCloudVault(name);
+      setLink(createdLink);
+      setCloudVaults((current) => [
+        ...current,
+        {
+          id: createdLink.vault_id,
+          name: createdLink.vault_name,
+          cursor: 0,
+          created_at: createdLink.linked_at,
+          updated_at: createdLink.linked_at,
+        },
+      ]);
+      setSelectedVaultId(createdLink.vault_id);
+      setSummary(null);
+      requestCloudAutoSync("vault-link");
+    });
+
+  const unlinkVault = (): Promise<void> =>
+    runAction("unlink", async () => {
+      await bridge.unlinkCloudVault();
+      setLink(null);
+      setSummary(null);
+      setBackups([]);
+      setRestoreResult(null);
+    });
+
+  const syncVault = (): Promise<void> =>
+    runAction("sync", async () => {
+      setSummary(await syncCloudVaultWithStatus(bridge, link?.vault_name));
+    });
+
+  const createBackup = (): Promise<void> =>
+    runAction("backup-create", async () => {
+      const label = backupLabel.trim() || undefined;
+      const created = await bridge.createCloudBackup(label);
+      setBackups((current) => [
+        created,
+        ...current.filter((backup) => backup.id !== created.id),
+      ]);
+      setBackupLabel("");
+      setRestoreResult(null);
+      await refreshServiceAccount();
+    });
+
+  const refreshBackups = (): Promise<void> =>
+    runAction("backup-refresh", loadBackups);
+
+  const refreshPublishedNotes = (): Promise<void> =>
+    runAction("publish-refresh", loadPublishedNotes);
+
+  const copyPublishedLink = (note: CloudPublishedNote): void => {
+    bridge.clipboardWriteText(note.url);
+    useToastStore.getState().addToast("Public link copied.", "success");
+  };
+
+  const unpublishNote = async (note: CloudPublishedNote): Promise<void> => {
+    const confirmed = await confirmApp({
+      title: `Unpublish ${note.title}?`,
+      description:
+        "The public link will stop working. Your local and synced note are not changed.",
+      confirmLabel: "Unpublish",
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    await runAction("publish-delete", async () => {
+      await bridge.unpublishCloudNote(note.id);
+      setPublishedNotes((current) =>
+        current.filter((candidate) => candidate.id !== note.id),
+      );
+      await refreshServiceAccount();
+    });
+  };
+
+  const deleteBackup = async (backup: CloudBackupSnapshot): Promise<void> => {
+    const confirmed = await confirmApp({
+      title: "Delete this cloud backup?",
+      description:
+        "This removes the recovery archive permanently. Your synced vault is not changed.",
+      confirmLabel: "Delete backup",
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    await runAction("backup-delete", async () => {
+      await bridge.deleteCloudBackup(backup.id);
+      setBackups((current) =>
+        current.filter((candidate) => candidate.id !== backup.id),
+      );
+      setRestoreResult(null);
+      await refreshServiceAccount();
+    });
+  };
+
+  const downloadBackup = (backup: CloudBackupSnapshot): Promise<void> =>
+    runAction("backup-download", async () => {
+      await bridge.downloadCloudBackup(backup.id);
+    });
+
+  const restoreBackup = async (backup: CloudBackupSnapshot): Promise<void> => {
+    const confirmed = await confirmApp({
+      title: `Restore ${backup.label || "this backup"}?`,
+      description:
+        "ZenNotes will replace the linked cloud vault with this snapshot, then sync the restored contents to this device. Changes made after the backup may be removed.",
+      confirmLabel: "Restore backup",
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    await runAction("backup-restore", async () => {
+      const result = await bridge.restoreCloudBackup(backup.id);
+      setRestoreResult(result);
+      if (result.sync) setSummary(result.sync);
+      await loadBackups();
+    });
+  };
+
+  if (status === null) {
+    return <CloudLoadingState />;
+  }
+
+  return (
+    <div className="space-y-6">
+      {error && (
+        <div
+          role="alert"
+          className="rounded-xl border border-danger/35 bg-danger/10 px-4 py-3 text-sm leading-6 text-danger"
+        >
+          {error}
+        </div>
+      )}
+
+      {status.state === "disconnected" && (
+        <CloudDisconnected
+          busy={action === "connect"}
+          onConnect={() => void connect()}
+        />
+      )}
+
+      {status.state === "connecting" && (
+        <CloudConnecting
+          busy={action === "logout"}
+          onCancel={() => void logout()}
+        />
+      )}
+
+      {status.state === "connected" && status.account && (
+        <>
+          <section
+            data-settings-search-id="cloud-account"
+            className="overflow-hidden rounded-3xl border border-paper-300/60 bg-paper-50/45"
+          >
+            <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-ink-900">
+                  {status.account.user.name}
+                </div>
+                <div className="mt-1 truncate text-xs text-ink-500">
+                  {status.account.user.email}
+                </div>
+                <div className="mt-1 truncate text-xs text-ink-400">
+                  {status.account.device.name} · {status.account.base_url}
+                </div>
+              </div>
+              <Button
+                variant="secondary"
+                disabled={action !== null}
+                onClick={() => void logout()}
+              >
+                {action === "logout" ? "Disconnecting…" : "Disconnect"}
+              </Button>
+            </div>
+          </section>
+
+          {loadingDetails && !serviceAccount ? (
+            <CloudLoadingState compact />
+          ) : serviceAccount ? (
+            <>
+              <CloudFeatureList account={serviceAccount} />
+              <CloudUsageSummary account={serviceAccount} />
+              <CloudVaultPanel
+                action={action}
+                cloudVaults={cloudVaults}
+                currentBaseUrl={status.account.base_url}
+                link={link}
+                linkMismatch={linkMismatch}
+                localVaultAvailable={localVaultAvailable}
+                newVaultName={newVaultName}
+                selectedVaultId={selectedVaultId}
+                summary={summary}
+                onCreateAndLink={() => void createAndLinkVault()}
+                onLink={() => void linkSelectedVault()}
+                onNewVaultNameChange={setNewVaultName}
+                onSelectedVaultChange={setSelectedVaultId}
+                onSync={() => void syncVault()}
+                onUnlink={() => void unlinkVault()}
+                onUseAnotherAccount={() => void logout()}
+                syncIncluded={serviceAccount.features.sync.active}
+              />
+              <CloudPublishedNotesPanel
+                action={action}
+                loading={loadingPublishedNotes}
+                notes={publishedNotes}
+                publishedBytes={serviceAccount.usage?.storage.publish_bytes}
+                publishIncluded={publishIncluded}
+                usage={serviceAccount.usage?.publish}
+                onCopy={copyPublishedLink}
+                onOpen={(note) => window.open(note.url, "_blank")}
+                onRefresh={() => void refreshPublishedNotes()}
+                onUnpublish={(note) => void unpublishNote(note)}
+              />
+              <CloudBackupPanel
+                action={action}
+                backupIncluded={backupIncluded}
+                backupLabel={backupLabel}
+                backups={backups}
+                limits={serviceAccount.features.backup.limits}
+                link={activeLink}
+                loading={loadingBackups}
+                restoreResult={restoreResult}
+                onBackupLabelChange={setBackupLabel}
+                onCreate={() => void createBackup()}
+                onDelete={(backup) => void deleteBackup(backup)}
+                onDownload={(backup) => void downloadBackup(backup)}
+                onRefresh={() => void refreshBackups()}
+                onRestore={(backup) => void restoreBackup(backup)}
+              />
+            </>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
+function CloudPublishedNotesPanel({
+  action,
+  loading,
+  notes,
+  publishedBytes,
+  publishIncluded,
+  usage,
+  onCopy,
+  onOpen,
+  onRefresh,
+  onUnpublish,
+}: {
+  action: CloudAction;
+  loading: boolean;
+  notes: CloudPublishedNote[];
+  publishedBytes?: number;
+  publishIncluded: boolean;
+  usage?: CloudUsage["publish"];
+  onCopy: (note: CloudPublishedNote) => void;
+  onOpen: (note: CloudPublishedNote) => void;
+  onRefresh: () => void;
+  onUnpublish: (note: CloudPublishedNote) => void;
+}): JSX.Element {
+  if (!publishIncluded) {
+    return (
+      <CloudNotice>
+        Publishing is not included in this subscription.
+      </CloudNotice>
+    );
+  }
+
+  return (
+    <section
+      data-settings-search-id="cloud-published-notes"
+      aria-labelledby="cloud-published-notes-heading"
+      className="space-y-3"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3
+            id="cloud-published-notes-heading"
+            className="text-xs font-medium uppercase tracking-[0.2em] text-ink-500"
+          >
+            Published notes
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-ink-500">
+            {usage
+              ? `${pluralize(usage.notes, "published note")} · ${pluralize(usage.views, "view")} · ${pluralize(usage.assets, "asset")} using ${formatBytes(publishedBytes ?? 0)}.`
+              : "Anyone with a link can view a published note until you unpublish it."}
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          disabled={action !== null || loading}
+          onClick={onRefresh}
+        >
+          {action === "publish-refresh" || loading ? "Refreshing…" : "Refresh"}
+        </Button>
+      </div>
+
+      <div className="overflow-hidden rounded-3xl border border-paper-300/60 bg-paper-50/45">
+        {notes.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-ink-500">
+            {loading ? "Loading published notes…" : "No published notes yet."}
+          </div>
+        ) : (
+          <div className="divide-y divide-paper-300/45">
+            {notes.map((note) => (
+              <div
+                key={note.id}
+                className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-ink-900">
+                    {note.title}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-500">
+                    {note.note_path && (
+                      <span className="truncate">{note.note_path}</span>
+                    )}
+                    <span>
+                      {note.view_count}{" "}
+                      {note.view_count === 1 ? "view" : "views"}
+                    </span>
+                    {note.updated_at && (
+                      <span>
+                        Updated {formatCloudVaultDate(note.updated_at)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    disabled={action !== null}
+                    onClick={() => onCopy(note)}
+                  >
+                    Copy link
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={action !== null}
+                    onClick={() => onOpen(note)}
+                  >
+                    Open
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={action !== null}
+                    onClick={() => onUnpublish(note)}
+                  >
+                    {action === "publish-delete"
+                      ? "Unpublishing…"
+                      : "Unpublish"}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CloudDisconnected({
+  busy,
+  onConnect,
+}: {
+  busy: boolean;
+  onConnect: () => void;
+}): JSX.Element {
+  return (
+    <section className="overflow-hidden rounded-3xl border border-paper-300/60 bg-paper-50/45">
+      <div className="flex flex-col gap-5 px-5 py-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="max-w-xl">
+          <h3 className="text-base font-semibold text-ink-900">
+            Keep your vault available everywhere
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-ink-500">
+            Connect your ZenNotes account to sync this vault, create recoverable
+            backups, and publish notes included in your plan.
+          </p>
+        </div>
+        <Button variant="primary" size="md" disabled={busy} onClick={onConnect}>
+          {busy ? "Opening browser…" : "Connect ZenNotes Cloud"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function CloudConnecting({
+  busy,
+  onCancel,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+}): JSX.Element {
+  return (
+    <section className="overflow-hidden rounded-3xl border border-accent/25 bg-accent/5">
+      <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-ink-900">
+            Finish signing in in your browser
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-ink-500">
+            Return to ZenNotes after approving this device. The request expires
+            after five minutes.
+          </p>
+        </div>
+        <Button variant="secondary" disabled={busy} onClick={onCancel}>
+          {busy ? "Cancelling…" : "Cancel sign-in"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function CloudFeatureList({
+  account,
+}: {
+  account: CloudServiceAccount;
+}): JSX.Element {
+  const features = [
+    ["Sync", account.features.sync.active],
+    ["Backup", account.features.backup.active],
+    ["Publish", account.features.publish.active],
+  ] as const;
+
+  return (
+    <section
+      data-settings-search-id="cloud-plan"
+      aria-labelledby="cloud-plan-heading"
+      className="space-y-3"
+    >
+      <div>
+        <h3
+          id="cloud-plan-heading"
+          className="text-xs font-medium uppercase tracking-[0.2em] text-ink-500"
+        >
+          Current plan
+        </h3>
+        <p className="mt-1 text-sm leading-6 text-ink-500">
+          Access is checked by the service on every request, independent of this
+          device.
+        </p>
+      </div>
+      <div className="grid gap-px overflow-hidden rounded-2xl border border-paper-300/60 bg-paper-300/60 sm:grid-cols-3">
+        {features.map(([label, active]) => (
+          <div
+            key={label}
+            className="flex items-center justify-between gap-3 bg-paper-50 px-4 py-3"
+          >
+            <span className="text-sm font-medium text-ink-800">{label}</span>
+            <span
+              className={
+                active
+                  ? "text-xs font-medium text-accent"
+                  : "text-xs text-ink-400"
+              }
+            >
+              {active ? "Included" : "Not included"}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CloudUsageSummary({
+  account,
+}: {
+  account: CloudServiceAccount;
+}): JSX.Element | null {
+  const usage = account.usage;
+  if (!usage) return null;
+
+  const syncLimit = numericLimit(
+    account.features.sync.limits,
+    "max_storage_bytes",
+  );
+  const retentionDays = numericLimit(
+    account.features.backup.limits,
+    "retention_days",
+  );
+  const syncPercent =
+    syncLimit && syncLimit > 0
+      ? Math.min(100, (usage.storage.sync_bytes / syncLimit) * 100)
+      : null;
+
+  return (
+    <section
+      data-settings-search-id="cloud-usage"
+      aria-labelledby="cloud-usage-heading"
+      className="space-y-3"
+    >
+      <div>
+        <h3
+          id="cloud-usage-heading"
+          className="text-xs font-medium uppercase tracking-[0.2em] text-ink-500"
+        >
+          Cloud storage
+        </h3>
+        <p className="mt-1 text-sm leading-6 text-ink-500">
+          {formatBytes(usage.storage.total_bytes)} stored across synced notes,
+          backup archives, and published assets.
+        </p>
+      </div>
+
+      <div className="grid gap-px overflow-hidden rounded-2xl border border-paper-300/60 bg-paper-300/60 sm:grid-cols-3">
+        <CloudUsageCard
+          label="Synced notes"
+          value={
+            syncLimit
+              ? `${formatBytes(usage.storage.sync_bytes)} of ${formatBytes(syncLimit)}`
+              : formatBytes(usage.storage.sync_bytes)
+          }
+          detail={`${pluralize(usage.sync.items, "synced note")} across ${pluralize(usage.sync.vaults, "vault")}`}
+          percent={syncPercent}
+        />
+        <CloudUsageCard
+          label="Backups"
+          value={formatBytes(usage.storage.backup_bytes)}
+          detail={`${pluralize(usage.backup.snapshots, "backup")}${retentionDays ? ` · ${retentionDays}-day retention` : ""}`}
+        />
+        <CloudUsageCard
+          label="Publishing"
+          value={formatBytes(usage.storage.publish_bytes)}
+          detail={`${pluralize(usage.publish.notes, "published note")} · ${pluralize(usage.publish.views, "view")}`}
+        />
+      </div>
+    </section>
+  );
+}
+
+function CloudUsageCard({
+  detail,
+  label,
+  percent,
+  value,
+}: {
+  detail: string;
+  label: string;
+  percent?: number | null;
+  value: string;
+}): JSX.Element {
+  return (
+    <div className="bg-paper-50 px-4 py-4">
+      <div className="text-xs font-medium text-ink-500">{label}</div>
+      <div className="mt-1 text-base font-semibold text-ink-900">{value}</div>
+      {percent !== null && percent !== undefined && (
+        <div
+          role="progressbar"
+          aria-label={`${label} storage`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(percent)}
+          className="mt-3 h-1 overflow-hidden rounded-full bg-paper-300/65"
+        >
+          <div
+            className="h-full rounded-full bg-accent"
+            style={{ width: `${Math.max(percent, 0.5)}%` }}
+          />
+        </div>
+      )}
+      <div className="mt-2 text-xs leading-5 text-ink-500">{detail}</div>
+    </div>
+  );
+}
+
+function CloudVaultPanel({
+  action,
+  cloudVaults,
+  currentBaseUrl,
+  link,
+  linkMismatch,
+  localVaultAvailable,
+  newVaultName,
+  selectedVaultId,
+  summary,
+  syncIncluded,
+  onCreateAndLink,
+  onLink,
+  onNewVaultNameChange,
+  onSelectedVaultChange,
+  onSync,
+  onUnlink,
+  onUseAnotherAccount,
+}: {
+  action: CloudAction;
+  cloudVaults: CloudSyncVault[];
+  currentBaseUrl: string;
+  link: CloudVaultLink | null;
+  linkMismatch: boolean;
+  localVaultAvailable: boolean;
+  newVaultName: string;
+  selectedVaultId: string;
+  summary: CloudSyncRunSummary | null;
+  syncIncluded: boolean;
+  onCreateAndLink: () => void;
+  onLink: () => void;
+  onNewVaultNameChange: (value: string) => void;
+  onSelectedVaultChange: (value: string) => void;
+  onSync: () => void;
+  onUnlink: () => void;
+  onUseAnotherAccount: () => void;
+}): JSX.Element {
+  if (!syncIncluded) {
+    return (
+      <CloudNotice>Sync is not included in this subscription.</CloudNotice>
+    );
+  }
+  if (!localVaultAvailable) {
+    return (
+      <CloudNotice>
+        Save this folder as a local vault before linking it to ZenNotes Cloud.
+      </CloudNotice>
+    );
+  }
+
+  return (
+    <section
+      data-settings-search-id="cloud-vault"
+      aria-labelledby="cloud-vault-heading"
+      className="space-y-3"
+    >
+      <div>
+        <h3
+          id="cloud-vault-heading"
+          className="text-xs font-medium uppercase tracking-[0.2em] text-ink-500"
+        >
+          This vault
+        </h3>
+        <p className="mt-1 text-sm leading-6 text-ink-500">
+          A local vault links to one cloud vault. Nothing syncs until you choose
+          a destination.
+        </p>
+      </div>
+
+      <div className="overflow-hidden rounded-3xl border border-paper-300/60 bg-paper-50/45">
+        {link && linkMismatch ? (
+          <div className="divide-y divide-paper-300/45">
+            <div role="status" className="space-y-4 bg-accent/5 px-5 py-5">
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold text-ink-900">
+                  Move this vault to the current account
+                </h4>
+                <p className="text-sm leading-6 text-ink-600">
+                  This vault was linked to{" "}
+                  <span className="break-all font-mono text-xs text-ink-800">
+                    {link.base_url}
+                  </span>
+                  . You’re now connected to{" "}
+                  <span className="break-all font-mono text-xs text-ink-800">
+                    {currentBaseUrl}
+                  </span>
+                  .
+                </p>
+                <p className="text-sm leading-6 text-ink-500">
+                  Your local notes stay on this device. The old link is replaced
+                  only after the new cloud vault is ready.
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                disabled={action !== null}
+                onClick={onUseAnotherAccount}
+              >
+                {action === "logout" ? "Disconnecting…" : "Use another account"}
+              </Button>
+            </div>
+            <CloudVaultDestinationOptions
+              action={action}
+              cloudVaults={cloudVaults}
+              moving
+              newVaultName={newVaultName}
+              selectedVaultId={selectedVaultId}
+              onCreateAndLink={onCreateAndLink}
+              onLink={onLink}
+              onNewVaultNameChange={onNewVaultNameChange}
+              onSelectedVaultChange={onSelectedVaultChange}
+            />
+          </div>
+        ) : link ? (
+          <div className="space-y-4 px-5 py-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-ink-900">
+                  Linked to {link.vault_name}
+                </div>
+                <div className="mt-1 text-xs text-ink-500">
+                  Syncs automatically on this device.
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="ghost"
+                  disabled={action !== null}
+                  onClick={onUnlink}
+                >
+                  {action === "unlink" ? "Unlinking…" : "Unlink"}
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={action !== null}
+                  onClick={onSync}
+                >
+                  {action === "sync" ? "Syncing…" : "Sync now"}
+                </Button>
+              </div>
+            </div>
+            {summary && <CloudSyncSummary summary={summary} />}
+          </div>
+        ) : (
+          <CloudVaultDestinationOptions
+            action={action}
+            cloudVaults={cloudVaults}
+            moving={false}
+            newVaultName={newVaultName}
+            selectedVaultId={selectedVaultId}
+            onCreateAndLink={onCreateAndLink}
+            onLink={onLink}
+            onNewVaultNameChange={onNewVaultNameChange}
+            onSelectedVaultChange={onSelectedVaultChange}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CloudVaultDestinationOptions({
+  action,
+  cloudVaults,
+  moving,
+  newVaultName,
+  selectedVaultId,
+  onCreateAndLink,
+  onLink,
+  onNewVaultNameChange,
+  onSelectedVaultChange,
+}: {
+  action: CloudAction;
+  cloudVaults: CloudSyncVault[];
+  moving: boolean;
+  newVaultName: string;
+  selectedVaultId: string;
+  onCreateAndLink: () => void;
+  onLink: () => void;
+  onNewVaultNameChange: (value: string) => void;
+  onSelectedVaultChange: (value: string) => void;
+}): JSX.Element {
+  const selectedVault =
+    cloudVaults.find((vault) => vault.id === selectedVaultId) ??
+    cloudVaults[0] ??
+    null;
+
+  return (
+    <div className="divide-y divide-paper-300/45">
+      {cloudVaults.length > 0 && (
+        <div className="space-y-4 px-5 py-5">
+          <div>
+            <h4 className="text-sm font-semibold text-ink-900">
+              {moving
+                ? "Move to an existing cloud vault"
+                : "Continue with your cloud vault"}
+            </h4>
+            <p className="mt-1 text-sm leading-6 text-ink-500">
+              {moving
+                ? "Choose where this device should sync next."
+                : "Open the same notes you use on your other devices."}
+            </p>
+          </div>
+
+          {cloudVaults.length > 1 && (
+            <select
+              id="cloud-vault-select"
+              aria-label="Cloud vault"
+              value={selectedVaultId}
+              disabled={action !== null}
+              onChange={(event) => onSelectedVaultChange(event.target.value)}
+              className="w-full rounded-lg border border-paper-300 bg-paper-50 px-3 py-2 text-sm text-ink-900 outline-none focus:border-accent disabled:opacity-50"
+            >
+              {cloudVaults.map((vault) => (
+                <option key={vault.id} value={vault.id}>
+                  {vault.name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <div className="flex flex-col gap-4 rounded-2xl border border-paper-300/60 bg-paper-100/45 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium text-ink-900">
+                {selectedVault?.name}
+              </div>
+              {selectedVault && (
+                <div className="mt-1 text-xs text-ink-500">
+                  Updated {formatCloudVaultDate(selectedVault.updated_at)}
+                </div>
+              )}
+            </div>
+            <Button
+              variant="primary"
+              disabled={!selectedVaultId || action !== null}
+              onClick={onLink}
+            >
+              {action === "link"
+                ? moving
+                  ? "Moving…"
+                  : "Opening…"
+                : moving
+                  ? "Move here"
+                  : "Open on this device"}
+            </Button>
+          </div>
+
+          {!moving && (
+            <p className="text-xs leading-5 text-ink-500">
+              Notes already on this device are merged safely. If the same note
+              changed in both places, ZenNotes keeps a conflict copy for review.
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="space-y-3 px-5 py-5">
+        <label
+          htmlFor="new-cloud-vault-name"
+          className="text-sm font-medium text-ink-800"
+        >
+          {cloudVaults.length > 0
+            ? "Start a separate cloud vault"
+            : "Create a new cloud vault"}
+        </label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            id="new-cloud-vault-name"
+            value={newVaultName}
+            maxLength={120}
+            disabled={action !== null}
+            onChange={(event) => onNewVaultNameChange(event.target.value)}
+            className="min-w-0 flex-1 rounded-lg border border-paper-300 bg-paper-50 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent disabled:opacity-50"
+            placeholder="My notes"
+          />
+          <Button
+            disabled={!newVaultName.trim() || action !== null}
+            onClick={onCreateAndLink}
+          >
+            {action === "link"
+              ? "Creating…"
+              : moving
+                ? "Create and move"
+                : "Create and link"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CloudBackupPanel({
+  action,
+  backupIncluded,
+  backupLabel,
+  backups,
+  limits,
+  link,
+  loading,
+  restoreResult,
+  onBackupLabelChange,
+  onCreate,
+  onDelete,
+  onDownload,
+  onRefresh,
+  onRestore,
+}: {
+  action: CloudAction;
+  backupIncluded: boolean;
+  backupLabel: string;
+  backups: CloudBackupSnapshot[];
+  limits: Record<string, unknown> | null;
+  link: CloudVaultLink | null;
+  loading: boolean;
+  restoreResult: CloudBackupRestoreResult | null;
+  onBackupLabelChange: (value: string) => void;
+  onCreate: () => void;
+  onDelete: (backup: CloudBackupSnapshot) => void;
+  onDownload: (backup: CloudBackupSnapshot) => void;
+  onRefresh: () => void;
+  onRestore: (backup: CloudBackupSnapshot) => void;
+}): JSX.Element {
+  if (!backupIncluded) {
+    return (
+      <CloudNotice>Backups are not included in this subscription.</CloudNotice>
+    );
+  }
+  if (!link) {
+    return (
+      <CloudNotice>Link this vault before creating cloud backups.</CloudNotice>
+    );
+  }
+
+  const maxSnapshots = numericLimit(limits, "max_snapshots");
+  const maxSnapshotBytes = numericLimit(limits, "max_snapshot_bytes");
+  const retentionDays = numericLimit(limits, "retention_days");
+  const backupPolicy = [
+    maxSnapshots ? `Up to ${maxSnapshots} backups per vault` : null,
+    retentionDays ? `kept for ${retentionDays} days` : null,
+    maxSnapshotBytes
+      ? `${formatBytes(maxSnapshotBytes)} maximum per backup`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <section
+      data-settings-search-id="cloud-backups"
+      aria-labelledby="cloud-backups-heading"
+      className="space-y-3"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3
+            id="cloud-backups-heading"
+            className="text-xs font-medium uppercase tracking-[0.2em] text-ink-500"
+          >
+            Backups
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-ink-500">
+            {backupPolicy || "Create a recovery point from the synced vault."}
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          disabled={action !== null || loading}
+          onClick={onRefresh}
+        >
+          {action === "backup-refresh" || loading ? "Refreshing…" : "Refresh"}
+        </Button>
+      </div>
+
+      {restoreResult && <CloudRestoreResult result={restoreResult} />}
+
+      <div className="overflow-hidden rounded-3xl border border-paper-300/60 bg-paper-50/45">
+        <div className="flex flex-col gap-2 border-b border-paper-300/45 px-5 py-5 sm:flex-row">
+          <input
+            aria-label="Backup label"
+            value={backupLabel}
+            maxLength={120}
+            disabled={action !== null}
+            onChange={(event) => onBackupLabelChange(event.target.value)}
+            className="min-w-0 flex-1 rounded-lg border border-paper-300 bg-paper-50 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent disabled:opacity-50"
+            placeholder="Before a major edit"
+          />
+          <Button disabled={action !== null} onClick={onCreate}>
+            {action === "backup-create" ? "Creating…" : "Create backup"}
+          </Button>
+        </div>
+
+        {backups.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-ink-500">
+            {loading ? "Loading backups…" : "No backups yet."}
+          </div>
+        ) : (
+          <div className="divide-y divide-paper-300/45">
+            {backups.map((backup) => (
+              <div
+                key={backup.id}
+                className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-sm font-medium text-ink-900">
+                      {backup.label ||
+                        `Backup from ${formatBackupDate(backup.created_at)}`}
+                    </span>
+                    <CloudBackupStatus status={backup.status} />
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-ink-500">
+                    {backup.item_count} items ·{" "}
+                    {formatBytes(backup.total_bytes)} source
+                    {backup.archive_bytes !== null && (
+                      <> · {formatBytes(backup.archive_bytes)} archive</>
+                    )}
+                  </div>
+                  <div className="text-xs leading-5 text-ink-400">
+                    Created {formatBackupDate(backup.created_at)}
+                    {backup.expires_at && (
+                      <> · Expires {formatBackupDate(backup.expires_at)}</>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    disabled={action !== null || backup.status !== "ready"}
+                    onClick={() => onDownload(backup)}
+                  >
+                    {action === "backup-download" ? "Saving…" : "Save archive"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={action !== null || backup.status !== "ready"}
+                    onClick={() => onRestore(backup)}
+                  >
+                    {action === "backup-restore" ? "Restoring…" : "Restore"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={action !== null}
+                    onClick={() => onDelete(backup)}
+                  >
+                    {action === "backup-delete" ? "Deleting…" : "Delete"}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CloudBackupStatus({
+  status,
+}: {
+  status: CloudBackupSnapshot["status"];
+}): JSX.Element {
+  const label =
+    status === "ready" ? "Ready" : status === "failed" ? "Failed" : "Preparing";
+  return (
+    <span
+      className={
+        status === "ready"
+          ? "rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent"
+          : status === "failed"
+            ? "rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger"
+            : "rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning"
+      }
+    >
+      {label}
+    </span>
+  );
+}
+
+function CloudRestoreResult({
+  result,
+}: {
+  result: CloudBackupRestoreResult;
+}): JSX.Element {
+  if (result.restore.status === "completed") {
+    return (
+      <div
+        role="status"
+        className="rounded-xl border border-accent/25 bg-accent/5 px-4 py-3 text-sm text-ink-700"
+      >
+        Restored {result.restore.restored_items} items and removed{" "}
+        {result.restore.deleted_items} newer items. This vault is synced to
+        cursor {result.sync?.cursor ?? result.restore.end_cursor}.
+      </div>
+    );
+  }
+
+  const message =
+    result.restore.status === "conflict"
+      ? "The cloud vault changed before restore began, so nothing was replaced. Refresh and try again."
+      : result.restore.error?.message || "The backup could not be restored.";
+  return (
+    <div
+      role="alert"
+      className="rounded-xl border border-danger/35 bg-danger/10 px-4 py-3 text-sm text-danger"
+    >
+      {message}
+    </div>
+  );
+}
+
+function formatBackupDate(value: string): string {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleString() : value;
+}
+
+function formatCloudVaultDate(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+
+  const elapsedMs = Date.now() - date.getTime();
+  const elapsedMinutes = Math.max(0, Math.floor(elapsedMs / 60_000));
+  if (elapsedMinutes < 1) return "just now";
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 7) return `${elapsedDays}d ago`;
+
+  return date.toLocaleDateString();
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const unitIndex = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1,
+  );
+  if (unitIndex === 0) return `${Math.round(bytes)} B`;
+  return `${(bytes / 1024 ** unitIndex).toFixed(1)} ${units[unitIndex]}`;
+}
+
+function pluralize(value: number, singular: string): string {
+  return `${value} ${value === 1 ? singular : `${singular}s`}`;
+}
+
+function numericLimit(
+  limits: Record<string, unknown> | null,
+  key: string,
+): number | null {
+  const value = limits?.[key];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+function CloudSyncSummary({
+  summary,
+}: {
+  summary: CloudSyncRunSummary;
+}): JSX.Element {
+  const conflictCount =
+    summary.conflicts.length + summary.bootstrap_conflicts.length;
+  return (
+    <div
+      role="status"
+      className={
+        conflictCount > 0
+          ? "rounded-xl border border-warning/35 bg-warning/10 px-4 py-3 text-sm text-ink-700"
+          : "rounded-xl border border-accent/25 bg-accent/5 px-4 py-3 text-sm text-ink-700"
+      }
+    >
+      <div className="font-medium">
+        {summary.pulled === 0 && summary.pushed === 0
+          ? "Everything is up to date"
+          : `Downloaded ${summary.pulled} · Uploaded ${summary.pushed}`}
+      </div>
+      <div className="mt-1 text-xs text-ink-500">
+        {conflictCount === 0
+          ? "All changes are synced."
+          : `${conflictCount} conflict${conflictCount === 1 ? " needs" : "s need"} review.`}
+      </div>
+    </div>
+  );
+}
+
+function CloudNotice({ children }: { children: React.ReactNode }): JSX.Element {
+  return (
+    <div className="rounded-2xl border border-paper-300/60 bg-paper-50/45 px-5 py-4 text-sm leading-6 text-ink-500">
+      {children}
+    </div>
+  );
+}
+
+function CloudLoadingState({
+  compact = false,
+}: {
+  compact?: boolean;
+}): JSX.Element {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Loading ZenNotes Cloud"
+      className={compact ? "space-y-2" : "space-y-3 py-2"}
+    >
+      <div className="h-4 w-40 animate-pulse rounded bg-paper-300/70" />
+      <div className="h-14 animate-pulse rounded-2xl bg-paper-200/70" />
+    </div>
+  );
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error) || !error.message.trim()) return fallback;
+
+  const message = error.message
+    .replace(/^Error invoking remote method '[^']+':\s*/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim();
+
+  return message || fallback;
+}

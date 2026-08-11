@@ -54,6 +54,7 @@ import {
   appUpdatePrimaryActionLabel,
   useAppUpdateState
 } from './lib/app-update-state'
+import { ensureCloudAutoSyncStarted, stopCloudAutoSync } from './lib/cloud-auto-sync'
 
 let editorModulePromise: Promise<typeof import('./components/Editor')> | null = null
 const EDITOR_MODULE_WARMUP_GRACE_MS = 40
@@ -386,6 +387,12 @@ function App(): JSX.Element {
   useEffect(() => {
     void init()
   }, [init])
+
+  useEffect(() => {
+    if (!vault) return undefined
+    ensureCloudAutoSyncStarted()
+    return stopCloudAutoSync
+  }, [vault?.root])
 
   useEffect(() => {
     if (!vault) return undefined

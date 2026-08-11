@@ -11,6 +11,19 @@ import type {
   WriteTemplateInput
 } from '@zennotes/bridge-contract/templates'
 import type {
+  CloudAccountConnectResult,
+  CloudAccountStatus,
+  CloudBackupRestoreResult,
+  CloudBackupSnapshot,
+  CloudPublishedNote,
+  CloudPublishedNoteResult,
+  CloudPublishNoteInput,
+  CloudServiceAccount,
+  CloudSyncRunSummary,
+  CloudSyncVault,
+  CloudVaultLink
+} from '@zennotes/bridge-contract/cloud-sync'
+import type {
   ApplyWorkflowInput,
   ExportWorkflowInput,
   ImportedWorkflowFile,
@@ -79,6 +92,7 @@ const DESKTOP_CAPABILITIES: ZenCapabilities = {
   supportsFloatingWindows: true,
   supportsLocalFilesystemPickers: true,
   supportsRemoteWorkspace: true,
+  supportsCloudSync: true,
   // CLI install is supported on macOS and Linux via /usr/local/bin or
   // ~/.local/bin symlinks. Windows uses a different model (PATH munging)
   // and is gated to a follow-up.
@@ -195,6 +209,49 @@ const api: ZenBridge = {
     ipcRenderer.invoke(IPC.APP_UPDATER_CHECK_WITH_UI),
   downloadAppUpdate: (): Promise<AppUpdateState> => ipcRenderer.invoke(IPC.APP_UPDATER_DOWNLOAD),
   installAppUpdate: (): Promise<void> => ipcRenderer.invoke(IPC.APP_UPDATER_INSTALL),
+  getCloudAccountStatus: (): Promise<CloudAccountStatus> =>
+    ipcRenderer.invoke(IPC.CLOUD_ACCOUNT_GET),
+  connectCloudAccount: (baseUrl?: string): Promise<CloudAccountConnectResult> =>
+    ipcRenderer.invoke(IPC.CLOUD_ACCOUNT_CONNECT, baseUrl),
+  logoutCloudAccount: (): Promise<CloudAccountStatus> =>
+    ipcRenderer.invoke(IPC.CLOUD_ACCOUNT_LOGOUT),
+  onCloudAccountChange: (cb: (status: CloudAccountStatus) => void): (() => void) => {
+    const listener = (_: unknown, status: CloudAccountStatus): void => cb(status)
+    ipcRenderer.on(IPC.CLOUD_ACCOUNT_ON_CHANGE, listener)
+    return () => ipcRenderer.removeListener(IPC.CLOUD_ACCOUNT_ON_CHANGE, listener)
+  },
+  getCloudServiceAccount: (): Promise<CloudServiceAccount> =>
+    ipcRenderer.invoke(IPC.CLOUD_SERVICE_ACCOUNT_GET),
+  listCloudPublishedNotes: (): Promise<CloudPublishedNote[]> =>
+    ipcRenderer.invoke(IPC.CLOUD_PUBLISHED_NOTES_LIST),
+  publishCloudNote: (input: CloudPublishNoteInput): Promise<CloudPublishedNoteResult> =>
+    ipcRenderer.invoke(IPC.CLOUD_PUBLISHED_NOTE_CREATE, input),
+  updateCloudPublishedNote: (
+    shareId: number,
+    input: CloudPublishNoteInput
+  ): Promise<CloudPublishedNoteResult> =>
+    ipcRenderer.invoke(IPC.CLOUD_PUBLISHED_NOTE_UPDATE, shareId, input),
+  unpublishCloudNote: (shareId: number): Promise<void> =>
+    ipcRenderer.invoke(IPC.CLOUD_PUBLISHED_NOTE_DELETE, shareId),
+  listCloudVaults: (): Promise<CloudSyncVault[]> => ipcRenderer.invoke(IPC.CLOUD_VAULTS_LIST),
+  getCloudVaultLink: (): Promise<CloudVaultLink | null> =>
+    ipcRenderer.invoke(IPC.CLOUD_VAULT_LINK_GET),
+  linkCloudVault: (vaultId: string): Promise<CloudVaultLink> =>
+    ipcRenderer.invoke(IPC.CLOUD_VAULT_LINK_SET, vaultId),
+  createAndLinkCloudVault: (name: string): Promise<CloudVaultLink> =>
+    ipcRenderer.invoke(IPC.CLOUD_VAULT_LINK_CREATE, name),
+  unlinkCloudVault: (): Promise<void> => ipcRenderer.invoke(IPC.CLOUD_VAULT_LINK_DELETE),
+  syncCloudVault: (): Promise<CloudSyncRunSummary> => ipcRenderer.invoke(IPC.CLOUD_VAULT_SYNC),
+  listCloudBackups: (): Promise<CloudBackupSnapshot[]> =>
+    ipcRenderer.invoke(IPC.CLOUD_BACKUPS_LIST),
+  createCloudBackup: (label?: string): Promise<CloudBackupSnapshot> =>
+    ipcRenderer.invoke(IPC.CLOUD_BACKUP_CREATE, label),
+  downloadCloudBackup: (backupId: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.CLOUD_BACKUP_DOWNLOAD, backupId),
+  deleteCloudBackup: (backupId: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.CLOUD_BACKUP_DELETE, backupId),
+  restoreCloudBackup: (backupId: string): Promise<CloudBackupRestoreResult> =>
+    ipcRenderer.invoke(IPC.CLOUD_BACKUP_RESTORE, backupId),
   getServerCapabilities: async (): Promise<ServerCapabilities | null> =>
     (await refreshRemoteWorkspaceInfo())?.capabilities ?? null,
   getServerSession: async (): Promise<ServerSessionStatus> => ({
@@ -419,6 +476,8 @@ const api: ZenBridge = {
     ipcRenderer.invoke(IPC.VAULT_IMPORT_FILES, notePath, sourcePaths),
   importPastedImage: (input: PastedImageInput): Promise<ImportedAsset> =>
     ipcRenderer.invoke(IPC.VAULT_IMPORT_PASTED_IMAGE, input),
+  readVaultAssetBase64: (assetPath: string): Promise<string> =>
+    ipcRenderer.invoke(IPC.VAULT_READ_ASSET_BASE64, assetPath),
   renameAsset: (relPath: string, nextName: string): Promise<AssetMeta> =>
     ipcRenderer.invoke(IPC.VAULT_RENAME_ASSET, relPath, nextName),
   moveAsset: (relPath: string, targetDir: string): Promise<AssetMeta> =>

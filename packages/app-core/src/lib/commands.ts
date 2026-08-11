@@ -22,6 +22,7 @@ import { dispatchKeyboardContextMenu, findTabContextMenuTarget } from './keyboar
 import { resolveSystemFolderLabels } from './system-folder-labels'
 import { isCalendarToggleAvailable, noteFolderSubpath } from './vault-layout'
 import { runWorkflowById } from './workflow-trigger'
+import { publishActiveCloudNote, showCloudPublishingError } from './cloud-publishing'
 import { DEMO_TOUR_START_PATH } from '@shared/demo-tour'
 
 const APP_WEBSITE_URL = 'https://zennotes.org'
@@ -203,6 +204,25 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       keywords: 'excalidraw drawing diagram sketch create new insert embed canvas',
       when: () => !!getState().activeNote,
       run: () => void getState().embedNewDrawing()
+    },
+    {
+      id: 'note.publish',
+      title: 'Publish Note',
+      category: 'Note',
+      keywords: 'share public link web cloud update',
+      when: () => {
+        const note = getState().activeNote
+        return window.zen.getCapabilities().supportsCloudSync === true
+          && note !== null
+          && note.folder !== 'trash'
+      },
+      run: async () => {
+        try {
+          await publishActiveCloudNote()
+        } catch (error) {
+          showCloudPublishingError(error)
+        }
+      }
     },
     {
       id: 'template.removeBuiltins',

@@ -112,6 +112,15 @@ describe('markdownPathsFromArgv', () => {
 })
 
 describe('candidatePathsFromArgv file:// decoding', () => {
+  it('skips the application entry when Electron runs an unpackaged app', () => {
+    expect(
+      candidatePathsFromArgv(
+        ['/path/to/Electron', '/repo/apps/desktop', '/vault/to/open'],
+        true
+      )
+    ).toEqual(['/vault/to/open'])
+  })
+
   it.skipIf(process.platform === 'win32')(
     'decodes folder and file URLs, skips other schemes and malformed URLs',
     () => {

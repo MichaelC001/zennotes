@@ -89,9 +89,12 @@ export function markdownPathsFromArgv(argv: readonly string[]): string[] {
  * markdown file opens a note, a directory opens a temporary session, and
  * anything else (e.g. the launcher's own script path) is ignored.
  */
-export function candidatePathsFromArgv(argv: readonly string[]): string[] {
+export function candidatePathsFromArgv(
+  argv: readonly string[],
+  skipUnpackagedApplicationEntry = false
+): string[] {
   const out: string[] = []
-  for (let i = 1; i < argv.length; i++) {
+  for (let i = skipUnpackagedApplicationEntry ? 2 : 1; i < argv.length; i++) {
     const arg = argv[i]
     if (!arg || arg.startsWith('-')) continue
     if (arg.includes('://')) {

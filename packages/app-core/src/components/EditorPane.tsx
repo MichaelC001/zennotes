@@ -132,6 +132,10 @@ import { selectTypstPreambleFor } from '../lib/typst-preamble-select'
 import { CommentsPanel, type CommentDraft } from './CommentsPanel'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { promptApp } from '../lib/prompt-requests'
+import {
+  publishCloudNoteWithFeedback,
+  showCloudPublishingError
+} from '../lib/cloud-publishing'
 import { TasksView } from './TasksView'
 import { DatabaseView } from './DatabaseView'
 import { LazyExcalidrawView } from './LazyExcalidrawView'
@@ -208,6 +212,7 @@ import {
   FeedbackIcon,
   HighlighterIcon,
   ListTreeIcon,
+  LinkIcon,
   PanelLeftIcon,
   PanelRightIcon,
   PinIcon,
@@ -837,6 +842,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const folderLabels = resolveSystemFolderLabels(systemFolderLabels)
   const vaultSettings = useStore((s) => s.vaultSettings)
   const autoCalendarPanel = useStore((s) => s.autoCalendarPanel)
+  const supportsCloudPublishing = window.zen.getCapabilities().supportsCloudSync === true
   // Tag-driven Typst definitions for this pane's note (#486); '' unless the
   // setting is on, Typst is the renderer, and the note's tags match a preamble.
   const typstPreamble = useStore((s) => selectTypstPreambleFor(s, content?.path ?? null))
@@ -3184,6 +3190,15 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     [comments]
   )
 
+  const publishContent = useCallback(async (): Promise<void> => {
+    if (!content) return
+    try {
+      await publishCloudNoteWithFeedback(content)
+    } catch (error) {
+      showCloudPublishingError(error)
+    }
+  }, [content])
+
   const toolbar = useMemo(() => {
     if (!content) return null
     const folder = content.folder
@@ -3234,6 +3249,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             <IconBtn title="Export as PDF (⇧⌘E)" onClick={() => void exportActiveNotePdf()}>
               <FileDownIcon />
             </IconBtn>
+            {supportsCloudPublishing && folder !== 'trash' && (
+              <IconBtn title="Publish note" onClick={() => void publishContent()}>
+                <LinkIcon />
+              </IconBtn>
+            )}
           </>
         )}
         {folder === 'trash' ? (
@@ -3272,7 +3292,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     archiveActive,
     restoreActive,
     unarchiveActive,
-    exportActiveNotePdf
+    exportActiveNotePdf,
+    publishContent,
+    supportsCloudPublishing
   ])
 
   const showEditor = !!content && mode !== 'preview'

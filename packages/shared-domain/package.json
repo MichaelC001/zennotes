@@ -13,6 +13,7 @@
     "test:run": "vitest run"
   },
   "dependencies": {
+    "@zennotes/bridge-contract": "*",
     "lz-string": "^1.5.0"
   }
 }

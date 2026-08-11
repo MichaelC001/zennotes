@@ -43,7 +43,10 @@ import {
   resolveTypstPreambleFolder,
 } from "@shared/typst-preamble-folder";
 import { useStore, refreshCustomThemes, refreshOverrides } from "../store";
-import { WORKFLOW_PRESETS, hiddenPresetsInOrder } from "@shared/workflows/presets";
+import {
+  WORKFLOW_PRESETS,
+  hiddenPresetsInOrder,
+} from "@shared/workflows/presets";
 import { startWorkflowTutorial } from "../lib/workflow-tutorial-flow";
 import type { LineNumberMode, WhichKeyHintMode } from "../store";
 import type {
@@ -125,6 +128,8 @@ import { RemoteWorkspaceProfileModal } from "./RemoteWorkspaceProfileModal";
 import { Button } from "./ui/Button";
 import { CustomCodeLanguagesSettings } from "./CustomCodeLanguagesSettings";
 import { TextReplacementsSettings } from "./TextReplacementsSettings";
+import { CloudSettings } from "./CloudSettings";
+import { consumeSettingsTarget } from "../lib/settings-navigation";
 
 type SettingsCategoryId =
   | "appearance"
@@ -133,6 +138,7 @@ type SettingsCategoryId =
   | "tasks"
   | "typography"
   | "vault"
+  | "cloud"
   | "templates"
   | "mcp"
   | "cli"
@@ -223,6 +229,12 @@ const SETTINGS_CATEGORY_ICONS: Record<SettingsCategoryId, JSX.Element> = {
       <path d="M3 7l9 4 9-4M12 11v10" />
     </NavIcon>
   ),
+  cloud: (
+    <NavIcon>
+      <path d="M6 18h11a4 4 0 0 0 .7-7.94A6 6 0 0 0 6.3 8.4 4.8 4.8 0 0 0 6 18Z" />
+      <path d="m9.5 14 2.5-2.5 2.5 2.5M12 11.5V18" />
+    </NavIcon>
+  ),
   templates: (
     <NavIcon>
       <rect x="4" y="4" width="16" height="16" rx="2" />
@@ -264,7 +276,7 @@ const SETTINGS_SECTIONS: {
     title: "Editing",
     categoryIds: ["editor", "tasks", "keymaps"],
   },
-  { id: "vault", title: "Vault", categoryIds: ["vault", "templates"] },
+  { id: "vault", title: "Vault", categoryIds: ["vault", "cloud", "templates"] },
   { id: "system", title: "System", categoryIds: ["mcp", "cli", "about"] },
 ];
 
@@ -421,6 +433,7 @@ export function SettingsModal(): JSX.Element {
   const supportsRemoteWorkspace =
     appInfo.runtime === "desktop" &&
     zenBridge.getCapabilities().supportsRemoteWorkspace;
+  const supportsCloudSync = !!zenBridge.getCapabilities().supportsCloudSync;
   const setSettingsOpen = useStore((s) => s.setSettingsOpen);
   const openHelpView = useStore((s) => s.openHelpView);
   const vimMode = useStore((s) => s.vimMode);
@@ -470,9 +483,7 @@ export function SettingsModal(): JSX.Element {
   const setKeepViewModeAcrossNotes = useStore(
     (s) => s.setKeepViewModeAcrossNotes,
   );
-  const syncTitleHeadingOnRename = useStore(
-    (s) => s.syncTitleHeadingOnRename,
-  );
+  const syncTitleHeadingOnRename = useStore((s) => s.syncTitleHeadingOnRename);
   const setSyncTitleHeadingOnRename = useStore(
     (s) => s.setSyncTitleHeadingOnRename,
   );
@@ -486,9 +497,7 @@ export function SettingsModal(): JSX.Element {
   const editorTabSize = useStore((s) => s.editorTabSize);
   const setEditorTabSize = useStore((s) => s.setEditorTabSize);
   const setListIndentGuides = useStore((s) => s.setListIndentGuides);
-  const textReplacementsEnabled = useStore(
-    (s) => s.textReplacementsEnabled,
-  );
+  const textReplacementsEnabled = useStore((s) => s.textReplacementsEnabled);
   const setTextReplacementsEnabled = useStore(
     (s) => s.setTextReplacementsEnabled,
   );
@@ -497,9 +506,7 @@ export function SettingsModal(): JSX.Element {
   const autoPairs = useStore((s) => s.autoPairs);
   const setAutoPairs = useStore((s) => s.setAutoPairs);
   const autoPairQuotesInProse = useStore((s) => s.autoPairQuotesInProse);
-  const setAutoPairQuotesInProse = useStore(
-    (s) => s.setAutoPairQuotesInProse,
-  );
+  const setAutoPairQuotesInProse = useStore((s) => s.setAutoPairQuotesInProse);
   const tabsEnabled = useStore((s) => s.tabsEnabled);
   const setTabsEnabled = useStore((s) => s.setTabsEnabled);
   const workflowsEnabled = useStore((s) => s.workflowsEnabled);
@@ -1146,8 +1153,9 @@ export function SettingsModal(): JSX.Element {
 
   const ref = useRef<HTMLDivElement | null>(null);
   const settingsSearchHighlightTimerRef = useRef<number | null>(null);
-  const [activeCategory, setActiveCategory] =
-    useState<SettingsCategoryId>("appearance");
+  const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(
+    () => consumeSettingsTarget() ?? "appearance",
+  );
   // Per-category active sub-tab (dense categories split their content into sub-tabs).
   const [activeSubTabByCategory, setActiveSubTabByCategory] = useState<
     Partial<Record<SettingsCategoryId, string>>
@@ -1948,7 +1956,8 @@ export function SettingsModal(): JSX.Element {
         {
           id: "heading-level-labels",
           title: "Heading level labels",
-          description: "Show H1, H2, H3, and other level labels beside headings.",
+          description:
+            "Show H1, H2, H3, and other level labels beside headings.",
           keywords: ["heading", "header", "h1", "h2", "outline", "level"],
         },
         {
@@ -1967,7 +1976,13 @@ export function SettingsModal(): JSX.Element {
           id: "text-replacements-enabled",
           title: "Text replacements",
           description: "Replace typed snippets such as -> with →.",
-          keywords: ["snippet", "replacement", "arrow", "autocorrect", "expand"],
+          keywords: [
+            "snippet",
+            "replacement",
+            "arrow",
+            "autocorrect",
+            "expand",
+          ],
         },
         {
           id: "auto-pairs",
@@ -1989,8 +2004,7 @@ export function SettingsModal(): JSX.Element {
         {
           id: "auto-pair-quotes-in-prose",
           title: "Auto-pair quotes in prose",
-          description:
-            "Also insert matching quotes outside Markdown code.",
+          description: "Also insert matching quotes outside Markdown code.",
           keywords: ["auto pair", "autopair", "quotes", "prose", "code blocks"],
         },
         {
@@ -2428,7 +2442,9 @@ export function SettingsModal(): JSX.Element {
                 {autoPairs && (
                   <ToggleRow
                     label="Auto-pair quotes in prose"
-                    description={'Also insert matching "" and \'\' outside inline code and fenced code blocks.'}
+                    description={
+                      "Also insert matching \"\" and '' outside inline code and fenced code blocks."
+                    }
                     value={autoPairQuotesInProse}
                     settingId="auto-pair-quotes-in-prose"
                     onChange={setAutoPairQuotesInProse}
@@ -2513,7 +2529,8 @@ export function SettingsModal(): JSX.Element {
         {
           id: "text-replacements",
           title: "Text replacements",
-          description: "Expand short triggers into symbols, words, or phrases as you type.",
+          description:
+            "Expand short triggers into symbols, words, or phrases as you type.",
           searchIds: ["text-replacements-enabled"],
           content: (
             <div className="space-y-6">
@@ -2618,7 +2635,9 @@ export function SettingsModal(): JSX.Element {
                 </div>
                 {(() => {
                   const total = WORKFLOW_PRESETS.length;
-                  const hidden = hiddenPresetsInOrder(hiddenWorkflowPresets).length;
+                  const hidden = hiddenPresetsInOrder(
+                    hiddenWorkflowPresets,
+                  ).length;
                   const copy =
                     hidden === 0
                       ? `All ${total} shipped recipes appear in the recipe gallery, behind New workflow in the Workflows view.`
@@ -3003,6 +3022,58 @@ export function SettingsModal(): JSX.Element {
         </div>
       ),
     },
+    ...(supportsCloudSync
+      ? [
+          {
+            id: "cloud" as const,
+            title: "Cloud",
+            description:
+              "Connect your account, review plan access, and sync this vault.",
+            keywords: [
+              "cloud",
+              "account",
+              "sync",
+              "backup",
+              "publish",
+              "subscription",
+            ],
+            searchItems: [
+              {
+                id: "cloud-account",
+                title: "ZenNotes Cloud account",
+                description:
+                  "Connect or disconnect this app from ZenNotes Cloud.",
+                keywords: ["login", "sign in", "account", "device"],
+              },
+              {
+                id: "cloud-plan",
+                title: "Cloud plan access",
+                description:
+                  "See whether sync, backup, and publishing are included.",
+                keywords: ["subscription", "entitlement", "features"],
+              },
+              {
+                id: "cloud-vault",
+                title: "Cloud vault link",
+                description: "Link this local vault and run a manual sync.",
+                keywords: ["sync", "link", "create", "conflict"],
+              },
+            ],
+            content: (
+              <div {...settingsSearchTargetProps("cloud-account")}>
+                <CloudSettings
+                  localVaultAvailable={
+                    workspaceMode === "local" &&
+                    !!vault &&
+                    vault.temporary !== true
+                  }
+                  localVaultName={vault?.name ?? "My notes"}
+                />
+              </div>
+            ),
+          },
+        ]
+      : []),
     {
       id: "vault",
       title: "Vault",
@@ -3554,7 +3625,10 @@ export function SettingsModal(): JSX.Element {
                   onChange={(mode) =>
                     void persistVaultSettings({
                       ...vaultSettings,
-                      drawingsLocation: { ...vaultSettings.drawingsLocation, mode },
+                      drawingsLocation: {
+                        ...vaultSettings.drawingsLocation,
+                        mode,
+                      },
                     })
                   }
                 />
@@ -3569,7 +3643,10 @@ export function SettingsModal(): JSX.Element {
                     onChange={(next) =>
                       void persistVaultSettings({
                         ...vaultSettings,
-                        drawingsLocation: { mode: "folder", folder: next ?? "" },
+                        drawingsLocation: {
+                          mode: "folder",
+                          folder: next ?? "",
+                        },
                       })
                     }
                   />
@@ -3587,7 +3664,10 @@ export function SettingsModal(): JSX.Element {
                   onChange={(mode) =>
                     void persistVaultSettings({
                       ...vaultSettings,
-                      databasesLocation: { ...vaultSettings.databasesLocation, mode },
+                      databasesLocation: {
+                        ...vaultSettings.databasesLocation,
+                        mode,
+                      },
                     })
                   }
                 />
@@ -3602,7 +3682,10 @@ export function SettingsModal(): JSX.Element {
                     onChange={(next) =>
                       void persistVaultSettings({
                         ...vaultSettings,
-                        databasesLocation: { mode: "folder", folder: next ?? "" },
+                        databasesLocation: {
+                          mode: "folder",
+                          folder: next ?? "",
+                        },
                       })
                     }
                   />
@@ -4300,10 +4383,26 @@ export function SettingsModal(): JSX.Element {
                 <div className="space-y-6">
                   {(
                     [
-                      { key: "inbox" as const, label: "Inbox path", desc: "Main notes area." },
-                      { key: "quick" as const, label: "Quick Notes path", desc: "Quick-capture folder." },
-                      { key: "archive" as const, label: "Archive path", desc: "Cold-storage notes." },
-                      { key: "trash" as const, label: "Trash path", desc: "Deleted-note recovery." },
+                      {
+                        key: "inbox" as const,
+                        label: "Inbox path",
+                        desc: "Main notes area.",
+                      },
+                      {
+                        key: "quick" as const,
+                        label: "Quick Notes path",
+                        desc: "Quick-capture folder.",
+                      },
+                      {
+                        key: "archive" as const,
+                        label: "Archive path",
+                        desc: "Cold-storage notes.",
+                      },
+                      {
+                        key: "trash" as const,
+                        label: "Trash path",
+                        desc: "Deleted-note recovery.",
+                      },
                     ] as const
                   ).map(({ key, label, desc }) => (
                     <TextInputRow
@@ -4316,7 +4415,7 @@ export function SettingsModal(): JSX.Element {
                       commitOnBlur
                       issue={folderPathIssues[key] ?? null}
                       onChange={(next) => {
-                        const trimmed = (next ?? "").trim()
+                        const trimmed = (next ?? "").trim();
                         // Say why, rather than saving nothing and letting the
                         // field snap back to its old value. The normalizer on
                         // the way in drops what it does not like, which is
@@ -4327,7 +4426,10 @@ export function SettingsModal(): JSX.Element {
                           trimmed,
                           vaultSettings.systemFolderPaths,
                         );
-                        setFolderPathIssues((current) => ({ ...current, [key]: problem }));
+                        setFolderPathIssues((current) => ({
+                          ...current,
+                          [key]: problem,
+                        }));
                         if (problem) return;
                         void persistVaultSettings({
                           ...vaultSettings,
@@ -4342,7 +4444,9 @@ export function SettingsModal(): JSX.Element {
                   <InlineNote>
                     Resolved paths:{" "}
                     {(["inbox", "quick", "archive", "trash"] as const)
-                      .map((f) => resolveFolderPath(f, vaultSettings.systemFolderPaths))
+                      .map((f) =>
+                        resolveFolderPath(f, vaultSettings.systemFolderPaths),
+                      )
                       .join(", ")}
                     .
                   </InlineNote>
@@ -5296,7 +5400,9 @@ function KeymapSettings({
           onSave={(binding) => {
             onSetBinding(
               recording.id,
-              binding === getDefaultKeymapBinding(recording.id) ? null : binding,
+              binding === getDefaultKeymapBinding(recording.id)
+                ? null
+                : binding,
             );
             setRecording(null);
           }}
@@ -5422,7 +5528,10 @@ function KeymapRecorderModal({
           </div>
           <div className="mt-1 text-xs text-ink-500">
             Default:{" "}
-            {formatKeymapBinding(getDefaultKeymapBinding(definition.id), definition.kind)}
+            {formatKeymapBinding(
+              getDefaultKeymapBinding(definition.id),
+              definition.kind,
+            )}
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 border-t border-paper-300/60 px-5 py-3">
@@ -5963,7 +6072,10 @@ function TextInputRow({
           </div>
         )}
         {issue && (
-          <div className="mt-1 text-xs leading-5 text-[color:rgb(var(--z-red))]" role="alert">
+          <div
+            className="mt-1 text-xs leading-5 text-[color:rgb(var(--z-red))]"
+            role="alert"
+          >
             {issue}
           </div>
         )}
@@ -6686,17 +6798,19 @@ function KanbanStatusesRow({ settingId }: { settingId?: string }): JSX.Element {
 
   return (
     <div className="px-5 py-4" {...settingsSearchTargetProps(settingId)}>
-      <div className="text-sm font-medium text-ink-900">Custom Kanban statuses</div>
+      <div className="text-sm font-medium text-ink-900">
+        Custom Kanban statuses
+      </div>
       <div className="mt-1 text-xs leading-5 text-ink-500">
-        The columns for the Tasks Kanban “Custom status” board, in order. Saved to
-        your config file. Move a task by dragging its card, or focus it and press
-        Shift+H / Shift+L; you never have to type the tokens by hand.
+        The columns for the Tasks Kanban “Custom status” board, in order. Saved
+        to your config file. Move a task by dragging its card, or focus it and
+        press Shift+H / Shift+L; you never have to type the tokens by hand.
       </div>
       <div className="mt-3 space-y-2">
         {rows.length === 0 && (
           <div className="rounded-md border border-dashed border-paper-300 px-3 py-2 text-xs text-ink-500">
-            No statuses yet. Add your first column below (for example Backlog, In
-            progress, Review, Done).
+            No statuses yet. Add your first column below (for example Backlog,
+            In progress, Review, Done).
           </div>
         )}
         {rows.map((id, i) => (
