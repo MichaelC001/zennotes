@@ -10,6 +10,7 @@ import {
   publishCloudNoteWithFeedback,
   type PublishableCloudNote
 } from '../lib/cloud-publishing'
+import { notifyPublishedNoteChanged } from '../lib/published-note-events'
 import { THEMES, type ThemeFamily } from '../lib/themes'
 import { Button } from './ui/Button'
 import { Modal } from './ui/Modal'
@@ -111,7 +112,8 @@ export function PublishNoteModal({
     }
 
     try {
-      await publishCloudNoteWithFeedback(note, bridge, appearance)
+      const outcome = await publishCloudNoteWithFeedback(note, bridge, appearance)
+      notifyPublishedNoteChanged({ notePath: note.path, url: outcome.url })
       onClose()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not publish this note.')

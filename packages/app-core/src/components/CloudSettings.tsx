@@ -20,6 +20,7 @@ import {
   syncCloudVaultWithStatus,
 } from "../lib/cloud-auto-sync";
 import { useToastStore } from "../lib/toast";
+import { notifyPublishedNoteChanged } from "../lib/published-note-events";
 import { Button } from "./ui/Button";
 
 type CloudAction =
@@ -344,6 +345,9 @@ export function CloudSettings({
       setPublishedNotes((current) =>
         current.filter((candidate) => candidate.id !== note.id),
       );
+      if (note.note_path) {
+        notifyPublishedNoteChanged({ notePath: note.note_path, url: null });
+      }
       await refreshServiceAccount();
     });
   };

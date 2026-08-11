@@ -4,6 +4,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ZenBridge } from '@zennotes/bridge-contract/bridge'
+import { subscribePublishedNoteChanges } from '../lib/published-note-events'
 import { PublishNoteModal } from './PublishNoteModal'
 
 describe('PublishNoteModal', () => {
@@ -24,6 +25,8 @@ describe('PublishNoteModal', () => {
   })
 
   it('loads the existing appearance and explicitly removes its logo', async () => {
+    const publishedNoteChanged = vi.fn()
+    const unsubscribe = subscribePublishedNoteChanges(publishedNoteChanged)
     const updateCloudPublishedNote = vi.fn(async () => ({
       id: 42,
       slug: 'launch',
@@ -89,5 +92,10 @@ describe('PublishNoteModal', () => {
       markdown: '# Launch',
       appearance: { theme: 'nord-light', logo: null }
     })
+    expect(publishedNoteChanged).toHaveBeenCalledWith({
+      notePath: 'Notes/Launch.md',
+      url: 'https://zennotes.org/s/launch'
+    })
+    unsubscribe()
   })
 })

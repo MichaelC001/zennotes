@@ -9,6 +9,7 @@ import type {
   CloudSyncRunSummary,
 } from "@zennotes/bridge-contract/cloud-sync";
 import { CloudSettings } from "./CloudSettings";
+import { subscribePublishedNoteChanges } from "../lib/published-note-events";
 
 const mocks = vi.hoisted(() => ({
   getCloudAccountStatus: vi.fn(),
@@ -200,6 +201,8 @@ describe("CloudSettings", () => {
   });
 
   it("lists, copies, and unpublishes public notes", async () => {
+    const publishedNoteChanged = vi.fn();
+    const unsubscribe = subscribePublishedNoteChanges(publishedNoteChanged);
     mocks.getCloudAccountStatus.mockResolvedValue(connected);
     mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
     mocks.getCloudVaultLink.mockResolvedValue(null);
@@ -250,6 +253,11 @@ describe("CloudSettings", () => {
     );
     expect(mocks.unpublishCloudNote).toHaveBeenCalledWith(42);
     expect(host.textContent).not.toContain("Launch notes");
+    expect(publishedNoteChanged).toHaveBeenCalledWith({
+      notePath: "Notes/Launch.md",
+      url: null,
+    });
+    unsubscribe();
   });
 
   it("continues with a cloud vault created on another device and reports a completed manual sync", async () => {

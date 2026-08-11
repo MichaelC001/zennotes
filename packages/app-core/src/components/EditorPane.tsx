@@ -132,7 +132,7 @@ import { selectTypstPreambleFor } from '../lib/typst-preamble-select'
 import { CommentsPanel, type CommentDraft } from './CommentsPanel'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { promptApp } from '../lib/prompt-requests'
-import { requestPublishNote } from '../lib/publish-note-requests'
+import { PublishedNoteButton } from './PublishedNoteButton'
 import { TasksView } from './TasksView'
 import { DatabaseView } from './DatabaseView'
 import { LazyExcalidrawView } from './LazyExcalidrawView'
@@ -209,7 +209,6 @@ import {
   FeedbackIcon,
   HighlighterIcon,
   ListTreeIcon,
-  LinkIcon,
   PanelLeftIcon,
   PanelRightIcon,
   PinIcon,
@@ -3187,10 +3186,6 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     [comments]
   )
 
-  const publishContent = useCallback((): void => {
-    if (content) requestPublishNote(content)
-  }, [content])
-
   const toolbar = useMemo(() => {
     if (!content) return null
     const folder = content.folder
@@ -3242,9 +3237,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               <FileDownIcon />
             </IconBtn>
             {supportsCloudPublishing && folder !== 'trash' && (
-              <IconBtn title="Publish note" onClick={() => void publishContent()}>
-                <LinkIcon />
-              </IconBtn>
+              <PublishedNoteButton key={content.path} note={content} />
             )}
           </>
         )}
@@ -3285,7 +3278,6 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     restoreActive,
     unarchiveActive,
     exportActiveNotePdf,
-    publishContent,
     supportsCloudPublishing
   ])
 
