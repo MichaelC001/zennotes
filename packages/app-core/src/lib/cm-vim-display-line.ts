@@ -95,6 +95,23 @@ function pixelMotionFallback(
 }
 
 /**
+ * True when `offset` sits exactly on a soft-wrap point: simultaneously past
+ * the end of one display row and at the start of the next. The codemirror-vim
+ * adapter reads such an offset with a hardcoded forward association, so a
+ * cursor resting there acts from the next row on the following press; whether
+ * that is correct depends on which reading of the offset the motion meant
+ * (#580). `zenMoveByDisplayLine` disambiguates by goal column.
+ */
+function isWrapPoint(view: EditorView, offset: number): boolean {
+  const line = view.state.doc.lineAt(offset)
+  if (offset <= line.from || offset >= line.to) return false
+  const before = view.coordsAtPos(offset, -1)
+  const after = view.coordsAtPos(offset, 1)
+  if (!before || !after) return false
+  return after.top - before.top > (before.bottom - before.top) / 2
+}
+
+/**
  * The wrap point ending the display row that contains `pos` (forward), or the
  * offset starting that row (backward). Forward returns `line.to` when the
  * cursor sits on the line's last row.
@@ -185,7 +202,8 @@ function displayRowEdge(view: EditorView, pos: number, forward: boolean): number
  * The whole pixel path runs inside `pixelMotionFallback` (#574): if any CM6
  * coordinate query throws, the motion degrades to the plain logical step
  * instead of letting the exception escape, which would type the pressed key
- * into the note.
+ * into the note. Soft-wrap points are never used as the motion's origin or
+ * destination (#580); see `isWrapPoint`.
  */
 export function zenMoveByDisplayLine(
   cm: VimMotionCm,
@@ -240,6 +258,30 @@ export function zenMoveByDisplayLine(
         vim.lastHSPos = cm.charCoords(head, 'div').left
       }
       const res = cm.findPosV(head, forward ? repeat : -repeat, 'line', vim.lastHSPos)
+      // A landing exactly ON a soft-wrap point is ambiguous: the offset is
+      // both "end of row N" and "start of row N+1". With a left-side goal
+      // column it means the next row's start and everything is consistent.
+      // With a right-edge goal it means row N's end, but findPosV's
+      // hardcoded forward association makes the NEXT press act from row
+      // N+1 (skipping a row down, bouncing in place up), and the cursor
+      // renders past the row's last character (#580). When the goal column
+      // sits closer to the row-end reading, rest ON that last character,
+      // like the display-row $ does.
+      const view = cm.cm6
+      if (view && vim.lastHSPos != null && res.ch > 0 && res.line + 1 <= view.state.doc.lines) {
+        const line = view.state.doc.line(res.line + 1)
+        const offset = Math.min(line.to, line.from + res.ch)
+        if (isWrapPoint(view, offset)) {
+          const rowEnd = view.coordsAtPos(offset, -1)
+          const rowStart = view.coordsAtPos(offset, 1)
+          if (rowEnd && rowStart) {
+            const goalX = view.contentDOM.getBoundingClientRect().left + vim.lastHSPos
+            if (Math.abs(goalX - rowEnd.left) <= Math.abs(goalX - rowStart.left)) {
+              res.ch -= 1
+            }
+          }
+        }
+      }
       if (mathRanges.length && Math.abs(res.line - head.line) > repeat) {
         // The pixel motion overshot (e.g. launched from a line with large CSS
         // margins straight over a block widget). If a math block sits in the

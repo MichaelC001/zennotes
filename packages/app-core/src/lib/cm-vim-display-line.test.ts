@@ -334,6 +334,92 @@ describe('wrapped display-row boundaries (#536)', () => {
   })
 })
 
+describe('wrap-point landings disambiguate by goal column (#580)', () => {
+  // Line 2 (0-based line 1) holds 100 chars wrapping into rows of 30, so the
+  // wrap points sit at ch 30/60/90. coordsAtPos honors the side argument:
+  // side -1 is the end of the previous row (right edge, x 240), side 1 the
+  // start of the next (left edge, x 0). vim.lastHSPos is the goal x.
+  const DOC = `alpha\n${'x'.repeat(100)}\nomega`
+
+  function wrapCm(findPosVResult: { line: number; ch: number }) {
+    const state = EditorState.create({ doc: DOC })
+    const coordsAtPos = (offset: number, side: 1 | -1 = 1) => {
+      if (offset < 6 || offset > 106) return null
+      const rel = offset - 6
+      const effective = side === -1 ? Math.max(0, rel - 1) : rel
+      const row = Math.min(3, Math.floor(effective / 30))
+      const left = side === -1 && rel % 30 === 0 && rel > 0 ? 240 : (rel % 30) * 8
+      const top = 100 + row * 20
+      return { left, right: left, top, bottom: top + 18 }
+    }
+    const findPosV = vi.fn((_start: { line: number; ch: number }) => ({ ...findPosVResult }))
+    const charCoords = vi.fn((_pos: { line: number; ch: number }) => ({ left: 42 }))
+    return {
+      cm: {
+        firstLine: () => 0,
+        lastLine: () => 2,
+        findPosV,
+        charCoords,
+        cm6: {
+          state,
+          coordsAtPos,
+          contentDOM: { getBoundingClientRect: () => ({ left: 0 }) }
+        } as unknown as EditorView
+      } as unknown as Cm,
+      findPosV,
+      charCoords
+    }
+  }
+
+  // Sticky goal columns across presses need vim.lastMotion to be this motion.
+  const vimWithGoal = (lastHSPos: number): VimState =>
+    ({ lastMotion: zenMoveByDisplayLine, lastHSPos }) as VimState
+
+  it('a right-edge goal landing on a wrap point rests on the last character of the previous row', () => {
+    const { cm } = wrapCm({ line: 1, ch: 60 })
+    const res = zenMoveByDisplayLine(
+      cm,
+      { line: 1, ch: 29 },
+      { forward: true, repeat: 1 },
+      vimWithGoal(235)
+    )
+    expect(res).toEqual({ line: 1, ch: 59 })
+  })
+
+  it('a left-edge goal landing on a wrap point keeps the start of the next row', () => {
+    const { cm } = wrapCm({ line: 1, ch: 60 })
+    const res = zenMoveByDisplayLine(
+      cm,
+      { line: 1, ch: 30 },
+      { forward: true, repeat: 1 },
+      vimWithGoal(2)
+    )
+    expect(res).toEqual({ line: 1, ch: 60 })
+  })
+
+  it('mid-row landings are untouched either way', () => {
+    const { cm } = wrapCm({ line: 1, ch: 45 })
+    const res = zenMoveByDisplayLine(
+      cm,
+      { line: 1, ch: 15 },
+      { forward: true, repeat: 1 },
+      vimWithGoal(235)
+    )
+    expect(res).toEqual({ line: 1, ch: 45 })
+  })
+
+  it('line starts and ends are not wrap points', () => {
+    const { cm } = wrapCm({ line: 2, ch: 0 })
+    const res = zenMoveByDisplayLine(
+      cm,
+      { line: 1, ch: 100 },
+      { forward: true, repeat: 1 },
+      vimWithGoal(235)
+    )
+    expect(res).toEqual({ line: 2, ch: 0 })
+  })
+})
+
 describe('display-row boundaries from row midpoints (#575)', () => {
   // Simulated layout: line 2 (0-based line 1) holds 100 chars wrapping into
   // rows of 30 (offsets 6-35, 36-65, 66-95, 96-106). coordsAtPos reports a
