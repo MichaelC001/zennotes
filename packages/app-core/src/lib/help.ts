@@ -124,7 +124,7 @@ export const HELP_HOW_TO_GUIDES: HelpCard[] = [
   {
     title: 'Turn a CSV into a database',
     body:
-      'Run “New Database” from the command palette (or right-click a folder in the sidebar → New database) to create one, or just open an existing `.csv` file from the vault. ZenNotes stores a database as a `<Name>.base` folder: `data.csv` (the rows), `schema.json` (field types, select options, saved views), and the record-page notes rows open into. Edit cells inline in the Table view, group records in a Board by any select field, switch the raw-CSV toggle to see the underlying file, and press `o` on a row to open it as a full Markdown page whose frontmatter mirrors the row’s properties. The whole grid is keyboard-driven — see the Database grid shortcuts.'
+      'Run “New Database” from the command palette (or right-click a folder in the sidebar → New database) to create one, or just open an existing `.csv` file from the vault. ZenNotes stores a database as a `<Name>.base` folder: `data.csv` (the rows), `schema.json` (field types, select options, saved views), and the record-page notes rows open into. A database opens from its sidebar row like a note: click it, or press Enter or `l` on it in Vim mode (the row’s `m` menu carries Open database too); the chevron still expands the folder to browse its record pages, and the open grid closes like any tab. Edit cells inline in the Table view, group records in a Board by any select field, switch the raw-CSV toggle to see the underlying file, and press `o` on a row to open it as a full Markdown page whose frontmatter mirrors the row’s properties. The whole grid is keyboard-driven — see the Database grid shortcuts.'
   },
   {
     title: 'Move a note without dragging',

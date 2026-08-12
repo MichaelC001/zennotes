@@ -1902,7 +1902,23 @@ export function Sidebar(): JSX.Element {
       ];
     }
 
-    const items: ContextMenuItem[] = [
+    const items: ContextMenuItem[] = [];
+    // A `<Name>.base` folder is a database: its grid opens on click and on
+    // Enter/`l`, and the menu offers the same action so no surface is
+    // mouse-only (Discord report: the m menu had no way to open the grid).
+    if (!isTop && isFormDirName(subpath.split("/").slice(-1)[0])) {
+      items.push({
+        label: "Open database",
+        icon: <DatabaseIcon />,
+        onSelect: async () => {
+          const csvPath = csvPathForFormDir(
+            vaultRelativeFolderPath(folder, subpath, vaultSettings),
+          );
+          await useStore.getState().openDatabase(csvPath);
+        },
+      });
+    }
+    items.push(
       {
         label: "New note",
         onSelect: async () => {
@@ -1927,7 +1943,7 @@ export function Sidebar(): JSX.Element {
           await createDatabase(folder, subpath);
         },
       },
-    ];
+    );
     if (folder === "quick" && isTop) {
       items.push({
         label: "Open as Tab",
@@ -4808,15 +4824,18 @@ function SubTree({
   const myIdx = idxCounter.value++;
   const selectionKey = folderSelectionKey(folder, node.subpath);
 
+  const databaseCsvPath = isDatabase
+    ? csvPathForFormDir(
+        vaultRelativeFolderPath(folder, node.subpath, vaultSettings),
+      )
+    : undefined;
+
   const handleSelect = (
     e: React.MouseEvent | React.KeyboardEvent,
   ): void => {
-    if (isDatabase) {
-      const csvPath = csvPathForFormDir(
-        vaultRelativeFolderPath(folder, node.subpath, vaultSettings),
-      );
+    if (databaseCsvPath) {
       onSelectItem(e, { kind: "folder", folder, subpath: node.subpath }, () => {
-        void useStore.getState().openDatabase(csvPath);
+        void useStore.getState().openDatabase(databaseCsvPath);
       });
       return;
     }
@@ -4883,7 +4902,7 @@ function SubTree({
         sidebarIdx={myIdx}
         vimHighlight={vimCursor === myIdx}
         sidebarFocused={sidebarFocused}
-        sidebarData={{ type: "folder", folder, subpath: node.subpath, key }}
+        sidebarData={{ type: "folder", folder, subpath: node.subpath, key, database: databaseCsvPath }}
         selectionKey={selectionKey}
         reserveLeadingSlot={showSidebarChevrons}
         showExpandChevron={showSidebarChevrons}
@@ -5399,7 +5418,17 @@ function TreeRow({
   sidebarIdx?: number;
   vimHighlight?: boolean;
   sidebarFocused?: boolean;
-  sidebarData?: { type: string; folder: string; subpath: string; key: string; dateNavKey?: string };
+  sidebarData?: {
+    type: string;
+    folder: string;
+    subpath: string;
+    key: string;
+    dateNavKey?: string;
+    /** Present only on `<Name>.base` database rows: the grid's csv path, so
+     *  keyboard activation (VimNav Enter/`l`) can open the grid the same way a
+     *  click does instead of taking the plain-folder path. */
+    database?: string;
+  };
   selectionKey?: string;
   /** Optional inline action(s) shown on the right edge, revealed on hover. */
   trailing?: JSX.Element;
@@ -5463,6 +5492,7 @@ function TreeRow({
             // #301: present only on Daily/Weekly date-group rows — VimNav reads
             // it to expand/collapse them via the store's date-nav actions.
             "data-sidebar-datenav-key": sidebarData?.dateNavKey,
+            "data-sidebar-database": sidebarData?.database,
             "data-sidebar-expandable": String(expandable),
             "data-sidebar-collapsed": String(collapsed),
             "data-sidebar-select-key": selectionKey,

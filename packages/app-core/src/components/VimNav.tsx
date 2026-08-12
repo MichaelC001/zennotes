@@ -2099,6 +2099,17 @@ export function VimNav(): JSX.Element | null {
     }
     const itemType = el.dataset.sidebarType
     if (itemType === 'folder') {
+      // A `<Name>.base` folder is a database. Its grid only opened through a
+      // real click (the database case lives in the row's click handler), so
+      // in Vim mode Enter/`l` fell into the plain-folder path below and the
+      // grid was mouse-only. Open it like the click does; expanding to browse
+      // the record notes stays on the chevron and the toggle-folder key.
+      const databaseCsv = el.dataset.sidebarDatabase
+      if (databaseCsv) {
+        state.setFocusedPanel('editor')
+        void state.openDatabase(databaseCsv)
+        return
+      }
       const folder = el.dataset.sidebarFolder as 'inbox' | 'quick' | 'archive' | 'trash'
       const subpath = el.dataset.sidebarSubpath ?? ''
       state.setView({ kind: 'folder', folder, subpath })
