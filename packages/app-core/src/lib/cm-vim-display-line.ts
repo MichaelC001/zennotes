@@ -116,14 +116,17 @@ function isWrapPoint(view: EditorView, offset: number): boolean {
  * offset starting that row (backward). Forward returns `line.to` when the
  * cursor sits on the line's last row.
  *
- * Found by binary-searching `coordsAtPos` row midpoints instead of hit-testing
- * an x coordinate at the viewport edge, which is what `goLineRight` does and
- * what #575 broke: under fractional display scaling the x resolution walks
+ * Found by binary-searching `coordsAtPos` rows instead of hit-testing an x
+ * coordinate at the viewport edge, which is what `goLineRight` does and what
+ * #575 broke: under fractional display scaling the x resolution walks
  * sub-pixel glyph rects and lands several characters short of the wrap point,
- * or on a neighboring row entirely. Vertical midpoints move a full row height
- * per row, so a half-row tolerance absorbs that imprecision. Returns null when
- * coordinates are unavailable (unrendered or widget-only spans); callers fall
- * back to the pixel path.
+ * or on a neighboring row entirely. Two positions count as the same row when
+ * their vertical ranges overlap, not when their midpoints sit close: an
+ * inline widget on the row (a rendered wikilink chip, say) can be taller
+ * than the text beside it, and a midpoint tolerance misread that skew as a
+ * wrap, which sent `A` and `$` short of a line-ending link (#582). Returns
+ * null when coordinates are unavailable (unrendered or widget-only spans);
+ * callers fall back structurally.
  */
 function displayRowEdge(view: EditorView, pos: number, forward: boolean): number | null {
   const line = view.state.doc.lineAt(pos)
@@ -132,17 +135,18 @@ function displayRowEdge(view: EditorView, pos: number, forward: boolean): number
     const other: 1 | -1 = side === 1 ? -1 : 1
     return view.coordsAtPos(offset, side) ?? view.coordsAtPos(offset, other)
   }
-  const rowMid = (offset: number): number | null => {
-    const coords = rowCoords(offset)
-    return coords ? (coords.top + coords.bottom) / 2 : null
-  }
   const anchorCoords = rowCoords(pos)
   if (!anchorCoords) return null
-  const anchorMid = (anchorCoords.top + anchorCoords.bottom) / 2
-  const halfRow = Math.max(2, (anchorCoords.bottom - anchorCoords.top) / 2)
   const sameRow = (offset: number): boolean | null => {
-    const mid = rowMid(offset)
-    return mid == null ? null : Math.abs(mid - anchorMid) < halfRow
+    const coords = rowCoords(offset)
+    if (!coords) return null
+    const overlap =
+      Math.min(coords.bottom, anchorCoords.bottom) - Math.max(coords.top, anchorCoords.top)
+    const shortest = Math.min(
+      coords.bottom - coords.top,
+      anchorCoords.bottom - anchorCoords.top
+    )
+    return overlap > Math.max(1, shortest / 4)
   }
   if (forward) {
     let lo = pos
@@ -335,7 +339,7 @@ export function zenMoveToDisplayLineBoundary(
     return new CodeMirror.Pos(line, Infinity)
   }
 
-  // Preferred path: find the wrap point from row midpoints (#575). The
+  // Preferred path: find the wrap point from row coordinates (#575). The
   // goLineRight/goLineLeft commands below locate it by hit-testing an x
   // coordinate at the viewport edge, which under fractional display scaling
   // lands several characters short of the row end, or on a neighboring row.
@@ -353,6 +357,13 @@ export function zenMoveToDisplayLineBoundary(
           return motionArgs.forward
             ? new CodeMirror.Pos(head.line, Math.max(0, edge - line.from - 1))
             : new CodeMirror.Pos(head.line, edge - line.from)
+        }
+        // No usable coordinates. Vim's plain logical `$` beats hit-testing an
+        // x coordinate here: goLineRight resolves the rightmost VISIBLE glyph,
+        // and with live preview hiding a line-ending token (a wikilink's
+        // closing brackets), that landed the cursor inside the link (#582).
+        if (motionArgs.forward) {
+          return new CodeMirror.Pos(head.line, Infinity)
         }
       }
     } catch (err) {
@@ -485,6 +496,10 @@ export function registerDisplayLineMotion(): void {
               const pos = Math.min(line.to, line.from + Math.max(0, cursor.ch))
               const edge = displayRowEdge(view, pos, true)
               if (edge != null) return new CodeMirror.Pos(cursor.line, edge - line.from)
+              // No usable coordinates: append at the LOGICAL line end, like
+              // plain Vim, rather than goLineRight's rightmost visible glyph,
+              // which live preview's hidden closing tokens pull short (#582).
+              return new CodeMirror.Pos(cursor.line, line.length)
             }
             cm.execCommand('goLineRight')
             return cm.getCursor()

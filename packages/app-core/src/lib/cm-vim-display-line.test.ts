@@ -481,20 +481,45 @@ describe('display-row boundaries from row midpoints (#575)', () => {
     ).toEqual({ line: 1, ch: 60 })
   })
 
-  it('falls back to goLineRight when coordinates are unavailable', () => {
+  it('falls back to the LOGICAL line end when coordinates are unavailable (#582)', () => {
+    // goLineRight would resolve the rightmost visible glyph, which live
+    // preview's hidden closing tokens pull short of the real end; plain
+    // Vim's logical $ is the safe degradation.
     const state = EditorState.create({ doc: DOC })
-    let cursor = { line: 1, ch: 34, sticky: 'before' }
     const cm = {
-      execCommand: vi.fn((command: string) => {
-        expect(command).toBe('goLineRight')
-        cursor = { line: 1, ch: 30, sticky: 'before' }
-      }),
-      getCursor: () => cursor,
+      execCommand: vi.fn(),
+      getCursor: vi.fn(),
       cm6: { state, coordsAtPos: () => null } as unknown as EditorView
     }
     const res = zenMoveToDisplayLineBoundary(cm, { line: 1, ch: 0 }, { forward: true, repeat: 1 })
-    expect(cm.execCommand).toHaveBeenCalledTimes(1)
-    expect(res).toEqual({ line: 1, ch: 29 })
+    expect(cm.execCommand).not.toHaveBeenCalled()
+    expect(res).toEqual({ line: 1, ch: Infinity })
+  })
+
+  it('a taller inline chip on the row does not read as a wrap (#582)', () => {
+    // The line-end coords sit lower and taller (a rendered wikilink chip)
+    // but still overlap the text row; $ must reach the line end, not stop
+    // at an imaginary wrap before the chip.
+    const state = EditorState.create({ doc: 'alpha\nnote [[wikilink]]\nomega' })
+    const line = { from: 6, to: 23 }
+    const coordsAtPos = (offset: number) => {
+      if (offset < line.from || offset > line.to) return null
+      // Text glyphs: top 100..118 (midpoint 109). The trailing chip region:
+      // top 106..134 (midpoint 120), a skew past the old half-row midpoint
+      // tolerance, yet clearly overlapping the same visual row.
+      const inChip = offset >= 11
+      const top = inChip ? 106 : 100
+      const bottom = inChip ? 134 : 118
+      return { left: (offset - line.from) * 8, right: 0, top, bottom }
+    }
+    const cm = {
+      execCommand: vi.fn(),
+      getCursor: vi.fn(),
+      cm6: { state, coordsAtPos } as unknown as EditorView
+    }
+    const res = zenMoveToDisplayLineBoundary(cm, { line: 1, ch: 0 }, { forward: true, repeat: 1 })
+    expect(cm.execCommand).not.toHaveBeenCalled()
+    expect(res).toEqual({ line: 1, ch: 16 }) // line length 17, $ rests ON the last char
   })
 })
 
