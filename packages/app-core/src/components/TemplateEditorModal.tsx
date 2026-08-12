@@ -11,6 +11,7 @@ import { EditorView, drawSelection, highlightActiveLine, keymap, tooltips } from
 import { vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
+import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { yamlFrontmatter } from '@codemirror/lang-yaml'
 import { syntaxHighlighting, HighlightStyle, defaultHighlightStyle } from '@codemirror/language'
@@ -117,6 +118,7 @@ export function TemplateEditorModal({
       extensions: [
         appMarkdownSnippetExtension(),
         new Compartment().of(vimModeRef.current ? vim() : []),
+        vimVisualHighlightExtension,
         history(),
         drawSelection(),
         editorTabSize(useStore.getState().editorTabSize),

@@ -42,6 +42,7 @@ import {
 import { Vim, vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
+import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { registerDisplayLineMotion } from '../lib/cm-vim-display-line'
 import { toggleWrap, wrapLink } from '../lib/cm-format'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
@@ -438,6 +439,7 @@ export function QuickCaptureApp(): JSX.Element {
         extensions: [
           appMarkdownSnippetExtension(),
           new Compartment().of(prefs.vimMode ? vim() : []),
+          vimVisualHighlightExtension,
           // #312: inline-format shortcuts (bold/italic/code/strike/highlight/
           // math/link) — the same markers the main editor's VimNav binds — so
           // the Quick Note window formats identically instead of falling through
