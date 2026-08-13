@@ -11,8 +11,13 @@ import type { CloudAuthDeepLinkRequest } from "./deep-links";
 const PENDING_AUTH_FILE = "cloud-auth-pending.json";
 const CLOUD_ACCOUNT_FILE = "cloud-account.json";
 const AUTH_LIFETIME_MS = 5 * 60 * 1000;
-const PRODUCTION_CLOUD_BASE_URL = "https://zennotes.laravel.cloud";
+const PRODUCTION_CLOUD_BASE_URL = "https://zennotes.org";
 const DEVELOPMENT_CLOUD_BASE_URL = PRODUCTION_CLOUD_BASE_URL;
+/** The Laravel Cloud origin 2.28.0 shipped with. The deployment moved to
+ *  zennotes.org on release day and the old hostname stopped resolving, so a
+ *  stored account pointing at it is migrated on first read: same service,
+ *  same database, the token stays valid under the new origin. */
+const LEGACY_CLOUD_BASE_URL = "https://zennotes.laravel.cloud";
 
 interface PendingCloudAuth {
   base_url: string;
@@ -60,7 +65,10 @@ export class CloudAuthManager {
 
   async status(): Promise<CloudAccountStatus> {
     const storedAccount = await this.readJson<unknown>(CLOUD_ACCOUNT_FILE);
-    const account = isCloudAccount(storedAccount) ? storedAccount : null;
+    let account = isCloudAccount(storedAccount) ? storedAccount : null;
+    if (account?.base_url === LEGACY_CLOUD_BASE_URL) {
+      account = await this.migrateLegacyAccount(account);
+    }
     if (account && (await this.dependencies.getSecret(account.base_url))) {
       return { state: "connected", account };
     }
@@ -188,6 +196,27 @@ export class CloudAuthManager {
       this.removeFile(PENDING_AUTH_FILE),
     ]);
     return { state: "disconnected", account: null };
+  }
+
+  /** Move a legacy-origin account to the production origin: rewrite the
+   *  stored base_url and re-key the credential. The token is deleted from the
+   *  old key only after it is safely stored under the new one; if any step
+   *  fails, the account is left exactly as it was. */
+  private async migrateLegacyAccount(
+    account: CloudAccount,
+  ): Promise<CloudAccount> {
+    const token = await this.dependencies.getSecret(account.base_url);
+    if (!token) return account;
+    if (!(await this.dependencies.setSecret(PRODUCTION_CLOUD_BASE_URL, token))) {
+      return account;
+    }
+    const migrated: CloudAccount = {
+      ...account,
+      base_url: PRODUCTION_CLOUD_BASE_URL,
+    };
+    await this.writeJson(CLOUD_ACCOUNT_FILE, migrated);
+    await this.dependencies.deleteSecret(account.base_url);
+    return migrated;
   }
 
   private async readPending(): Promise<PendingCloudAuth | null> {

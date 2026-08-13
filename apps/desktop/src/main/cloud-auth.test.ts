@@ -232,10 +232,8 @@ describe("normalizeCloudBaseUrl", () => {
 });
 
 describe("resolveCloudBaseUrl", () => {
-  it("uses the Laravel Cloud backend by default in development", () => {
-    expect(resolveCloudBaseUrl(undefined, false)).toBe(
-      "https://zennotes.laravel.cloud",
-    );
+  it("uses the production cloud service by default in development", () => {
+    expect(resolveCloudBaseUrl(undefined, false)).toBe("https://zennotes.org");
   });
 
   it("supports an explicit development override", () => {
@@ -254,6 +252,78 @@ describe("resolveCloudBaseUrl", () => {
         true,
         "http://localhost:8000",
       ),
-    ).toBe("https://zennotes.laravel.cloud");
+    ).toBe("https://zennotes.org");
+  });
+});
+
+describe("legacy Laravel Cloud account migration (2.28.0 → 2.28.1)", () => {
+  const legacyAccount = {
+    base_url: "https://zennotes.laravel.cloud",
+    user: { id: 7, name: "Niri", email: "niri@example.com" },
+    device: { id: "device-3", name: "Test Mac", platform: "desktop" },
+    connected_at: "2026-08-12T09:00:00.000Z",
+  };
+
+  it("re-keys the stored account and credential to zennotes.org on read", async () => {
+    const { manager, storageDirectory, secrets } = await setup();
+    await writeFile(
+      path.join(storageDirectory, "cloud-account.json"),
+      JSON.stringify(legacyAccount),
+    );
+    secrets.set("https://zennotes.laravel.cloud", "legacy-token");
+
+    const status = await manager.status();
+
+    expect(status.state).toBe("connected");
+    expect(status.account?.base_url).toBe("https://zennotes.org");
+    expect(status.account?.user).toEqual(legacyAccount.user);
+    expect(secrets.get("https://zennotes.org")).toBe("legacy-token");
+    expect(secrets.has("https://zennotes.laravel.cloud")).toBe(false);
+    const persisted = JSON.parse(
+      await readFile(
+        path.join(storageDirectory, "cloud-account.json"),
+        "utf8",
+      ),
+    );
+    expect(persisted.base_url).toBe("https://zennotes.org");
+  });
+
+  it("reports disconnected without rewriting when the legacy credential is gone", async () => {
+    const { manager, storageDirectory, secrets } = await setup();
+    await writeFile(
+      path.join(storageDirectory, "cloud-account.json"),
+      JSON.stringify(legacyAccount),
+    );
+
+    const status = await manager.status();
+
+    expect(status.state).toBe("disconnected");
+    expect(secrets.size).toBe(0);
+    const persisted = JSON.parse(
+      await readFile(
+        path.join(storageDirectory, "cloud-account.json"),
+        "utf8",
+      ),
+    );
+    expect(persisted.base_url).toBe("https://zennotes.laravel.cloud");
+  });
+
+  it("keeps the legacy pairing intact when the new credential cannot be stored", async () => {
+    const { manager, storageDirectory, secrets } = await setup();
+    await writeFile(
+      path.join(storageDirectory, "cloud-account.json"),
+      JSON.stringify(legacyAccount),
+    );
+    secrets.set("https://zennotes.laravel.cloud", "legacy-token");
+    const failingManager = manager as unknown as {
+      dependencies: { setSecret(baseUrl: string, token: string): Promise<boolean> };
+    };
+    failingManager.dependencies.setSecret = async () => false;
+
+    const status = await manager.status();
+
+    expect(status.state).toBe("connected");
+    expect(status.account?.base_url).toBe("https://zennotes.laravel.cloud");
+    expect(secrets.get("https://zennotes.laravel.cloud")).toBe("legacy-token");
   });
 });
