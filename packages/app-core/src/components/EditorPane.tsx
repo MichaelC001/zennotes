@@ -121,7 +121,7 @@ import { slashCommandSource, slashCommandRender } from '../lib/cm-slash-commands
 import { calloutTypeSource } from '../lib/cm-callouts'
 import { dateShortcutSource } from '../lib/cm-date-shortcuts'
 import { wikilinkSource, wikilinkHeadingSource, atNoteSource } from '../lib/cm-wikilinks'
-import { extractLinkAtCursor, markdownLinkAt } from '../lib/internal-links'
+import { linkRangeAtCursor, markdownLinkAt } from '../lib/internal-links'
 import { setBlockType, toggleWrap, wrapLink } from '../lib/cm-format'
 import { EditorSelectionToolbar } from './EditorSelectionToolbar'
 import { appMarkdownSnippetExtension } from '../lib/markdown-snippets-config'
@@ -300,6 +300,29 @@ const LARGE_DOC_EDITOR_HYDRATE_DELAY_MS = 180
 // chords are stripped from `defaultKeymap` so Vim's `<C-d>` & co. work (see
 // cm-vim-default-keymap). Built behind a compartment and reconfigured on Vim
 // toggle or keymap-override changes.
+/**
+ * Whether the pointer actually rests on the rendered glyphs of [from, to].
+ * posAtCoords clamps coordinates in the blank space beside a line to the
+ * nearest caret, and live preview hides a link's closing syntax, so that
+ * caret lands inside a link that merely ends its line; without this check the
+ * whole blank stretch after the line hovers and follows like the link (#587).
+ */
+function pointerOverRange(
+  view: EditorView,
+  from: number,
+  to: number,
+  x: number,
+  y: number
+): boolean {
+  const start = view.coordsAtPos(from, 1)
+  const end = view.coordsAtPos(to, -1)
+  if (!start || !end) return false
+  if (y < start.top || y > end.bottom) return false
+  if (y <= start.bottom && x < start.left) return false
+  if (y >= end.top && x > end.right) return false
+  return true
+}
+
 function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extension {
   return keymap.of([
     {
@@ -1786,14 +1809,21 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
                 if (pos != null) {
                   const doc = view.state.doc.toString()
                   if (event.metaKey || event.ctrlKey) {
-                    const linkTarget = extractLinkAtCursor(doc, pos)
-                    if (linkTarget && followLinkTarget(linkTarget)) {
+                    const link = linkRangeAtCursor(doc, pos)
+                    if (
+                      link &&
+                      pointerOverRange(view, link.from, link.to, event.clientX, event.clientY) &&
+                      followLinkTarget(link.target)
+                    ) {
                       event.preventDefault()
                       return true
                     }
                   } else {
                     const link = markdownLinkAt(doc, pos)
-                    if (link) {
+                    if (
+                      link &&
+                      pointerOverRange(view, link.from, link.to, event.clientX, event.clientY)
+                    ) {
                       const sel = view.state.selection.main
                       const rendered = sel.to < link.from || sel.from > link.to
                       if (rendered && followLinkTarget(link.href)) {
@@ -1827,7 +1857,19 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
                 return false
               }
               const line = view.state.doc.lineAt(pos)
-              setHoveredLink(extractLinkAtCursor(line.text, pos - line.from))
+              const link = linkRangeAtCursor(line.text, pos - line.from)
+              setHoveredLink(
+                link &&
+                  pointerOverRange(
+                    view,
+                    line.from + link.from,
+                    line.from + link.to,
+                    event.clientX,
+                    event.clientY
+                  )
+                  ? link.target
+                  : null
+              )
               return false
             },
             mouseleave: () => {
