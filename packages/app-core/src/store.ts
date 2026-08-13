@@ -271,6 +271,7 @@ const VALID_FAMILIES: ThemeFamily[] = [
   'tokyo-night',
   'kanagawa',
   'black-metal',
+  'rose-pine',
   'custom'
 ]
 const VALID_MODES: ThemeMode[] = ['light', 'dark', 'auto']
