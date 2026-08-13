@@ -43,7 +43,6 @@ function setup(published = false, publishActive = true) {
           url: 'https://zennotes.org/s/launch',
           title: 'Launch',
           note_path: 'Notes/Launch.md',
-          view_count: 3,
           created_at: '2026-08-10T12:00:00.000Z',
           updated_at: '2026-08-10T12:00:00.000Z'
         }]

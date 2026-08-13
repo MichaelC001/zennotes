@@ -283,7 +283,6 @@ export interface CloudUsage {
   publish: {
     notes: number;
     assets: number;
-    views: number;
     latest_at: string | null;
   };
 }
@@ -308,7 +307,6 @@ export interface CloudPublishedNote {
   url: string;
   title: string;
   note_path: string | null;
-  view_count: number;
   appearance?: CloudPublishedNoteAppearance;
   created_at: string | null;
   updated_at: string | null;

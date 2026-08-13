@@ -41,7 +41,6 @@ describe('PublishedNoteButton', () => {
         url: 'https://zennotes.org/s/launch',
         title: 'Launch',
         note_path: note.path,
-        view_count: 3,
         created_at: '2026-08-10T12:00:00.000Z',
         updated_at: '2026-08-10T12:00:00.000Z'
       }])

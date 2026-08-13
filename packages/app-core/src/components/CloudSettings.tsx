@@ -592,7 +592,7 @@ function CloudPublishedNotesPanel({
           </h3>
           <p className="mt-1 text-sm leading-6 text-ink-500">
             {usage
-              ? `${pluralize(usage.notes, "published note")} · ${pluralize(usage.views, "view")} · ${pluralize(usage.assets, "asset")} using ${formatBytes(publishedBytes ?? 0)}.`
+              ? `${pluralize(usage.notes, "published note")} · ${pluralize(usage.assets, "asset")} using ${formatBytes(publishedBytes ?? 0)}.`
               : "Anyone with a link can view a published note until you unpublish it."}
           </p>
         </div>
@@ -625,10 +625,6 @@ function CloudPublishedNotesPanel({
                     {note.note_path && (
                       <span className="truncate">{note.note_path}</span>
                     )}
-                    <span>
-                      {note.view_count}{" "}
-                      {note.view_count === 1 ? "view" : "views"}
-                    </span>
                     {note.updated_at && (
                       <span>
                         Updated {formatCloudVaultDate(note.updated_at)}
@@ -835,7 +831,7 @@ function CloudUsageSummary({
         <CloudUsageCard
           label="Publishing"
           value={formatBytes(usage.storage.publish_bytes)}
-          detail={`${pluralize(usage.publish.notes, "published note")} · ${pluralize(usage.publish.views, "view")}`}
+          detail={pluralize(usage.publish.notes, "published note")}
         />
       </div>
     </section>

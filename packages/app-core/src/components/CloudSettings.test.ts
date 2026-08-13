@@ -102,7 +102,6 @@ const serviceAccount: CloudServiceAccount = {
     publish: {
       notes: 1,
       assets: 0,
-      views: 12,
       latest_at: "2026-08-10T12:05:00.000Z",
     },
   },
@@ -197,7 +196,8 @@ describe("CloudSettings", () => {
     expect(host.textContent).toContain("1.5 MB of 1.0 GB");
     expect(host.textContent).toContain("38 synced notes across 2 vaults");
     expect(host.textContent).toContain("1 backup · 30-day retention");
-    expect(host.textContent).toContain("1 published note · 12 views");
+    expect(host.textContent).toContain("1 published note");
+    expect(host.textContent).not.toContain("views");
   });
 
   it("lists, copies, and unpublishes public notes", async () => {
@@ -214,7 +214,6 @@ describe("CloudSettings", () => {
         url: "https://zennotes.org/s/launch",
         title: "Launch notes",
         note_path: "Notes/Launch.md",
-        view_count: 12,
         created_at: "2026-08-10T12:00:00.000Z",
         updated_at: "2026-08-10T12:05:00.000Z",
       },
@@ -232,7 +231,7 @@ describe("CloudSettings", () => {
 
     expect(host.textContent).toContain("Published notes");
     expect(host.textContent).toContain("Launch notes");
-    expect(host.textContent).toContain("12 views");
+    expect(host.textContent).not.toContain("views");
     expect(host.textContent).toContain("Updated");
 
     const copy = [...host.querySelectorAll("button")].find(

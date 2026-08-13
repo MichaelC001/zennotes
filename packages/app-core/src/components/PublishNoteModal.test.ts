@@ -24,7 +24,7 @@ describe('PublishNoteModal', () => {
     document.body.querySelectorAll('[role="dialog"]').forEach((dialog) => dialog.remove())
   })
 
-  it('loads the existing appearance and explicitly removes its logo', async () => {
+  it('updates an existing note without sending per-note appearance', async () => {
     const publishedNoteChanged = vi.fn()
     const unsubscribe = subscribePublishedNoteChanges(publishedNoteChanged)
     const updateCloudPublishedNote = vi.fn(async () => ({
@@ -48,7 +48,6 @@ describe('PublishNoteModal', () => {
         url: 'https://zennotes.org/s/launch',
         title: 'Launch',
         note_path: 'Notes/Launch.md',
-        view_count: 3,
         appearance: {
           theme: 'rose-pine-moon',
           logo_url: 'https://zennotes.org/s/assets/logo'
@@ -71,16 +70,10 @@ describe('PublishNoteModal', () => {
     })
 
     const dialog = document.body.querySelector('[role="dialog"]') as HTMLDivElement
-    const theme = dialog.querySelector('select') as HTMLSelectElement
-    expect(theme.value).toBe('rose-pine-moon')
-    expect(dialog.textContent).toContain('Custom logo')
-
-    const remove = [...dialog.querySelectorAll('button')]
-      .find((button) => button.textContent?.trim() === 'Remove')
-    await act(async () => remove!.click())
-
-    theme.value = 'nord-light'
-    await act(async () => theme.dispatchEvent(new Event('change', { bubbles: true })))
+    expect(dialog.querySelector('select')).toBeNull()
+    expect(dialog.querySelector('input[type="file"]')).toBeNull()
+    expect(dialog.textContent).toContain('Update the public copy with the latest content')
+    expect(dialog.textContent).toContain('Theme and logo are managed for your full publication')
 
     const update = [...dialog.querySelectorAll('button')]
       .find((button) => button.textContent?.trim() === 'Update note')
@@ -89,8 +82,7 @@ describe('PublishNoteModal', () => {
     expect(updateCloudPublishedNote).toHaveBeenCalledWith(42, {
       note_path: 'Notes/Launch.md',
       title: 'Launch',
-      markdown: '# Launch',
-      appearance: { theme: 'nord-light', logo: null }
+      markdown: '# Launch'
     })
     expect(publishedNoteChanged).toHaveBeenCalledWith({
       notePath: 'Notes/Launch.md',
