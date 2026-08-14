@@ -50,6 +50,7 @@ import {
 } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { isImeComposing } from '../lib/ime'
+import { displayRowBoundaryKeymap } from '../lib/cm-display-row'
 import { resolveCodeLanguage } from '../lib/cm-code-languages'
 import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languages'
 import {
@@ -74,7 +75,7 @@ import {
 } from '../lib/cm-vim-clipboard'
 import { wireYankHighlight, yankHighlightExtension } from '../lib/cm-yank-highlight'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
-import { frontmatterStyle } from '../lib/cm-frontmatter'
+import { frontmatterStyle, frontmatterTagExtension } from '../lib/cm-frontmatter'
 import { codeBlockFontPlugin } from '../lib/cm-code-block-font'
 import {
   orderedListRenumber,
@@ -105,6 +106,7 @@ import { hashtagExtension } from '../lib/cm-hashtags'
 import { taskMetadataExtension } from '../lib/cm-task-metadata'
 import { taskRollupExtension } from '../lib/cm-task-rollup'
 import { hashtagSource } from '../lib/cm-hashtag-complete'
+import { frontmatterTagSource } from '../lib/cm-frontmatter-tag-complete'
 import { applyHighlight, HIGHLIGHT_COLORS, highlightExtension } from '../lib/cm-highlight'
 import { wikilinkRenderExtension } from '../lib/cm-wikilink-render'
 import { mathRenderExtension } from '../lib/cm-math-render'
@@ -120,6 +122,7 @@ import { mathBlockArrowKeymap } from '../lib/cm-math-nav'
 import { slashCommandSource, slashCommandRender } from '../lib/cm-slash-commands'
 import { calloutTypeSource } from '../lib/cm-callouts'
 import { dateShortcutSource } from '../lib/cm-date-shortcuts'
+import { latexCommandSource } from '../lib/cm-latex-completions'
 import { wikilinkSource, wikilinkHeadingSource, atNoteSource } from '../lib/cm-wikilinks'
 import { linkRangeAtCursor, markdownLinkAt } from '../lib/internal-links'
 import { setBlockType, toggleWrap, wrapLink } from '../lib/cm-format'
@@ -325,6 +328,11 @@ function pointerOverRange(
 
 function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extension {
   return keymap.of([
+    // Home/End on the display row the user can see. Listed before
+    // defaultKeymap, whose versions hit-test an x coordinate at the editor's
+    // edge and misland on wrapped lines under fractional display scaling
+    // (#591, the same resolution #575 removed from `$`).
+    ...displayRowBoundaryKeymap,
     {
       key: 'Mod-f',
       run: () => {
@@ -404,6 +412,7 @@ function markdownEditingExtensions(showHeadingLevelLabels = false): Extension[] 
     vimAwareMarkdownKeymap,
     markdownListIndentPlugin,
     frontmatterStyle,
+    frontmatterTagExtension,
     orderedListRenumber,
     forwardOnCheckboxArrow,
     headingFolding({ showLevelLabels: showHeadingLevelLabels }),
@@ -1779,7 +1788,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               slashCommandSource,
               calloutTypeSource,
               dateShortcutSource,
+              latexCommandSource,
               atNoteSource,
+              frontmatterTagSource,
               hashtagSource,
               wikilinkSource,
               wikilinkHeadingSource

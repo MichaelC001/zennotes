@@ -23,7 +23,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { IPC } from "@shared/ipc";
-import type { CloudPublishNoteInput } from "@zennotes/bridge-contract/cloud-sync";
+import type {
+  CloudPublishNoteInput,
+  CloudSyncSettingsChoice,
+} from "@zennotes/bridge-contract/cloud-sync";
 import type {
   NoteMeta,
   NoteCommentInput,
@@ -182,6 +185,7 @@ import {
   setRemoteWorkspaceSecret,
 } from "./secret-store";
 import { CloudAuthManager, resolveCloudBaseUrl } from "./cloud-auth";
+import { shouldForceGnomeLibsecret } from "./linux-password-store";
 import { CloudAuthLoopbackServer } from "./cloud-auth-loopback";
 import { createCloudSyncClient } from "./cloud-sync-client";
 import { DesktopCloudSyncService } from "./cloud-sync-service";
@@ -2629,6 +2633,17 @@ function registerIpc(): void {
   handle(IPC.CLOUD_VAULT_SYNC, () =>
     getCloudSyncService().sync(requireLocalCloudVaultRoot()),
   );
+  handle(IPC.CLOUD_VAULT_SETTINGS_CONFLICT_GET, () =>
+    getCloudSyncService().settingsConflict(requireLocalCloudVaultRoot()),
+  );
+  handle(
+    IPC.CLOUD_VAULT_SETTINGS_CONFLICT_RESOLVE,
+    (_event, choice: CloudSyncSettingsChoice) =>
+      getCloudSyncService().resolveSettingsConflict(
+        requireLocalCloudVaultRoot(),
+        choice === "cloud" ? "cloud" : "local",
+      ),
+  );
   handle(IPC.CLOUD_BACKUPS_LIST, () =>
     getCloudSyncService().listBackups(requireLocalCloudVaultRoot()),
   );
@@ -4759,6 +4774,18 @@ if (process.platform === "linux") {
   // through xdg-desktop-portal, but Electron only wires that path when this
   // Chromium feature is enabled before app.whenReady().
   app.commandLine.appendSwitch("enable-features", "GlobalShortcutsPortal");
+  // Chromium picks the safeStorage keyring backend from desktop detection,
+  // not by probing the bus, so on compositors it does not recognize (Niri,
+  // Hyprland, Sway) it falls back to plaintext and cloud sign-in cannot store
+  // its credential even with a healthy gnome-keyring running. Point Chromium
+  // at libsecret on those sessions; rationale and the safety argument live in
+  // linux-password-store.ts. A user-supplied --password-store always wins.
+  if (
+    !app.commandLine.hasSwitch("password-store") &&
+    shouldForceGnomeLibsecret(process.env)
+  ) {
+    app.commandLine.appendSwitch("password-store", "gnome-libsecret");
+  }
 }
 
 app.whenReady().then(async () => {
