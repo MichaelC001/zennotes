@@ -29,6 +29,16 @@ function content(data: string): CloudSyncContent {
   }
 }
 
+function binaryContent(data: string): CloudSyncContent {
+  return {
+    encoding: 'base64',
+    data,
+    sha256: `hash:${data}`,
+    byte_length: data.length,
+    media_type: 'image/jpeg'
+  }
+}
+
 function ids(): CloudSyncIdSource {
   let item = 0
   let operation = 0
@@ -423,6 +433,57 @@ describe('CloudSyncCoordinator', () => {
     expect(second.state.cursor).toBe(1)
     expect(mutations).toHaveLength(1)
     expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('checkpoints binary uploads one per request while retaining text batches', async () => {
+    const states = memoryState({ version: 1, vault_id: 'vault-1', cursor: 0, items: {} })
+    const repository = memoryRepository([
+      { path: 'a.md', kind: 'text', content: content('a') },
+      { path: 'b.md', kind: 'text', content: content('b') },
+      { path: 'c.jpg', kind: 'binary', content: binaryContent('c') },
+      { path: 'd.jpg', kind: 'binary', content: binaryContent('d') },
+      { path: 'e.jpg', kind: 'binary', content: binaryContent('e') },
+      { path: 'f.jpg', kind: 'binary', content: binaryContent('f') },
+      { path: 'g.md', kind: 'text', content: content('g') },
+      { path: 'h.md', kind: 'text', content: content('h') }
+    ])
+    const requests: CloudSyncMutationRequest[] = []
+    let sequence = 0
+    const server: CloudSyncRemote = {
+      async manifest() {
+        return { data: [], cursor: 0, next_page: null }
+      },
+      async changes(_vaultId, after) {
+        return { data: [], cursor: after, has_more: false }
+      },
+      async mutate(_vaultId, body) {
+        requests.push(body)
+        const acknowledged = body.mutations.map((mutation) => ({
+          operation_id: mutation.operation_id,
+          item_id: mutation.item_id,
+          revision: 1,
+          sequence: ++sequence
+        }))
+        return { acknowledged, conflicts: [], cursor: sequence }
+      }
+    }
+
+    await new CloudSyncCoordinator('vault-1', server, repository, states, ids()).sync()
+
+    expect(
+      requests.map((request) =>
+        request.mutations.map((mutation) =>
+          mutation.type === 'upsert' ? mutation.path : mutation.type
+        )
+      )
+    ).toEqual([
+      ['a.md', 'b.md'],
+      ['c.jpg'],
+      ['d.jpg'],
+      ['e.jpg'],
+      ['f.jpg'],
+      ['g.md', 'h.md']
+    ])
   })
 
   it('stops initial sync on same-path content conflicts', async () => {

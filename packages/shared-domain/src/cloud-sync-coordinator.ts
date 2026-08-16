@@ -5,6 +5,7 @@ import type {
   CloudSyncLocalConflict,
   CloudSyncManifestItem,
   CloudSyncManifestResponse,
+  CloudSyncMutation,
   CloudSyncMutationRequest,
   CloudSyncMutationResponse
 } from '@zennotes/bridge-contract/cloud-sync'
@@ -137,8 +138,7 @@ export class CloudSyncCoordinator {
     let mutationCursor = state.cursor
     let pushed = 0
 
-    for (let offset = 0; offset < plan.mutations.length; offset += MUTATION_BATCH_SIZE) {
-      const batch = { mutations: plan.mutations.slice(offset, offset + MUTATION_BATCH_SIZE) }
+    for (const batch of mutationBatches(plan.mutations)) {
       const response = await this.remote.mutate(this.vaultId, batch)
       const resolution = resolveCloudSyncMutations(state, batch, response)
       state = resolution.state
@@ -275,6 +275,37 @@ export class CloudSyncCoordinator {
 
     throw new Error('Vault changed repeatedly while the initial sync manifest was loading')
   }
+}
+
+function mutationBatches(mutations: CloudSyncMutation[]): CloudSyncMutationRequest[] {
+  const batches: CloudSyncMutationRequest[] = []
+  let batch: CloudSyncMutation[] = []
+
+  const flush = (): void => {
+    if (batch.length === 0) return
+    batches.push({ mutations: batch })
+    batch = []
+  }
+
+  for (const mutation of mutations) {
+    // The cloud server persists non-UTF-8 payloads to object storage serially.
+    // Isolating each one keeps several assets from exhausting one request's
+    // timeout and rolling back the whole batch before progress is checkpointed.
+    const usesObjectStorage =
+      mutation.type === 'upsert' && mutation.content.encoding !== 'utf8'
+
+    if (usesObjectStorage) {
+      flush()
+      batches.push({ mutations: [mutation] })
+      continue
+    }
+
+    batch.push(mutation)
+    if (batch.length === MUTATION_BATCH_SIZE) flush()
+  }
+
+  flush()
+  return batches
 }
 
 function manifestState(
