@@ -6,6 +6,7 @@ import {
   isSameFileBlockLink,
   isSameFileHeadingLink,
   parseCreateNotePath,
+  resolveWikilinkPath,
   resolveWikilinkTarget,
   stripWikilinkAnchor,
   suggestCreateNotePath,
@@ -161,6 +162,28 @@ describe('resolveWikilinkTarget — heading/block anchors (#196)', () => {
 
   it('returns null for a bare [[#heading]] with no document', () => {
     expect(resolveWikilinkTarget(notes, '#My Heading')).toBeNull()
+  })
+})
+
+describe('resolveWikilinkPath — same-note anchors (#601)', () => {
+  const currentPath = 'inbox/My Document.md'
+
+  it('uses the current note for a same-note block link', () => {
+    expect(resolveWikilinkPath(notes, '^note-two', currentPath)).toBe(currentPath)
+  })
+
+  it('uses the current note for a same-note heading link', () => {
+    expect(resolveWikilinkPath(notes, '#Introduction', currentPath)).toBe(currentPath)
+  })
+
+  it('still resolves a cross-note anchored link normally', () => {
+    expect(resolveWikilinkPath(notes, 'projects/Spec^design', currentPath)).toBe(
+      'inbox/projects/Spec.md'
+    )
+  })
+
+  it('returns null when a same-note anchor has no current note', () => {
+    expect(resolveWikilinkPath(notes, '^note-two', null)).toBeNull()
   })
 })
 

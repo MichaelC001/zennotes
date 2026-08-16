@@ -180,6 +180,25 @@ export function resolveWikilinkTarget<T extends NoteRef>(notes: T[], target: str
   return visible.find((note) => normalizeForCompare(note.title) === needle) ?? null
 }
 
+/**
+ * The note path a wikilink should open, including same-note `[[#heading]]` and
+ * `[[^block]]` targets whose note part is intentionally empty. Keeping this
+ * decision beside resolution prevents keyboard and raw-link entry points from
+ * rejecting the target before anchor navigation gets a chance to dispatch it.
+ */
+export function resolveWikilinkPath<T extends NoteRef>(
+  notes: T[],
+  target: string,
+  currentPath: string | null | undefined
+): string | null {
+  const resolved = resolveWikilinkTarget(notes, target)
+  if (resolved) return resolved.path
+  if (currentPath && (isSameFileHeadingLink(target) || isSameFileBlockLink(target))) {
+    return currentPath
+  }
+  return null
+}
+
 export function backlinksForNote<T extends NoteRef & Pick<NoteMeta, 'wikilinks'>>(
   notes: T[],
   current: Pick<NoteMeta, 'path'>

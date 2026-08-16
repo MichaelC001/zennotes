@@ -2,7 +2,7 @@ import { useStore } from '../store'
 import { offerCreateNoteFromLink } from './create-note-from-link'
 import { externalFileLink, openExternalFileLink } from './external-file-link'
 import { externalLinkUrl, resolveInternalNoteHref } from './internal-links'
-import { resolveWikilinkTarget } from './wikilinks'
+import { resolveWikilinkPath } from './wikilinks'
 import {
   openDatabaseFromWikilink,
   openWikilinkHeading,
@@ -37,9 +37,9 @@ export function followLinkTarget(target: string): boolean {
     else void state.selectNote(internal.path).then(focusSoon)
     return true
   }
-  const wikilink = resolveWikilinkTarget(state.notes, target)
-  if (wikilink) {
-    void openWikilinkTarget(wikilink.path, target).then(focusSoon)
+  const wikilinkPath = resolveWikilinkPath(state.notes, target, state.selectedPath)
+  if (wikilinkPath) {
+    void openWikilinkTarget(wikilinkPath, target).then(focusSoon)
     return true
   }
   if (openDatabaseFromWikilink(target)) {

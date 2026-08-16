@@ -20,7 +20,7 @@ import { rankItems } from "../lib/fuzzy-score";
 import { BUILTIN_TEMPLATES } from "@shared/builtin-templates";
 import { mergeTemplates } from "@shared/template-files";
 import type { PaneLayout, PaneSplit } from "../lib/pane-layout";
-import { parseCreateNotePath, resolveWikilinkTarget } from "../lib/wikilinks";
+import { parseCreateNotePath, resolveWikilinkPath } from "../lib/wikilinks";
 import {
   openDatabaseFromWikilink,
   openWikilinkHeading,
@@ -645,13 +645,13 @@ function registerVimCommands(): void {
     }
 
     const notes = state.notes;
-    const resolved = resolveWikilinkTarget(notes, target);
-    if (resolved) {
+    const wikilinkPath = resolveWikilinkPath(notes, target, state.selectedPath);
+    if (wikilinkPath) {
       const focusEditorSoon = (): void => {
         state.setFocusedPanel("editor");
         requestAnimationFrame(() => useStore.getState().editorViewRef?.focus());
       };
-      void openWikilinkTarget(resolved.path, target).then(focusEditorSoon);
+      void openWikilinkTarget(wikilinkPath, target).then(focusEditorSoon);
       return;
     }
 
