@@ -123,6 +123,7 @@ import { slashCommandSource, slashCommandRender } from '../lib/cm-slash-commands
 import { calloutTypeSource } from '../lib/cm-callouts'
 import { dateShortcutSource } from '../lib/cm-date-shortcuts'
 import { latexCommandSource } from '../lib/cm-latex-completions'
+import { typstCommandSource } from '../lib/cm-typst-completions'
 import {
   wikilinkSource,
   wikilinkHeadingSource,
@@ -1794,6 +1795,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               calloutTypeSource,
               dateShortcutSource,
               latexCommandSource,
+              typstCommandSource,
               atNoteSource,
               frontmatterTagSource,
               hashtagSource,
