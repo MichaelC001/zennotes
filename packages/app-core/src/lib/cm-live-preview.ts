@@ -1166,9 +1166,7 @@ function computeDecorations(view: EditorView): DecorationSet {
       // are hidden and reveal it when the cursor is on the line to edit.
       if (!lineActive && !replacedLines.has(lineNo)) {
         const blockId = trailingBlockIdRange(line.text)
-        // Leave a lone `^id` line visible: hiding it would render an empty line
-        // with nothing to explain the gap.
-        if (blockId && blockId.from > 0) {
+        if (blockId) {
           pending.push({
             from: line.from + blockId.from,
             to: line.from + blockId.to,

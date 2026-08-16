@@ -28,7 +28,8 @@ const storeState = vi.hoisted(() => ({
   },
   noteContents: {
     'inbox/Zen Garden.md': {
-      body: '# Intro\n\n## Setup\n\n- Install the thing ^install\n\n## Usage Notes\n\n- Run it ^run-it\n\nbody\n'
+      body:
+        '# Intro\n\n## Setup\n\n- Install the thing ^install\n\n## Usage Notes\n\n- Run it ^run-it\n\nStandalone explanation.\n\n^standalone\n'
     }
   },
   notes: [
@@ -191,14 +192,15 @@ function blockResult(doc: string) {
 describe('wikilinkBlockSource (#601 — block id autocomplete)', () => {
   it('suggests the target note block ids after ^', async () => {
     const result = await blockResult('[[Zen Garden^')
-    expect(result?.options.map((o) => o.label)).toEqual(['install', 'run-it'])
+    expect(result?.options.map((o) => o.label)).toEqual(['install', 'run-it', 'standalone'])
   })
 
   it('shows the block text so ids can be told apart', async () => {
     const result = await blockResult('[[Zen Garden^')
     expect(result?.options.map((o) => o.detail)).toEqual([
       '- Install the thing',
-      '- Run it'
+      '- Run it',
+      'Standalone explanation.'
     ])
   })
 

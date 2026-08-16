@@ -55,6 +55,15 @@ describe('parseBlockAnchors (#601)', () => {
     expect(body.slice(anchor!.markerFrom, anchor!.markerTo)).toBe('^note-two')
     expect(body.split('\n')[anchor!.line - 1]).toBe('- Second note ^note-two')
   })
+
+  it('points a standalone marker at the paragraph it names while retaining marker coordinates', () => {
+    const anchor = parseBlockAnchors(body).find((a) => a.id === 'standalone')
+    expect(anchor).toBeDefined()
+    expect(anchor!.line).toBe(14)
+    expect(body.slice(anchor!.from)).toMatch(/^A standalone marker follows this paragraph\./)
+    expect(anchor!.markerLine).toBe(16)
+    expect(body.slice(anchor!.markerFrom, anchor!.markerTo)).toBe('^standalone')
+  })
 })
 
 describe('findBlockAnchor (#601)', () => {

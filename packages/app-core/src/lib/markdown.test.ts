@@ -16,6 +16,19 @@ describe('renderMarkdown', () => {
     expect(toml).not.toContain('title =')
   })
 
+  it('hides trailing and standalone block ids from rendered prose (#601)', () => {
+    const html = renderMarkdown(
+      ['A trailing marker. ^trailing', '', 'A standalone marker names this.', '', '^standalone'].join(
+        '\n'
+      )
+    )
+
+    expect(html).toContain('A trailing marker.')
+    expect(html).toContain('A standalone marker names this.')
+    expect(html).not.toContain('^trailing')
+    expect(html).not.toContain('^standalone')
+  })
+
   it('sanitizes raw HTML and javascript URLs', () => {
     const html = renderMarkdown(
       [

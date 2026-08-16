@@ -277,8 +277,9 @@ export async function wikilinkBlockSource(
     seen.add(key)
     // Show what the id actually marks; an id on its own line describes the
     // block above it, so fall back to that.
-    const own = (lines[anchor.line - 1] ?? '').slice(0, -(anchor.id.length + 1)).trim()
-    const detail = own || (lines[anchor.line - 2] ?? '').trim()
+    const markerLine = lines[anchor.markerLine - 1] ?? ''
+    const own = markerLine.slice(0, anchor.markerFrom - anchor.markerLineFrom).trim()
+    const detail = own || (lines[anchor.line - 1] ?? '').trim()
     options.push({
       label: anchor.id,
       detail: detail.slice(0, 60) || undefined,

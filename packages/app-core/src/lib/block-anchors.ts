@@ -35,6 +35,10 @@ export interface BlockAnchor {
   line: number
   /** 0-based char offset where that line starts, for jumping to the block. */
   from: number
+  /** 1-based line number carrying the literal `^id` marker. */
+  markerLine: number
+  /** 0-based char offset where the marker's line starts. */
+  markerLineFrom: number
   /** 0-based char offsets of the `^id` marker itself, for hiding it. */
   markerFrom: number
   markerTo: number
@@ -50,15 +54,38 @@ export interface BlockAnchor {
  */
 export function parseBlockAnchors(body: string): BlockAnchor[] {
   const anchors: BlockAnchor[] = []
+  const lines = body.split('\n')
+  const lineStarts: number[] = []
+  let lineOffset = 0
+  for (const line of lines) {
+    lineStarts.push(lineOffset)
+    lineOffset += line.length + 1
+  }
 
   for (const { text, line, from } of scanMarkdownLines(body)) {
     const marker = trailingBlockIdRange(text)
     if (!marker) continue
 
+    let targetLine = line
+    let targetFrom = from
+    const markerIsStandalone = text.slice(0, marker.from).trim() === ''
+    if (markerIsStandalone) {
+      let previous = line - 2
+      while (previous >= 0 && lines[previous].trim() === '') previous--
+      if (previous >= 0) {
+        let first = previous
+        while (first > 0 && lines[first - 1].trim() !== '') first--
+        targetLine = first + 1
+        targetFrom = lineStarts[first]
+      }
+    }
+
     anchors.push({
       id: marker.id,
-      line,
-      from,
+      line: targetLine,
+      from: targetFrom,
+      markerLine: line,
+      markerLineFrom: from,
       markerFrom: from + marker.from,
       markerTo: from + marker.to
     })
@@ -96,9 +123,11 @@ export function extractBlock(body: string, id: string): string | null {
   if (!anchor) return null
 
   const lines = body.split('\n')
-  const index = anchor.line - 1
+  const index = anchor.markerLine - 1
   const marked = lines[index] ?? ''
-  const withoutMarker = marked.slice(0, anchor.markerFrom - anchor.from).replace(/[ \t]+$/, '')
+  const withoutMarker = marked
+    .slice(0, anchor.markerFrom - anchor.markerLineFrom)
+    .replace(/[ \t]+$/, '')
 
   // A marker on its own line describes the paragraph above it.
   if (withoutMarker.trim() === '') {

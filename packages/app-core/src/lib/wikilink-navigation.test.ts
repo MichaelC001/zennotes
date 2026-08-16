@@ -91,6 +91,25 @@ describe('[[Note^block]] navigation (#601)', () => {
     expect(opts).toMatchObject({ scrollMode: 'start' })
   })
 
+  it('scrolls a standalone marker to the paragraph above it', async () => {
+    const standaloneBody = [
+      '# Daily Note',
+      '',
+      'First line of the named paragraph.',
+      'Second line of the named paragraph.',
+      '',
+      '^standalone',
+      '',
+      'After.'
+    ].join('\n')
+    noteContents = { [target]: { body: standaloneBody } }
+
+    await openWikilinkBlock(target, 'standalone')
+
+    const [, offset] = openNoteAtOffset.mock.calls[0]
+    expect(standaloneBody.slice(offset)).toMatch(/^First line of the named paragraph\./)
+  })
+
   it('falls back to the top of the note when the id is gone', async () => {
     noteContents = { [target]: { body } }
     await openWikilinkBlock(target, 'deleted-id')

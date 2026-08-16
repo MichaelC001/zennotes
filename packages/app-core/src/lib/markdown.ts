@@ -102,13 +102,26 @@ function sanitizeRenderedHtml(html: string): string {
  */
 function remarkBlockIds() {
   return (tree: MdRoot): void => {
+    // A marker-only paragraph has no prose of its own. Remove the paragraph
+    // before stripping trailing markers from ordinary text nodes, so the
+    // reading view neither prints `^id` nor emits a meaningless empty block.
+    visit(tree, 'paragraph', (node, index, parent) => {
+      if (!parent || index === undefined) return
+      const paragraph = node as unknown as AnyParent
+      if (paragraph.children.length !== 1 || paragraph.children[0]?.type !== 'text') return
+      const text = paragraph.children[0] as AnyNode & { value?: string }
+      if (typeof text.value !== 'string') return
+      const marker = trailingBlockIdRange(text.value)
+      if (!marker || text.value.slice(0, marker.from).trim() !== '') return
+      ;(parent as unknown as AnyParent).children.splice(index, 1)
+      return [SKIP, index]
+    })
+
     visit(tree, 'text', (node) => {
       const text = node as AnyNode & { value?: string }
       if (typeof text.value !== 'string') return
       const marker = trailingBlockIdRange(text.value)
-      // A marker alone on its line has nothing left to attach to, so leave it
-      // rather than rendering an empty paragraph.
-      if (!marker || marker.from === 0) return
+      if (!marker) return
       text.value = text.value.slice(0, marker.from).replace(/[ \t]+$/, '')
     })
   }
