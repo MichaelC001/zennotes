@@ -442,6 +442,31 @@ describe("CloudSettings", () => {
     expect(host.textContent).not.toContain("Error invoking remote method");
   });
 
+  it("refreshes and clears a connection error when the network comes back", async () => {
+    mocks.getCloudAccountStatus.mockResolvedValue(connected);
+    mocks.getCloudServiceAccount
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValue(serviceAccount);
+    mocks.listCloudVaults.mockResolvedValue([]);
+    mocks.getCloudVaultLink.mockResolvedValue(null);
+
+    await act(async () =>
+      root.render(
+        createElement(CloudSettings, {
+          localVaultAvailable: true,
+          localVaultName: "Notes",
+        }),
+      ),
+    );
+
+    expect(host.textContent).toContain("fetch failed");
+
+    await act(async () => window.dispatchEvent(new Event("online")));
+
+    expect(host.textContent).not.toContain("fetch failed");
+    expect(host.textContent).toContain("SyncIncluded");
+  });
+
   it("guides a vault linked to another cloud service into the current account", async () => {
     mocks.getCloudAccountStatus.mockResolvedValue(connected);
     mocks.getCloudServiceAccount.mockResolvedValue({

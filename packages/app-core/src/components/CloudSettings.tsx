@@ -132,12 +132,22 @@ export function CloudSettings({
   );
 
   useEffect(() => {
-    void loadStatus().catch((cause) => {
-      setError(errorMessage(cause, "Could not load ZenNotes Cloud."));
-    });
-    return bridge.onCloudAccountChange((next) => {
+    const refresh = (): void => {
+      void loadStatus().catch((cause) => {
+        setError(errorMessage(cause, "Could not load ZenNotes Cloud."));
+      });
+    };
+
+    refresh();
+    const unsubscribe = bridge.onCloudAccountChange((next) => {
       void loadStatus(next);
     });
+    window.addEventListener("online", refresh);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener("online", refresh);
+    };
   }, [bridge, loadStatus]);
 
   const refreshServiceAccount = useCallback(async (): Promise<void> => {
