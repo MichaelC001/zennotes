@@ -742,6 +742,9 @@ export interface ServerCapabilities {
    *  (delete/duplicate/restore/purge). Absent on servers before 2.24, which
    *  is what turns a bare 404 into a "server needs an update" message. */
   supportsAssetOps?: boolean
+  /** Server-side workflow file CRUD plus journalled apply/undo. Absent before
+   *  2.29, where the web client must keep Workflows read-only. */
+  supportsWorkflows?: boolean
 }
 
 export interface ServerSessionStatus {
