@@ -196,43 +196,62 @@ function wikilinkAnchorMatch(
   const inside = before.slice(openIndex + 2)
   if (inside.includes(']]') || inside.includes('|')) return null
   const first = inside.indexOf(marker)
-  if (first < 0) return null // no anchor of this kind — `wikilinkSource` owns this
+  if (first < 0) return null // no anchor of this kind; `wikilinkSource` owns this
   // Whichever marker opens the anchor owns everything after it, the same rule
-  // wikilinkHeadingAnchor / wikilinkBlockAnchor follow. (#601)
+  // wikilinkHeadingAnchor / wikilinkBlockAnchor follow, with the same Obsidian
+  // exception: in `[[Note#^` the hash immediately followed by the caret is the
+  // canonical block form, so the caret owns the anchor and the heading source
+  // stands down. (#601)
   const other = inside.indexOf(marker === '#' ? '^' : '#')
-  if (other >= 0 && other < first) return null
+  let noteEnd = first
+  if (marker === '#') {
+    if (other >= 0 && other < first) return null
+    if (inside.slice(first + 1).startsWith('^')) return null
+  } else if (other >= 0 && other < first) {
+    if (inside.slice(other + 1, first).trim() !== '') return null
+    noteEnd = other
+  }
   const last = inside.lastIndexOf(marker)
 
   return {
     from: line.from + openIndex + 2 + last + 1,
-    notePart: inside.slice(0, first).trim(),
+    notePart: inside.slice(0, noteEnd).trim(),
     query: inside.slice(last + 1)
   }
 }
 
-// Bodies fetched for heading completion are cached so typing the heading query
-// doesn't re-read the file on every keystroke (`validFor` keeps the option list
-// while the query stays anchor-shaped, so this mostly matters across notes).
-const headingBodyCache = new Map<string, string>()
+// Bodies fetched for anchor completion are cached so typing the query doesn't
+// re-read the file on every keystroke. An entry is only trusted while the
+// note's `updatedAt` still matches: block ids are typically created seconds
+// before being linked, so a session-long snapshot made block completion a
+// first-use failure (new ids never appeared until restart), and a vault switch
+// could even serve another vault's ids for a same-relative-path note.
+const anchorBodyCache = new Map<string, { updatedAt: number; body: string }>()
+const ANCHOR_BODY_CACHE_LIMIT = 32
 
 /**
- * Autocomplete headings inside a wikilink: typing `[[Note#` (or `[[#` for the
- * current note) suggests that note's headings. (#196)
+ * The body used for `[[Note#…]]` / `[[Note^…]]` completion. An open buffer
+ * always wins (it holds unsaved ids); otherwise a read validated against the
+ * note's `updatedAt`.
  */
 async function anchorNoteBody(notePart: string): Promise<string | null> {
   const state = useStore.getState()
   const note = notePart ? resolveWikilinkTarget(state.notes, notePart) : state.activeNote
   if (!note) return null
 
-  const body =
-    state.noteContents[note.path]?.body ??
-    (note as { body?: string }).body ?? // activeNote ([[#…]]) already carries its body
-    headingBodyCache.get(note.path)
-  if (body != null) return body
+  const open = state.noteContents[note.path]?.body
+  if (open != null) return open
+  const inline = (note as { body?: string }).body // activeNote ([[#…]]) carries its body
+  if (inline != null) return inline
+
+  const updatedAt = (note as { updatedAt?: number }).updatedAt ?? 0
+  const cached = anchorBodyCache.get(note.path)
+  if (cached && cached.updatedAt === updatedAt) return cached.body
 
   try {
     const read = (await window.zen.readNote(note.path)).body
-    headingBodyCache.set(note.path, read)
+    if (anchorBodyCache.size >= ANCHOR_BODY_CACHE_LIMIT) anchorBodyCache.clear()
+    anchorBodyCache.set(note.path, { updatedAt, body: read })
     return read
   } catch {
     return null

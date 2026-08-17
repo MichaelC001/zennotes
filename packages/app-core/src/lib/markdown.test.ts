@@ -29,6 +29,25 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('^standalone')
   })
 
+  it('never deletes prose that merely resembles a block id (#601 review)', () => {
+    const html = renderMarkdown('See note ^ref *below* for details\n\n| a |\n| - |\n| 10 ^2 |')
+    // The caret is mid-line, so it is prose, and the joining space survives.
+    expect(html).toContain('^ref <em>below</em>')
+    expect(html).toContain('10 ^2')
+  })
+
+  it('strips a genuine anchor on a non-final paragraph line (#601 review)', () => {
+    const html = renderMarkdown('first line ^mid\nsecond line')
+    expect(html).not.toContain('^mid')
+    expect(html).toContain('first line')
+    expect(html).toContain('second line')
+  })
+
+  it('leaves code-fence and frontmatter carets untouched (#601 review)', () => {
+    const html = renderMarkdown('```bash\nkill %1 ^Z2\n```')
+    expect(html).toContain('^Z2')
+  })
+
   it('sanitizes raw HTML and javascript URLs', () => {
     const html = renderMarkdown(
       [

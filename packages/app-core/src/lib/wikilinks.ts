@@ -82,25 +82,37 @@ export function wikilinkHeadingAnchor(target: string): string | null {
   if (hash < 0) return null
   const caret = target.indexOf('^')
   if (caret >= 0 && caret < hash) return null // a ^block anchor comes first
-  return target.slice(hash + 1).trim() || null
+  const anchor = target.slice(hash + 1).trim()
+  // Obsidian writes block references as `Note#^id`: the hash is its anchor
+  // separator and the caret makes it a block, never a heading named "^id".
+  // Treating it as one sent every imported Obsidian block link to the top of
+  // the note. (#601)
+  if (anchor.startsWith('^')) return null
+  return anchor || null
 }
 
 /**
  * The `^block` id from a wikilink target, or null when there's no block anchor.
  * `[[Doc^note-two]]` → `note-two`; `[[Doc#Heading]]` / `[[Doc]]` → null. The
- * mirror of {@link wikilinkHeadingAnchor}, and like it, whichever marker comes
- * first owns the anchor, so `[[Doc#Heading^id]]` is a heading link. (#601)
+ * mirror of {@link wikilinkHeadingAnchor}: whichever marker comes first owns
+ * the anchor (`[[Doc#Heading^id]]` is a heading link), with one exception in
+ * Obsidian's favor: `[[Doc#^id]]`, hash immediately followed by caret, is its
+ * canonical block reference and parses as one. (#601)
  */
 export function wikilinkBlockAnchor(target: string): string | null {
   const caret = target.indexOf('^')
   if (caret < 0) return null
   const hash = target.indexOf('#')
-  if (hash >= 0 && hash < caret) return null // a #heading anchor comes first
+  if (hash >= 0 && hash < caret) {
+    // `Note#Heading^tail` is a heading link, but Obsidian's canonical block
+    // form `Note#^id` (nothing between the two markers) is a block link.
+    if (target.slice(hash + 1, caret).trim() !== '') return null
+  }
   return target.slice(caret + 1).trim() || null
 }
 
 /**
- * True for `[[^block]]` — a wikilink whose note part is empty, so it targets a
+ * True for `[[^block]]`: a wikilink whose note part is empty, so it targets a
  * block *in the current note*, the block-level twin of
  * {@link isSameFileHeadingLink}. (#601)
  */

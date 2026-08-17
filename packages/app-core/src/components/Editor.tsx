@@ -23,7 +23,6 @@ import type { PaneLayout, PaneSplit } from "../lib/pane-layout";
 import { parseCreateNotePath, resolveWikilinkPath } from "../lib/wikilinks";
 import {
   openDatabaseFromWikilink,
-  openWikilinkHeading,
   openWikilinkTarget,
 } from "../lib/wikilink-navigation";
 import {
@@ -664,8 +663,8 @@ function registerVimCommands(): void {
         state.setFocusedPanel("editor");
         requestAnimationFrame(() => useStore.getState().editorViewRef?.focus());
       };
-      if (internal.heading) {
-        void openWikilinkHeading(internal.path, internal.heading).then(
+      if (internal.anchor) {
+        void openWikilinkTarget(internal.path, `#${internal.anchor}`).then(
           focusEditorSoon,
         );
       } else {

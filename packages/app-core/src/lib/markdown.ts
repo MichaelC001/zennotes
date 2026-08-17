@@ -15,7 +15,7 @@ import type { Root as MdRoot } from 'mdast'
 import type { Root as HastRoot, Element as HastElement } from 'hast'
 import type { VFile } from 'vfile'
 import { recordRendererPerf } from './perf'
-import { trailingBlockIdRange } from './block-anchors'
+import { stripBlockAnchorMarkers } from './block-anchors'
 import { wikilinkDisplayLabel } from './wikilinks'
 import { classifyLocalAssetHref } from './local-assets'
 import { parseEmbedSizeHint, splitEmbedLabel } from './excalidraw-preview'
@@ -91,40 +91,6 @@ function sanitizeRenderedHtml(html: string): string {
     ALLOWED_URI_REGEXP: ALLOWED_RENDERED_URI_RE,
     ADD_ATTR: ALLOWED_RENDERED_DATA_ATTRS
   })
-}
-
-/**
- * Drop the trailing `^block-id` marker from rendered prose. It names the block
- * so `[[Note^id]]` can point at it, which is addressing rather than something
- * to read, and the editor's live preview hides it for the same reason. Code
- * spans and fences are untouched: those are `inlineCode` / `code` nodes, which
- * this never visits. (#601)
- */
-function remarkBlockIds() {
-  return (tree: MdRoot): void => {
-    // A marker-only paragraph has no prose of its own. Remove the paragraph
-    // before stripping trailing markers from ordinary text nodes, so the
-    // reading view neither prints `^id` nor emits a meaningless empty block.
-    visit(tree, 'paragraph', (node, index, parent) => {
-      if (!parent || index === undefined) return
-      const paragraph = node as unknown as AnyParent
-      if (paragraph.children.length !== 1 || paragraph.children[0]?.type !== 'text') return
-      const text = paragraph.children[0] as AnyNode & { value?: string }
-      if (typeof text.value !== 'string') return
-      const marker = trailingBlockIdRange(text.value)
-      if (!marker || text.value.slice(0, marker.from).trim() !== '') return
-      ;(parent as unknown as AnyParent).children.splice(index, 1)
-      return [SKIP, index]
-    })
-
-    visit(tree, 'text', (node) => {
-      const text = node as AnyNode & { value?: string }
-      if (typeof text.value !== 'string') return
-      const marker = trailingBlockIdRange(text.value)
-      if (!marker) return
-      text.value = text.value.slice(0, marker.from).replace(/[ \t]+$/, '')
-    })
-  }
 }
 
 function remarkWikilinks() {
@@ -1040,7 +1006,6 @@ function createProcessor(mathRenderer: 'katex' | 'typst') {
     // head of one unsplit text node when it is matched.
     .use(remarkTaskStates)
     .use(remarkTaskRollup)
-    .use(remarkBlockIds)
     .use(remarkWikilinks)
     .use(remarkImageSizeHints)
     .use(remarkHashtags)
@@ -1289,10 +1254,16 @@ export function renderMarkdown(src: string): string {
 
   const startedAt = performance.now()
   try {
+    // Anchor markers are stripped from the SOURCE, with the parser's own
+    // line-level grammar, before remark ever sees it. Stripping per mdast
+    // text node deleted real prose (a mid-line `^word` before emphasis) and
+    // missed genuine anchors on non-final paragraph lines. (#601)
     const html = sanitizeRenderedHtml(
       String(
         activeProcessor().processSync(
-          escapeTableMathPipes(normalizeBlockMathFences(src, markdownLooseMathDelimiters()))
+          escapeTableMathPipes(
+            normalizeBlockMathFences(stripBlockAnchorMarkers(src), markdownLooseMathDelimiters())
+          )
         )
       )
     )

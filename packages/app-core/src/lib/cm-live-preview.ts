@@ -1,5 +1,5 @@
 import { syntaxTree } from '@codemirror/language'
-import { RangeSetBuilder, StateEffect } from '@codemirror/state'
+import { RangeSetBuilder, StateEffect, type EditorState } from '@codemirror/state'
 import {
   Decoration,
   DecorationSet,
@@ -16,7 +16,7 @@ import {
   resolveAssetVaultRelativePath,
   resolveLocalAssetUrl
 } from './local-assets'
-import { trailingBlockIdRange } from './block-anchors'
+import { parseBlockAnchors } from './block-anchors'
 import { setImageBlockDragPayload } from './image-block-dnd'
 import { imageCacheKey, rememberImageOnLoad, takeCachedImage } from './image-element-cache'
 import { assetTabPath } from './asset-tabs'
@@ -979,6 +979,23 @@ class InProgressMarkerWidget extends WidgetType {
   }
 }
 
+// Block-anchor markers by 1-based line number, memoized per document. The
+// parser's grammar (fence and frontmatter aware) decides what hides, and the
+// scan runs once per doc version rather than on every cursor move, since
+// computeDecorations also fires on selection changes.
+const blockAnchorCache = new WeakMap<object, Map<number, { from: number; to: number }>>()
+
+function blockAnchorMarkersFor(state: EditorState): Map<number, { from: number; to: number }> {
+  const cached = blockAnchorCache.get(state.doc)
+  if (cached) return cached
+  const markers = new Map<number, { from: number; to: number }>()
+  for (const anchor of parseBlockAnchors(state.doc.toString())) {
+    markers.set(anchor.markerLine, { from: anchor.markerFrom, to: anchor.markerTo })
+  }
+  blockAnchorCache.set(state.doc, markers)
+  return markers
+}
+
 function computeDecorations(view: EditorView): DecorationSet {
   const { state } = view
 
@@ -1163,13 +1180,16 @@ function computeDecorations(view: EditorView): DecorationSet {
 
       // #601: a trailing `^block-id` names the line so `[[Note^id]]` can point
       // at it. That is addressing, not prose, so hide it the way other markers
-      // are hidden and reveal it when the cursor is on the line to edit.
+      // are hidden and reveal it when the cursor is on the line to edit. Only
+      // markers the parser accepts are hidden: a per-line regex here blanked
+      // literal `^word` tails inside code fences and frontmatter that are not
+      // anchors at all, so code samples looked corrupted in the editor.
       if (!lineActive && !replacedLines.has(lineNo)) {
-        const blockId = trailingBlockIdRange(line.text)
+        const blockId = blockAnchorMarkersFor(state).get(lineNo)
         if (blockId) {
           pending.push({
-            from: line.from + blockId.from,
-            to: line.from + blockId.to,
+            from: blockId.from,
+            to: blockId.to,
             deco: hide
           })
         }

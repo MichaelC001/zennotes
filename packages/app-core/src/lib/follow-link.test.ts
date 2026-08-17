@@ -33,7 +33,7 @@ vi.mock('./create-note-from-link', () => ({ offerCreateNoteFromLink }))
 
 const { followLinkTarget } = await import('./follow-link')
 
-describe('followLinkTarget — same-note anchors (#601)', () => {
+describe('followLinkTarget: same-note anchors (#601)', () => {
   it('opens [[^block]] in the selected note instead of offering to create a note', () => {
     expect(followLinkTarget('^standalone')).toBe(true)
 

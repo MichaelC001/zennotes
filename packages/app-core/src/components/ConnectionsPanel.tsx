@@ -200,8 +200,10 @@ export function ConnectionsPanel({ note }: { note: NoteContent }): JSX.Element {
           return {
             note: candidate,
             backlink: linksHere,
-            // Which block ids this note reached for, so the row can say so. (#601)
-            blocks: blockAnchorsTargeting(notes, targets, note.path),
+            // Which block ids this note reached for, so the row can say so.
+            // Only backlink rows render them, so only those pay for the
+            // per-target resolution. (#601)
+            blocks: linksHere ? blockAnchorsTargeting(notes, targets, note.path) : [],
             mentionSnippet: snippet
           }
         } catch {
@@ -326,9 +328,17 @@ export function ConnectionsPanel({ note }: { note: NoteContent }): JSX.Element {
                 key={item.path}
                 note={item}
                 summary={
-                  blocks.length
-                    ? `Points at ${blocks.map((id) => `^${id}`).join(', ')}`
-                    : item.excerpt || 'No excerpt available yet.'
+                  // The excerpt is the row's context; a block link adds to it
+                  // rather than replacing it, since a note can link the page
+                  // plainly and point at a block in the same breath. (#601)
+                  [
+                    item.excerpt,
+                    blocks.length
+                      ? `Points at ${blocks.map((id) => `^${id}`).join(', ')}`
+                      : ''
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || 'No excerpt available yet.'
                 }
                 onOpen={() => void selectNote(item.path)}
                 onHover={(rect) => {

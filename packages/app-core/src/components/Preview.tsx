@@ -18,7 +18,6 @@ import {
   resolveWikilinkTarget,
 } from "../lib/wikilinks";
 import {
-  openWikilinkHeading,
   openWikilinkTarget,
 } from "../lib/wikilink-navigation";
 import { listDatabaseLinkTargets, resolveDatabaseWikilink } from "../lib/database-links";
@@ -466,8 +465,10 @@ export const Preview = memo(function Preview({
       );
       if (internalNote) {
         e.preventDefault();
-        if (internalNote.heading)
-          void openWikilinkHeading(internalNote.path, internalNote.heading);
+        // `#<anchor>` lets openWikilinkTarget decide heading vs block, so the
+        // Obsidian form `Note.md#^id` reaches the block here too. (#601)
+        if (internalNote.anchor)
+          void openWikilinkTarget(internalNote.path, `#${internalNote.anchor}`);
         else void selectNoteRef.current(internalNote.path);
         return;
       }
@@ -647,7 +648,7 @@ export const Preview = memo(function Preview({
         delete a.dataset.databaseCsv;
         return;
       }
-      // `[[#heading]]` / `[[^block]]` (no note part) point inside THIS note —
+      // `[[#heading]]` / `[[^block]]` (no note part) point inside THIS note:
       // resolve them to the note being previewed so the click scrolls in
       // place. (#291, #601)
       if (isSameFileHeadingLink(target) || isSameFileBlockLink(target)) {

@@ -189,7 +189,7 @@ function blockResult(doc: string) {
   return wikilinkBlockSource(new CompletionContext(state, doc.length, true))
 }
 
-describe('wikilinkBlockSource (#601 — block id autocomplete)', () => {
+describe('wikilinkBlockSource (#601, block id autocomplete)', () => {
   it('suggests the target note block ids after ^', async () => {
     const result = await blockResult('[[Zen Garden^')
     expect(result?.options.map((o) => o.label)).toEqual(['install', 'run-it', 'standalone'])

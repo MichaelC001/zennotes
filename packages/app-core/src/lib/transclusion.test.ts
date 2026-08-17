@@ -111,7 +111,7 @@ function anchorAwareCtxFor(vault: Record<string, { title: string; body: string }
   }
 }
 
-describe('expandEmbeds — block transclusion (#601)', () => {
+describe('expandEmbeds: block transclusion (#601)', () => {
   const vault = {
     Daily: {
       title: 'Daily',

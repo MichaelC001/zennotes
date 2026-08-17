@@ -76,6 +76,14 @@ describe('wikilinkBlockAnchor (#601)', () => {
     expect(wikilinkBlockAnchor('Doc^id#not-a-heading')).toBe('id#not-a-heading')
     expect(wikilinkHeadingAnchor('Doc^id#not-a-heading')).toBeNull()
   })
+
+  it("parses Obsidian's canonical block form Note#^id as a block link (#601 review)", () => {
+    expect(wikilinkBlockAnchor('Daily Note#^note-two')).toBe('note-two')
+    expect(wikilinkHeadingAnchor('Daily Note#^note-two')).toBeNull()
+    // The same-file spelling Obsidian writes.
+    expect(wikilinkBlockAnchor('#^note-two')).toBe('note-two')
+    expect(isSameFileBlockLink('#^note-two')).toBe(true)
+  })
 })
 
 describe('wikilinkDisplayLabel (#601)', () => {
@@ -165,7 +173,7 @@ describe('resolveWikilinkTarget — heading/block anchors (#196)', () => {
   })
 })
 
-describe('resolveWikilinkPath — same-note anchors (#601)', () => {
+describe('resolveWikilinkPath: same-note anchors (#601)', () => {
   const currentPath = 'inbox/My Document.md'
 
   it('uses the current note for a same-note block link', () => {

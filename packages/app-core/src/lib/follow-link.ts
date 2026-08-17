@@ -5,7 +5,6 @@ import { externalLinkUrl, resolveInternalNoteHref } from './internal-links'
 import { resolveWikilinkPath } from './wikilinks'
 import {
   openDatabaseFromWikilink,
-  openWikilinkHeading,
   openWikilinkTarget
 } from './wikilink-navigation'
 
@@ -33,7 +32,7 @@ export function followLinkTarget(target: string): boolean {
   }
   const internal = resolveInternalNoteHref(state.selectedPath, target, state.notes)
   if (internal) {
-    if (internal.heading) void openWikilinkHeading(internal.path, internal.heading).then(focusSoon)
+    if (internal.anchor) void openWikilinkTarget(internal.path, `#${internal.anchor}`).then(focusSoon)
     else void state.selectNote(internal.path).then(focusSoon)
     return true
   }
