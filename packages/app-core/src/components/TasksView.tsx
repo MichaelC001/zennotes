@@ -60,6 +60,7 @@ export function TasksView(): JSX.Element {
   const closeTasksView = useStore((s) => s.closeTasksView)
   const reorderTaskInNote = useStore((s) => s.reorderTaskInNote)
   const newTaskFile = useStore((s) => s.newTaskFile)
+  const setFocusedPanel = useStore((s) => s.setFocusedPanel)
 
   // Tasks written inside a daily note inherit that note's date as an implicit
   // due date (a clean line, no `due:` token) so they appear on the calendar.
@@ -573,6 +574,15 @@ export function TasksView(): JSX.Element {
     <div
       ref={rootRef}
       className="flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900"
+      // The pane's capture handlers claim focusedPanel 'editor' for any click
+      // or focus inside the pane (#477), which disconnects this view's window
+      // keydown handler (gated on 'tasks', #412): after focusing the filter
+      // box, 1/2/3, `/`, `:` and the list keys all fell through to VimNav,
+      // which walked the SIDEBAR cursor instead. This view is a panel, not an
+      // editor surface, so re-claim 'tasks'. Outer capture handlers run before
+      // inner ones, so this always lands after the pane's claim and wins.
+      onMouseDownCapture={() => setFocusedPanel('tasks')}
+      onFocusCapture={() => setFocusedPanel('tasks')}
     >
       <div className="flex items-center gap-2 border-b border-paper-300/45 px-4 py-3">
         <CheckSquareIcon width={18} height={18} />
