@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { forwardTaskSubtreeAtIndex, setTaskForwardedAtIndex, TASK_LINE_RE } from './tasklists'
-import { parseTasksFromBody, groupTasks, type ParseTasksContext } from './tasks'
+import {
+  bucketTasksByDueDate,
+  groupTasks,
+  inferDailyTaskDueDates,
+  parseTasksFromBody,
+  type ParseTasksContext
+} from './tasks'
 
 const ctx: ParseTasksContext = { path: 'inbox/t.md', title: 't', folder: 'inbox' }
 
@@ -122,5 +128,39 @@ describe('forwardTaskSubtreeAtIndex (#611)', () => {
     const { body, childLines } = forwardTaskSubtreeAtIndex(src, 0, '[[T]]')
     expect(childLines).toEqual(['  - [ ] sub'])
     expect(body.split('\n')[3]).toBe('- [>] real [[T]]')
+  })
+})
+
+describe('forwarded records on dated surfaces (#610)', () => {
+  const dayCtx = (day: string): ParseTasksContext => ({
+    path: `inbox/Daily Notes/${day}.md`,
+    title: day,
+    folder: 'inbox'
+  })
+
+  it('does not infer a daily due for a forwarded record, so a carry chain stays one task', () => {
+    const dueByPath = new Map([
+      ['inbox/Daily Notes/2026-08-15.md', '2026-08-15'],
+      ['inbox/Daily Notes/2026-08-16.md', '2026-08-16']
+    ])
+    const record = parseTasksFromBody('- [>] Pay rent [[2026-08-16]]', dayCtx('2026-08-15'))
+    const live = parseTasksFromBody('- [ ] Pay rent [[2026-08-15]]', dayCtx('2026-08-16'))
+    const out = inferDailyTaskDueDates([...record, ...live], dueByPath)
+    expect(out[0].due).toBeUndefined()
+    expect(out[1].due).toBe('2026-08-16')
+    expect(out[1].dueInferred).toBe(true)
+  })
+
+  it('keeps an explicit due: on a forwarded record, and buckets it on that date', () => {
+    const tasks = parseTasksFromBody('- [>] pay due:2026-08-20 [[X]]', dayCtx('2026-08-15'))
+    const out = inferDailyTaskDueDates(tasks, new Map([[tasks[0].sourcePath, '2026-08-15']]))
+    expect(out[0].due).toBe('2026-08-20')
+    expect(bucketTasksByDueDate(out).get('2026-08-20')?.length).toBe(1)
+  })
+
+  it('keeps an undated forwarded record off the calendar entirely, including unscheduled', () => {
+    const tasks = parseTasksFromBody('- [>] gone [[X]]\n- [ ] still here', dayCtx('2026-08-15'))
+    const buckets = bucketTasksByDueDate(tasks)
+    expect(buckets.get('unscheduled')?.map((t) => t.content)).toEqual(['still here'])
   })
 })
