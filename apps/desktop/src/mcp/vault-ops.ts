@@ -294,6 +294,11 @@ export interface VaultTask {
   checked: boolean
   /** True for a `[-]` cancelled task — intentionally abandoned (#450). */
   cancelled?: boolean
+  /** True for a `[>]` forwarded record: the task moved to another note and a
+   *  live copy exists there, so this line is history, not open work (#316).
+   *  Without this flag the subtree forward (#611) doubled every carried task
+   *  in MCP/CLI listings: the records read as open beside the live copies. */
+  forwarded?: boolean
   /** True for a `[/]` task in progress: started, not finished (#512). Still
    *  open work, unlike checked/cancelled. */
   inProgress?: boolean
@@ -1339,6 +1344,7 @@ function parseTasksFromBody(
     const checked = checkedChar === 'x' || checkedChar === 'X'
     const cancelled = checkedChar === '-'
     const inProgress = checkedChar === '/'
+    const forwarded = checkedChar === '>'
 
     let due: string | undefined
     let priority: 'high' | 'med' | 'low' | undefined
@@ -1381,6 +1387,7 @@ function parseTasksFromBody(
       checked,
       cancelled,
       inProgress,
+      forwarded,
       due: due ?? defaults.due,
       priority: priority ?? defaults.priority,
       waiting,

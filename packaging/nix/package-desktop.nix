@@ -116,8 +116,8 @@ stdenv.mkDerivation (finalAttrs: {
   dontBuild = true;
   # We invoke the wrapper manually and splice in gappsWrapperArgs ourselves.
   # Must be makeShellWrapper: wrapGAppsHook3 propagates makeBinaryWrapper,
-  # whose binary wrapper can't expand ''${NIXOS_OZONE_WL:+…} at runtime — the
-  # flag reaches Electron as a literal string instead.
+  # whose binary wrapper can't expand ''${NIXOS_OZONE_WL:+…} at runtime, so
+  # the flag reaches Electron as a literal string instead.
   dontWrapGApps = true;
 
   installPhase = ''

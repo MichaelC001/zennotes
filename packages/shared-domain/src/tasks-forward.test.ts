@@ -129,6 +129,25 @@ describe('forwardTaskSubtreeAtIndex (#611)', () => {
     expect(childLines).toEqual(['  - [ ] sub'])
     expect(body.split('\n')[3]).toBe('- [>] real [[T]]')
   })
+
+  it('carries loose children across blank lines, like the rollover walk (#611 review)', () => {
+    const src = ['- [ ] Parent', '    - [ ] a', '', '    - [ ] b', '- [ ] Sibling'].join('\n')
+    const { body, childLines } = forwardTaskSubtreeAtIndex(src, 0, '[[T]]')
+    expect(childLines).toEqual(['    - [ ] a', '', '    - [ ] b'])
+    expect(body.split('\n')).toEqual([
+      '- [>] Parent [[T]]',
+      '    - [>] a',
+      '',
+      '    - [>] b',
+      '- [ ] Sibling'
+    ])
+  })
+
+  it('re-bases mixed tab/space children by whitespace count (#611 review)', () => {
+    const src = ['  - [ ] Parent', '\t\t\t- [ ] child'].join('\n')
+    const { childLines } = forwardTaskSubtreeAtIndex(src, 0, '[[T]]')
+    expect(childLines).toEqual(['\t- [ ] child'])
+  })
 })
 
 describe('forwarded records on dated surfaces (#610)', () => {

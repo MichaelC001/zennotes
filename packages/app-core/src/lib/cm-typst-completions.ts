@@ -2,8 +2,8 @@
  * Typst math completion, the sibling of cm-latex-completions for notes whose
  * typesetter is Typst. Typst has no backslash: commands are bare words
  * (`sum`, `alpha`, `frac(a, b)`), so the trigger is the identifier being
- * typed — from two letters on, to stay out of the way of one-letter
- * variables — inside the same `$…$` / `$$…$$` regions.
+ * typed (from two letters on, to stay out of the way of one-letter
+ * variables) inside the same `$…$` / `$$…$$` regions.
  *
  * Where LaTeX previews need KaTeX, most Typst entries are single glyphs with
  * an exact Unicode form (α, ∑, ∫, ℝ, ∀ …), shown directly in the icon slot.
@@ -24,7 +24,7 @@ interface TypstCommand {
   /** Unicode glyph (or short sketch) for the icon slot. */
   icon: string
   /** Typst math compiled for the icon slot; the glyph paints while it loads.
-   *  Constructs need this — no single glyph says `mat(1, 2; 3, 4)`. */
+   *  Constructs need this: no single glyph says `mat(1, 2; 3, 4)`. */
   preview?: string
   boost?: number
 }
@@ -64,20 +64,20 @@ const SYMBOLS: Array<[string, string, string]> = [
   ['dots.h', '⋯', 'horizontal dots'],
   ['dots.v', '⋮', 'vertical dots'],
 
-  // Arrows — Typst also accepts the ASCII shorthands noted in the detail.
-  ['arrow.r', '→', 'right arrow — or ->'],
-  ['arrow.l', '←', 'left arrow — or <-'],
-  ['arrow.l.r', '↔', 'left-right arrow — or <->'],
-  ['arrow.r.double', '⇒', 'implies — or =>'],
-  ['arrow.l.r.double', '⇔', 'if and only if — or <=>'],
-  ['arrow.r.bar', '↦', 'maps to — or |->'],
+  // Arrows. Typst also accepts the ASCII shorthands noted in the detail.
+  ['arrow.r', '→', 'right arrow, or ->'],
+  ['arrow.l', '←', 'left arrow, or <-'],
+  ['arrow.l.r', '↔', 'left-right arrow, or <->'],
+  ['arrow.r.double', '⇒', 'implies, or =>'],
+  ['arrow.l.r.double', '⇔', 'if and only if, or <=>'],
+  ['arrow.r.bar', '↦', 'maps to, or |->'],
   ['arrow.t', '↑', 'up arrow'],
   ['arrow.b', '↓', 'down arrow'],
 
   // Comparisons.
-  ['lt.eq', '≤', 'less or equal — or <='],
-  ['gt.eq', '≥', 'greater or equal — or >='],
-  ['eq.not', '≠', 'not equal — or !='],
+  ['lt.eq', '≤', 'less or equal, or <='],
+  ['gt.eq', '≥', 'greater or equal, or >='],
+  ['eq.not', '≠', 'not equal, or !='],
 
   // Sets.
   ['inter', '∩', 'set intersection'],
@@ -90,7 +90,7 @@ const SYMBOLS: Array<[string, string, string]> = [
   ['compose', '∘', 'function composition'],
   ['plus.o', '⊕', 'direct sum'],
   ['times.o', '⊗', 'tensor product'],
-  ['dif', 'd', 'differential — dif x in integrals']
+  ['dif', 'd', 'differential: dif x in integrals']
 ]
 
 const FUNCTIONS = [
@@ -99,8 +99,8 @@ const FUNCTIONS = [
 ]
 
 const TYPST_COMMANDS: TypstCommand[] = [
-  // Everyday constructs, boosted to the top — templates are valid Typst math.
-  { label: 'frac', detail: 'fraction — or just a/b', template: 'frac(${a}, ${b})', icon: '⅟', boost: 99 },
+  // Everyday constructs, boosted to the top; templates are valid Typst math.
+  { label: 'frac', detail: 'fraction, or just a/b', template: 'frac(${a}, ${b})', icon: '⅟', boost: 99 },
   { label: 'sqrt', detail: 'square root', template: 'sqrt(${x})', icon: '√', boost: 98 },
   { label: 'root', detail: 'nth root', template: 'root(${n}, ${x})', icon: '∛' },
   { label: 'sum', detail: 'sum', template: 'sum_(${i=1})^(${n})', icon: '∑', boost: 97 },
@@ -108,7 +108,7 @@ const TYPST_COMMANDS: TypstCommand[] = [
   { label: 'lim', detail: 'limit', template: 'lim_(${x -> 0})', icon: 'lim', boost: 95 },
   { label: 'product', detail: 'product', template: 'product_(${i=1})^(${n})', icon: '∏', boost: 90 },
   { label: 'binom', detail: 'binomial', template: 'binom(${n}, ${k})', icon: '(ⁿₖ)' },
-  { label: 'mat', detail: 'matrix — ; ends a row', template: 'mat(${1, 2; 3, 4})', icon: '⊞' },
+  { label: 'mat', detail: 'matrix (; ends a row)', template: 'mat(${1, 2; 3, 4})', icon: '⊞' },
   { label: 'vec', detail: 'column vector', template: 'vec(${a}, ${b})', icon: '⇣' },
   { label: 'cases', detail: 'case distinction', template: 'cases(${x &"if" x > 0}, ${-x &"else"})', icon: '{' },
   { label: 'abs', detail: 'absolute value', template: 'abs(${x})', icon: '|x|' },
@@ -136,7 +136,7 @@ const TYPST_COMMANDS: TypstCommand[] = [
 ]
 
 /** The word being typed at `pos`, or null. Two letters minimum unless the
- *  completion was summoned explicitly — one-letter variables are the normal
+ *  completion was summoned explicitly: one-letter variables are the normal
  *  case in math and must not pop a menu. Dotted names (`dots.h`) match too. */
 export function typstTokenBefore(
   state: EditorState,
