@@ -300,6 +300,67 @@ export function setTaskForwardedAtIndex(
   })
 }
 
+/**
+ * Forward the task at `taskIndex` together with its indented subtree (#611).
+ *
+ * The parent line flips to `[>]` and gains `linkToken`, exactly like
+ * {@link setTaskForwardedAtIndex}. Its subtree (every following line indented
+ * deeper than the parent, up to the first blank line, dedent, or fence: the
+ * same walk `extractOpenTaskBlocks` uses) becomes part of the forwarded
+ * record. Open subtasks (`[ ]` / `[/]`) flip to `[>]` so they stop reading as
+ * live work in the source; done and cancelled subtasks keep their state, since
+ * that history is what the record preserves. Only the parent carries the link.
+ *
+ * `childLines` is the subtree as it read BEFORE the flip, a faithful copy of
+ * the task's current state, re-based to the parent's indent so the caller can
+ * place it under an unindented copy in the destination note.
+ *
+ * Returns the markdown unchanged (and no child lines) when the index is out of
+ * range or the parent line would not change.
+ */
+export function forwardTaskSubtreeAtIndex(
+  markdown: string,
+  taskIndex: number,
+  linkToken: string
+): { body: string; childLines: string[] } {
+  const unchanged = { body: markdown, childLines: [] as string[] }
+  if (taskIndex < 0) return unchanged
+  const lines = markdown.split('\n')
+  const parentAt = taskLineNumbers(lines)[taskIndex]
+  if (parentAt == null) return unchanged
+
+  const parentLine = lines[parentAt]
+  const match = parentLine.match(TASK_LINE_RE)
+  if (!match || !match[3].startsWith(']')) return unchanged
+  const tail = match[3].slice(1).replace(/\s+$/u, '')
+  const nextTail = !linkToken || tail.includes(linkToken) ? tail : `${tail} ${linkToken}`
+  const nextParent = `${match[1]}>]${nextTail}`
+  if (nextParent === parentLine) return unchanged
+
+  const parentIndent = parentLine.match(/^[ \t]*/u)?.[0] ?? ''
+  let end = parentAt + 1
+  while (end < lines.length) {
+    const next = lines[end]
+    if (next.trim() === '') break
+    if (FENCE_RE.test(next)) break
+    if (leadingIndentWidth(next) <= parentIndent.length) break
+    end += 1
+  }
+
+  const childLines = lines
+    .slice(parentAt + 1, end)
+    .map((l) => (l.startsWith(parentIndent) ? l.slice(parentIndent.length) : l))
+
+  lines[parentAt] = nextParent
+  for (let i = parentAt + 1; i < end; i++) {
+    const childMatch = lines[i].match(TASK_LINE_RE)
+    if (childMatch && (childMatch[2] === ' ' || childMatch[2] === '/')) {
+      lines[i] = `${childMatch[1]}>${childMatch[3]}`
+    }
+  }
+  return { body: lines.join('\n'), childLines }
+}
+
 /** Mark the task line at `taskIndex` as in progress (`[/]`) when `inProgress`,
  *  or flip it back to open (`[ ]`) when not. In progress = started but not
  *  finished, so it stays an OPEN task everywhere: it keeps its place in Today,

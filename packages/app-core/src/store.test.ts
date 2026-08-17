@@ -759,6 +759,37 @@ describe('cancelTaskFromList (#450)', () => {
   })
 })
 
+describe('task forwarding carries the subtree (#611)', () => {
+  it('moves subtasks with the parent and leaves the whole block as the source record', async () => {
+    installZen()
+    const { useStore } = await loadStore()
+    const srcBody = ['- [ ] Main task', '    - [ ] sub a', '    - [x] sub b'].join('\n')
+    const task = makeTask('Main task', 0)
+    useStore.setState({
+      notes: [makeNote(srcBody, 'inbox/Note.md'), makeNote('# Work', 'inbox/Work.md')],
+      noteContents: {
+        'inbox/Note.md': makeNote(srcBody, 'inbox/Note.md'),
+        'inbox/Work.md': makeNote('# Work', 'inbox/Work.md')
+      },
+      vaultTasks: [task]
+    })
+
+    await useStore.getState().forwardTask(task, 'inbox/Work.md')
+
+    const state = useStore.getState()
+    expect(state.noteContents['inbox/Note.md'].body).toBe(
+      ['- [>] Main task [[Work]]', '    - [>] sub a', '    - [x] sub b'].join('\n')
+    )
+    expect(state.noteContents['inbox/Work.md'].body).toBe(
+      ['# Work', '- [ ] Main task [[Note]]', '    - [ ] sub a', '    - [x] sub b', ''].join('\n')
+    )
+    // The rebuilt index keeps the open work only in the destination; the
+    // source subtree is a forwarded record plus its done history.
+    const open = state.vaultTasks.filter((t) => !t.checked && !t.forwarded)
+    expect(open.map((t) => t.sourcePath)).toEqual(['inbox/Work.md', 'inbox/Work.md'])
+  })
+})
+
 describe('optimistic task state transitions (#512)', () => {
   it('starting a completed file task immediately clears every competing state', async () => {
     installZen()

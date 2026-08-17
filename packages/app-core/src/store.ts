@@ -76,13 +76,13 @@ import {
   FENCE_RE,
   TASK_LINE_RE,
   extractOpenTaskBlocks,
+  forwardTaskSubtreeAtIndex,
   insertTasksUnderTasksHeading,
   moveTaskLine,
   removeTaskAtIndex,
   takeTaskLineAtIndex,
   setTaskCheckedAtIndex,
   setTaskDueAtIndex,
-  setTaskForwardedAtIndex,
   setTaskCancelledAtIndex,
   setTaskInProgressAtIndex,
   setTaskPriorityAtIndex,
@@ -5602,14 +5602,22 @@ export const useStore = create<Store>((set, get) => {
     const backLink = `[[${task.noteTitle}]]`
     const forwardLink = `[[${targetMeta.title}]]`
 
-    // Original: flip to `[>]` and record where it went.
-    const nextSrc = setTaskForwardedAtIndex(srcBody, task.taskIndex, forwardLink)
+    // Original: flip to `[>]` and record where it went. The task's indented
+    // subtree is part of the record: open subtasks flip to `[>]` with the
+    // parent, done and cancelled subtasks keep their state (#611).
+    const { body: nextSrc, childLines } = forwardTaskSubtreeAtIndex(
+      srcBody,
+      task.taskIndex,
+      forwardLink
+    )
     if (nextSrc === srcBody) return
 
-    // Copy: a fresh open task in the target, backlinked to the origin. Slot it
-    // under the target's `## Tasks` heading when it has one, else append (#452).
+    // Copy: a fresh open task in the target, backlinked to the origin, with the
+    // subtree beneath it verbatim so the destination holds a faithful copy of
+    // the task's current state (#611). Slot it under the target's `## Tasks`
+    // heading when it has one, else append (#452).
     const copyLine = `- [ ] ${task.content} ${backLink}`.replace(/\s+$/u, '')
-    const nextTgt = insertTasksUnderTasksHeading(tgtBody, [copyLine])
+    const nextTgt = insertTasksUnderTasksHeading(tgtBody, [copyLine, ...childLines])
 
     if (srcBuffer) get().updateNoteBody(task.sourcePath, nextSrc)
     else {
