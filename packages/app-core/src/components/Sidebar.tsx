@@ -26,6 +26,7 @@ import { confirmMoveToTrash } from "../lib/confirm-trash";
 import { buildMoveNotePrompt, parseMoveNoteTarget } from "../lib/move-note";
 import { buildTagTree, extractTags, flattenTagTree } from "../lib/tags";
 import { isTypstPreamblePath, resolveTypstPreambleFolder } from "../lib/typst-preamble";
+import { focusEditorNormalMode } from "../lib/editor-focus";
 import type { AssetMeta, FolderColorId, FolderEntry, FolderIconId, NoteFolder, NoteMeta } from "@shared/ipc";
 import type { NoteSortOrder } from "../store";
 import { isArchiveTabPath } from "@shared/archive";
@@ -591,8 +592,11 @@ export function Sidebar(): JSX.Element {
     (path: string): void => {
       // Single click opens a VS Code-style preview tab; without tabs there
       // is nothing to preview, so fall back to a plain open.
-      if (tabsEnabled) void previewNote(path);
-      else void selectNote(path);
+      const opened = tabsEnabled ? previewNote(path) : selectNote(path);
+      // Every keyboard opener (VimNav Enter, palettes, gt) hands the keyboard
+      // to the editor afterwards; the mouse click was the one path that left
+      // focus on the clicked row, so typing kept driving the sidebar. (#599)
+      void opened.then(() => focusEditorNormalMode());
     },
     [previewNote, selectNote, tabsEnabled],
   );
@@ -5067,7 +5071,9 @@ const NoteLeaf = memo(function NoteLeaf({
   );
   const handleDoubleClick = useCallback(() => {
     // Double click keeps the note open as a permanent tab (VS Code-style).
-    void openNotePermanent(note.path);
+    // The second press re-focused the row after the first click's editor
+    // hand-off, so hand the keyboard back once more. (#599)
+    void openNotePermanent(note.path).then(() => focusEditorNormalMode());
   }, [note.path, openNotePermanent]);
   const handleContextMenu = useCallback(
     (event: React.MouseEvent) => onContextMenuNote(event, note),
