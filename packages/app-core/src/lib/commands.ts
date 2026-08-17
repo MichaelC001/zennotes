@@ -16,6 +16,7 @@ import { findLeaf } from './pane-layout'
 import { requestPaneMode } from './pane-mode'
 import { resolveQuickNoteTitle } from './quick-note-title'
 import { forwardTaskWithPicker, taskAtEditorCursor } from './forward-task'
+import { canManageWorkflows } from './workflow-workspace'
 import { toggleCheckbox } from './cm-toggle-checkbox'
 import { getKeymapDisplay, type KeymapId } from './keymaps'
 import { dispatchKeyboardContextMenu, findTabContextMenuTarget } from './keyboard-context-menu'
@@ -1852,14 +1853,20 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
   // run, and a row that only answers with an error is worse than no row.
   {
     const state = getState()
-    // Where a workflow could run at all: the desktop app, on a local vault.
+    // Where a workflow could run at all: any host that can keep workflow
+    // files and journals, the same predicate the Workflows view uses. Gating
+    // on runtime === 'desktop' left capable web workspaces (a 2.29 server
+    // advertising supportsWorkflows) with a working view but no palette rows
+    // and no vim ex-commands, on the keyboard-first surface of all places.
     // Deliberately NOT gated on the feature switch, because the tutorial below
     // must be findable BEFORE someone has opted in: starting it IS the opt-in,
     // exactly like the button in Settings.
     const workflowsPossibleHere =
-      state.workspaceMode !== 'remote' &&
-      window.zen.getAppInfo().runtime === 'desktop' &&
-      typeof window.zen.applyWorkflow === 'function'
+      canManageWorkflows(
+        window.zen.getAppInfo().runtime,
+        state.workspaceMode,
+        window.zen.getCapabilities()
+      ) && typeof window.zen.applyWorkflow === 'function'
     if (workflowsPossibleHere) {
       cmds.push({
         id: 'workflow.tutorial',

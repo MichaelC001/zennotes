@@ -49,7 +49,12 @@ function stringField(record: Record<string, unknown>, key: string): string | nul
   return typeof value === 'string' ? value : null
 }
 
-/** Validate one operation that crossed a process or HTTP boundary. */
+/** Validate one operation that crossed a process or HTTP boundary.
+ *  SYNCED COPIES: the same validator exists in apps/desktop/src/main/
+ *  workflow-apply.ts, and the Go server keeps a field map in
+ *  requiredWorkflowOpFields (apps/server/internal/vault/workflows.go).
+ *  A new op kind or field lands in all three or web and desktop disagree
+ *  about which runs are valid. */
 export function parseWorkflowOp(value: unknown): WorkflowOp | null {
   if (typeof value !== 'object' || value === null) return null
   const record = value as Record<string, unknown>

@@ -260,7 +260,6 @@ function getServerCapabilities(): Promise<ServerCapabilities | null> {
   return jsonRequest<ServerCapabilities>('/capabilities')
     .then((caps) => {
       lastServerCapabilities = caps
-      WEB_CAPABILITIES.supportsWorkflows = caps.supportsWorkflows === true
       return caps
     })
     .catch((err) => {
@@ -762,8 +761,9 @@ async function deleteWorkflow(sourcePath: string): Promise<void> {
 }
 
 async function applyWorkflow(input: ApplyWorkflowInput): Promise<WorkflowRunReceipt> {
-  await requireServerWorkflowSupport()
-  const settings = await getVaultSettings()
+  // Independent requests; no reason to stack their round trips in front of an
+  // already read-heavy prepare phase.
+  const [, settings] = await Promise.all([requireServerWorkflowSupport(), getVaultSettings()])
   const prepared = await prepareWorkflowRun(input, {
     read: readFileTextOrNull,
     systemFolderDirs: settings.systemFolderPaths ?? {}
@@ -1362,7 +1362,14 @@ function clipboardReadText(): string {
 // --------------------------------------------------------------------
 
 export const httpBridge: ZenBridge = {
-  getCapabilities: (): ZenCapabilities => WEB_CAPABILITIES,
+  // Workflows are the one capability the SERVER decides; derive it from the
+  // cached /capabilities response instead of mutating the const in place, so
+  // the UI gate (this) and the request gate (serverSupportsWorkflows) can
+  // never disagree about the same fact.
+  getCapabilities: (): ZenCapabilities => ({
+    ...WEB_CAPABILITIES,
+    supportsWorkflows: lastServerCapabilities?.supportsWorkflows === true
+  }),
   getAppInfo: (): ZenAppInfo => WEB_APP_INFO,
   platform,
   platformSync,
