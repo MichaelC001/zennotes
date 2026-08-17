@@ -397,6 +397,31 @@ export const Preview = memo(function Preview({
     if (!root) return;
     const onClick = (e: MouseEvent): void => {
       const target = e.target as HTMLElement;
+      // A `[/]` task has no checkbox input, but its half-filled marker is
+      // still a checkbox shape making a checkbox promise: clicking checks the
+      // task off, matching the editor widget and the Tasks list. The
+      // forwarded/cancelled markers stay inert records. (#599)
+      const inProgressMarker = target.closest<HTMLElement>(
+        ".zen-task-state-in-progress[data-task-index]",
+      );
+      if (inProgressMarker) {
+        e.preventDefault();
+        e.stopPropagation();
+        const taskIndex = Number.parseInt(
+          inProgressMarker.dataset.taskIndex ?? "-1",
+          10,
+        );
+        if (!Number.isFinite(taskIndex) || taskIndex < 0) return;
+        const nextMarkdown = toggleTaskAtIndex(
+          markdownRef.current,
+          taskIndex,
+          true,
+        );
+        if (nextMarkdown === markdownRef.current) return;
+        updateActiveBodyRef.current(nextMarkdown);
+        void persistActiveRef.current();
+        return;
+      }
       const copyButton = target.closest<HTMLButtonElement>(
         CODE_COPY_BUTTON_SELECTOR,
       );
@@ -706,6 +731,21 @@ export const Preview = memo(function Preview({
         input.setAttribute("role", "checkbox");
         input.classList.add("cursor-pointer");
         li.classList.toggle("task-self-done", input.checked);
+      } else {
+        // `[/]` renders a marker span instead of an input; make it a real
+        // control that checks the task off (see onClick). `[-]`/`[>]` keep
+        // their inert record markers. (#599)
+        const marker = li.querySelector<HTMLElement>(
+          ":scope > .zen-task-state-in-progress, :scope > p > .zen-task-state-in-progress",
+        );
+        if (marker) {
+          marker.dataset.taskIndex = String(idx);
+          marker.setAttribute("role", "checkbox");
+          marker.setAttribute("aria-checked", "mixed");
+          marker.setAttribute("aria-label", "Mark task done");
+          marker.title = "In progress. Click to mark done.";
+          marker.classList.add("cursor-pointer");
+        }
       }
       // An item is still open unless its own checkbox is checked; the `[/]` and
       // `[>]` states have no checkbox and are open by definition, `[-]` is not.

@@ -964,18 +964,52 @@ class CancelledMarkerWidget extends WidgetType {
 /** Renders a `- [/]` in-progress marker as a half-filled box (#512). Like the
  *  `[>]`/`[-]` markers this replaces a broken-link node, not a TaskMarker, so
  *  it draws its own glyph rather than reusing the checkbox input. The text is
- *  left alone: in-progress work still reads as live, not struck out. */
+ *  left alone: in-progress work still reads as live, not struck out.
+ *
+ *  Unlike those two, the half-filled box is still a checkbox shape making a
+ *  checkbox promise, so clicking it checks the task off — the same `[/]` → `[x]`
+ *  the toggle command performs. A dead click here read as a bug (#599).
+ *  Forwarded and cancelled markers stay inert on purpose: they are records of
+ *  a decision, not live work. */
 class InProgressMarkerWidget extends WidgetType {
-  eq(): boolean {
-    return true
+  constructor(
+    /** Absolute doc offset of the opening `[`; the state char is at `from + 1`. */
+    private readonly from: number
+  ) {
+    super()
   }
 
-  toDOM(): HTMLElement {
+  eq(other: InProgressMarkerWidget): boolean {
+    return other.from === this.from
+  }
+
+  toDOM(view: EditorView): HTMLElement {
     const span = document.createElement('span')
     span.className = 'cm-task-in-progress-marker'
-    span.title = 'In progress'
+    span.title = 'In progress. Click to mark done.'
     span.setAttribute('contenteditable', 'false')
+    span.setAttribute('role', 'checkbox')
+    span.setAttribute('aria-checked', 'mixed')
+    span.setAttribute('aria-label', 'Mark task done')
+
+    // Same pointer handling as TaskCheckboxWidget: keep the selection and
+    // focus where they were, then rewrite the single state char in place.
+    span.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+    })
+    span.addEventListener('click', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const stateFrom = this.from + 1
+      view.dispatch({ changes: { from: stateFrom, to: stateFrom + 1, insert: 'x' } })
+    })
     return span
+  }
+
+  // `false` lets DOM events reach the handlers above (see TaskCheckboxWidget).
+  ignoreEvent(): boolean {
+    return false
   }
 }
 
@@ -1257,7 +1291,7 @@ function computeDecorations(view: EditorView): DecorationSet {
               pending.push({
                 from: node.from,
                 to: node.to,
-                deco: Decoration.replace({ widget: new InProgressMarkerWidget() })
+                deco: Decoration.replace({ widget: new InProgressMarkerWidget(node.from) })
               })
             }
             return false

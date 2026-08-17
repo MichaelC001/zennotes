@@ -122,6 +122,11 @@ export function toggleTaskAtIndex(
   checked: boolean
 ): string {
   return editTaskAtIndex(markdown, taskIndex, (match) => {
+    // Unchecking means "not done", and an in-progress `[/]` already is not
+    // done: keep the `/` instead of collapsing it to open. Before this, a
+    // Kanban drag between live columns (which applies set-checked: false)
+    // silently erased the in-progress state. (#599)
+    if (!checked && match[2] === '/') return `${match[1]}/${match[3]}`
     return `${match[1]}${checked ? 'x' : ' '}${match[3]}`
   })
 }

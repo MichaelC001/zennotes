@@ -1743,7 +1743,12 @@ export function toggleTaskInBody(body: string, targetIndex: number): string | nu
     (_m, ch: string, tail: string) => {
       const fullMatch = original.match(TASK_LINE_RE)!
       const bracketIdx = original.indexOf('[' + ch + ']')
-      const next = ch === ' ' ? 'x' : ' '
+      // Same rules as the app's toggle (cm-toggle-checkbox / toggleTaskAtIndex):
+      // open and done flip, in-progress `[/]` checks off to done, and the
+      // forwarded / cancelled record markers are left alone. `[/]` used to fall
+      // into the "anything else opens" branch, silently erasing it. (#599)
+      if (ch === '>' || ch === '-') return fullMatch[0]
+      const next = /[xX]/.test(ch) ? ' ' : 'x'
       // Preserve the full prefix (list marker, whitespace) by splicing only
       // the single character inside the brackets.
       if (bracketIdx >= 0) {
