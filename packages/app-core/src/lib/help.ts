@@ -447,7 +447,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Workflows plan first and write second',
     body:
-      'A workflow is a plain `.md` file under `.zennotes/workflows/`: frontmatter plus one pipeline per line, like `good = books | where rating >= 4`. Wires carry sets of notes, so every wire on the canvas shows the live count flowing through it, and the canvas and the text are lossless projections of the same file (layout is computed, so no coordinates ever land in your vault). The engine can only propose changes: running shows the full dry-run diff before anything is applied, applying journals every file\'s pre-run bytes so Undo restores them exactly, and a run that fails midway rolls the whole thing back on its own. There are no code steps, no shell, and no network, which is why a workflow you did not write is safe to read and run. In this release workflows run when you run them: an event or schedule `trigger:` in the frontmatter parses but does not fire yet. Local desktop vaults and current self-hosted web servers can author and run workflows; desktop remote workspaces remain read-only. The feature is off by default; enable it under Settings → Workflows.'
+      'A workflow is a plain `.md` file under `.zennotes/workflows/`: frontmatter plus one pipeline per line, like `good = books | where rating >= 4`. Wires carry sets of notes, so every wire on the canvas shows the live count flowing through it, and the canvas and the text are lossless projections of the same file (layout is computed, so no coordinates ever land in your vault). The engine can only propose changes: running shows the full dry-run diff before anything is applied, applying journals every file\'s pre-run bytes so Undo restores them exactly, and a run that fails midway rolls the whole thing back on its own. There are no code steps, no shell, and no network, which is why a workflow you did not write is safe to read and run. In this release workflows run when you run them: an event or schedule `trigger:` in the frontmatter parses but does not fire yet. Local desktop vaults, self-hosted web servers, and desktop remote workspaces can all author and run workflows; a remote workspace needs a server on 2.29 or newer, and against an older server workflows stay read-only. The feature is off by default; enable it under Settings → Workflows.'
   },
   {
     title: 'The workflow grammar in one card',
@@ -512,7 +512,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'Ctrl-w h / j / k / l', action: 'Move focus', detail: 'Move between sidebar, note list, the active pane’s tab strip, editor, connections, or adjacent editor panes. From tabs, use h / l to switch tabs and j to return to the editor.' },
       { keys: 'Ctrl-w v', action: 'Split right', detail: 'Clone the current tab into a pane to the right.' },
       { keys: 'Ctrl-w s', action: 'Split down', detail: 'Clone the current tab into a pane below.' },
-      { keys: '[b / ]b', action: 'Previous / next buffer', detail: 'Move across open buffers, falling back to recent notes when only one buffer is open.' },
+      { keys: '[b / ]b', action: 'Previous / next buffer', detail: 'Move across open buffers, falling back to recent notes when only one buffer is open. Both take a count: `3]b` jumps three buffers forward, wrapping around the ring.' },
       { keys: 'Space o', action: 'Open buffers', detail: 'Show a searchable list of every open buffer across every pane.' },
       { keys: 'Space f', action: 'Search notes', detail: 'Open the vault-wide note search palette.' },
       { keys: 'Space s t', action: 'Search vault text', detail: 'Fuzzy-search matching text lines across notes in Inbox, Quick Notes, and Archive.' },
@@ -784,7 +784,7 @@ export const HELP_VIM_COMMANDS: HelpExCommand[] = [
   {
     command: ':bn / :bp',
     summary: 'Cycle tabs',
-    detail: 'Move to the next or previous tab, or the next most-recent note when only one tab is open. The default normal-mode keymaps are `]b` and `[b`, and both can be remapped in Settings.'
+    detail: 'Move to the next or previous tab, or the next most-recent note when only one tab is open. The default normal-mode keymaps are `]b` and `[b`, both remappable in Settings, and both accept a count: `3]b` jumps three tabs forward, wrapping around the ring.'
   },
   {
     command: ':buffers / :ls',
