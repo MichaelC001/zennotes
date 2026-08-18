@@ -511,6 +511,8 @@ export function SettingsModal(): JSX.Element {
   const setTabsEnabled = useStore((s) => s.setTabsEnabled);
   const workflowsEnabled = useStore((s) => s.workflowsEnabled);
   const setWorkflowsEnabled = useStore((s) => s.setWorkflowsEnabled);
+  const atlasEnabled = useStore((s) => s.atlasEnabled);
+  const setAtlasEnabled = useStore((s) => s.setAtlasEnabled);
   const hiddenWorkflowPresets = useStore((s) => s.hiddenWorkflowPresets);
   const setHiddenWorkflowPresets = useStore((s) => s.setHiddenWorkflowPresets);
   const wrapTabs = useStore((s) => s.wrapTabs);
@@ -2106,6 +2108,13 @@ export function SettingsModal(): JSX.Element {
           ],
         },
         {
+          id: "atlas-enabled",
+          title: "Atlas",
+          description:
+            "The Atlas map: the whole vault as notes and links, in 2D or 3D.",
+          keywords: ["atlas", "map", "graph", "visualize", "links", "network", "sky", "3d"],
+        },
+        {
           id: "workflows-enabled",
           title: "Workflows",
           description:
@@ -2582,6 +2591,29 @@ export function SettingsModal(): JSX.Element {
                 description="Floating capture window for thoughts you want in the vault without leaving whatever you're doing."
               >
                 <QuickCaptureHotkeyRow settingId="quick-capture-hotkey" />
+              </Section>
+            </div>
+          ),
+        },
+        {
+          id: "atlas",
+          title: "Atlas",
+          description:
+            "The Atlas map of the vault, and whether it appears in the app at all.",
+          searchIds: ["atlas-enabled"],
+          content: (
+            <div className="space-y-6">
+              <Section
+                title="Atlas"
+                description="The whole vault drawn as a map: every note a point, every wikilink a line, regions from your top-level folders. On by default."
+              >
+                <ToggleRow
+                  label="Atlas"
+                  description="Show the Atlas view: the sidebar row, the Open Atlas command, and the Space g leader binding in Vim mode. Custom themes can restyle it through the --z-atlas-region-1 to --z-atlas-region-8 and --z-atlas-bg CSS variables."
+                  value={atlasEnabled}
+                  settingId="atlas-enabled"
+                  onChange={setAtlasEnabled}
+                />
               </Section>
             </div>
           ),

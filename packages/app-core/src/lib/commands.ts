@@ -1118,6 +1118,16 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       run: () => getState().openWorkflowsView()
     },
     {
+      id: 'view.atlas',
+      title: 'Open Atlas',
+      category: 'View',
+      shortcut: leaderShortcut('vim.leaderAtlas'),
+      keywords: 'atlas map graph vault visualize notes links regions sky 3d',
+      // Hidden entirely when the feature is switched off in Settings
+      when: () => getState().atlasEnabled,
+      run: () => getState().openAtlasView()
+    },
+    {
       id: 'view.tags',
       title: 'Open Tags',
       category: 'View',

@@ -23,6 +23,7 @@ import { isHelpTabPath } from '@shared/help'
 import { isTagsTabPath } from '@shared/tags'
 import { isTasksTabPath } from '@shared/tasks'
 import { isWorkflowsTabPath } from '@shared/workflows-view'
+import { isAtlasTabPath } from '@shared/atlas-view'
 import { isArchiveTabPath } from '@shared/archive'
 import { isTrashTabPath } from '@shared/trash'
 import { isQuickNotesTabPath } from '@shared/quick-notes'
@@ -87,6 +88,19 @@ function buildEntries(deps: BuildDeps): BufferEntry[] {
         title: 'Tasks',
         subtitle: 'Vault-wide task list',
         keywords: 'tasks todos checklist vault virtual',
+        badge,
+        current: isCurrent,
+        dirty: false,
+        virtual: true
+      })
+      return
+    }
+    if (isAtlasTabPath(path)) {
+      entries.push({
+        path,
+        title: 'Atlas',
+        subtitle: 'The vault as a map',
+        keywords: 'atlas map graph vault notes links virtual',
         badge,
         current: isCurrent,
         dirty: false,

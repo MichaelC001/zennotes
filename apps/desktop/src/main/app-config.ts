@@ -276,6 +276,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     comment: 'code / monospace font; empty = system default'
   },
   // view
+  atlasEnabled: {
+    section: 'view',
+    tomlKey: 'atlas_enabled',
+    comment: 'the Atlas map view of the vault (sidebar row, command, Space g); on by default'
+  },
   workflowsEnabled: {
     section: 'view',
     tomlKey: 'workflows_enabled',

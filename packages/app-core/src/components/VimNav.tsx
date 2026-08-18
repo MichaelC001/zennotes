@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { completionStatus } from '@codemirror/autocomplete'
-import { isTagsViewActive, isTasksViewActive, useStore } from '../store'
+import { isAtlasViewActive, isTagsViewActive, isTasksViewActive, useStore } from '../store'
 import { HintOverlay } from './HintOverlay'
 import { WhichKeyOverlay, type WhichKeyItem } from './WhichKeyOverlay'
 import {
@@ -259,6 +259,15 @@ export function VimNav(): JSX.Element | null {
     }
 
     const items: WhichKeyItem[] = [
+      ...(useStore.getState().atlasEnabled
+        ? [
+            {
+              keyLabel: getKeymapDisplay(keymapOverrides, 'vim.leaderAtlas'),
+              label: 'Open atlas',
+              detail: 'See the vault as a map of notes and links.'
+            }
+          ]
+        : []),
       {
         keyLabel: getKeymapDisplay(keymapOverrides, 'vim.leaderOpenBuffers'),
         label: 'Open buffers',
@@ -714,7 +723,8 @@ export function VimNav(): JSX.Element | null {
           sidebarOpen: state.sidebarOpen,
           noteListOpen: state.noteListOpen,
           unifiedSidebar: state.unifiedSidebar,
-          tasksViewOpen: isTasksViewActive(state)
+          tasksViewOpen: isTasksViewActive(state),
+          atlasViewOpen: isAtlasViewActive(state)
         })
         const direction =
           matchesSequenceToken(e, overrides, 'vim.paneFocusLeft') ||
@@ -792,7 +802,8 @@ export function VimNav(): JSX.Element | null {
       // (hint mode) and every other leader command work in these panels too.
       // VimNav consumes the leader keypress before TasksView sees it, so the
       // leader no longer collides with Space-to-toggle. (#151)
-      const panelViewActive = isTasksViewActive(state) || isTagsViewActive(state)
+      const panelViewActive =
+        isTasksViewActive(state) || isTagsViewActive(state) || isAtlasViewActive(state)
       // Only defer while that view actually holds keyboard focus. After pane
       // navigation moves focus to another panel (e.g. Ctrl+W h → sidebar), the
       // Tasks/Tags tab is still "active" but focusedPanel is no longer
@@ -802,7 +813,8 @@ export function VimNav(): JSX.Element | null {
       const panelViewFocused =
         state.focusedPanel == null ||
         state.focusedPanel === 'tasks' ||
-        state.focusedPanel === 'tags'
+        state.focusedPanel === 'tags' ||
+        state.focusedPanel === 'atlas'
       if (
         panelViewActive &&
         panelViewFocused &&
@@ -847,6 +859,13 @@ export function VimNav(): JSX.Element | null {
         }
         // Skipped outright when Workflows is off, so the key falls through as
         // an unbound leader press instead of arming a dead view.
+        if (state.atlasEnabled && matchesSequenceToken(e, overrides, 'vim.leaderAtlas')) {
+          e.preventDefault()
+          e.stopImmediatePropagation()
+          resetLeader()
+          void state.openAtlasView()
+          return
+        }
         if (state.workflowsEnabled && matchesSequenceToken(e, overrides, 'vim.leaderWorkflows')) {
           e.preventDefault()
           e.stopImmediatePropagation()

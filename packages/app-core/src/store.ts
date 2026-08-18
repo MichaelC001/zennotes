@@ -62,6 +62,7 @@ import { recordTitle, composePageBody } from './lib/database-cells'
 import { applyManualMove, manualOrderCompare, parentDirOf } from './lib/manual-order'
 import { TAGS_TAB_PATH, isTagsTabPath } from '@shared/tags'
 import { WORKFLOWS_TAB_PATH, isWorkflowsTabPath } from '@shared/workflows-view'
+import { ATLAS_TAB_PATH, isAtlasTabPath } from '@shared/atlas-view'
 import { HELP_TAB_PATH, isHelpTabPath } from '@shared/help'
 import { ARCHIVE_TAB_PATH, isArchiveTabPath } from '@shared/archive'
 import { TRASH_TAB_PATH, isTrashTabPath } from '@shared/trash'
@@ -643,6 +644,7 @@ interface Prefs {
    *  closes any tab already showing it. OFF by default, deliberately: it can
    *  rewrite notes in bulk, so it is a one-time opt-in under Settings. */
   workflowsEnabled: boolean
+  atlasEnabled: boolean
   /** Built-in workflow recipes hidden from the gallery, by preset id. Unknown
    *  ids are kept rather than pruned, so hiding a preset survives the preset
    *  itself being renamed away and back across versions. */
@@ -1032,6 +1034,7 @@ export const DEFAULT_PREFS: Prefs = {
   // graph editor asks more of a new user than any other view. The feature is
   // opted into once in Settings -> Workflows, not stumbled into.
   workflowsEnabled: false,
+  atlasEnabled: true,
   hiddenWorkflowPresets: [],
   collapsedTagNodes: [],
   autoCalendarPanel: true,
@@ -1324,6 +1327,8 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.workflowsEnabled === 'boolean'
         ? p.workflowsEnabled
         : DEFAULT_PREFS.workflowsEnabled,
+    atlasEnabled:
+      typeof p.atlasEnabled === 'boolean' ? p.atlasEnabled : DEFAULT_PREFS.atlasEnabled,
     hiddenWorkflowPresets: normalizeHiddenWorkflowPresets(p.hiddenWorkflowPresets),
     collapsedTagNodes: Array.isArray(p.collapsedTagNodes)
       ? p.collapsedTagNodes.filter((k): k is string => typeof k === 'string')
@@ -2163,6 +2168,7 @@ function collectPrefs(s: {
   tagsCollapsed: boolean
   nestedTags: boolean
   workflowsEnabled: boolean
+  atlasEnabled: boolean
   hiddenWorkflowPresets: string[]
   collapsedTagNodes: string[]
   autoCalendarPanel: boolean
@@ -2254,6 +2260,7 @@ function collectPrefs(s: {
     tagsCollapsed: s.tagsCollapsed,
     nestedTags: s.nestedTags,
     workflowsEnabled: s.workflowsEnabled,
+    atlasEnabled: s.atlasEnabled,
     hiddenWorkflowPresets: s.hiddenWorkflowPresets,
     collapsedTagNodes: s.collapsedTagNodes,
     autoCalendarPanel: s.autoCalendarPanel,
@@ -2531,6 +2538,16 @@ export function isWorkflowsViewActive(state: {
 }): boolean {
   const leaf = findLeaf(state.paneLayout, state.activePaneId)
   return leaf?.activeTab === WORKFLOWS_TAB_PATH
+}
+
+/** True when the active pane is showing the Atlas map. Mirrors
+ *  `isTasksViewActive`; the sidebar row uses it for its selected state. */
+export function isAtlasViewActive(state: {
+  paneLayout: PaneLayout
+  activePaneId: string
+}): boolean {
+  const leaf = findLeaf(state.paneLayout, state.activePaneId)
+  return leaf?.activeTab === ATLAS_TAB_PATH
 }
 
 function hasTasksViewOpen(state: { paneLayout: PaneLayout }): boolean {
@@ -2818,6 +2835,7 @@ interface Store {
    *  row, the `view.workflows` command, and the leader binding, so the canvas
    *  has no way in at all. */
   workflowsEnabled: boolean
+  atlasEnabled: boolean
   /** Built-in recipes hidden from the New-workflow gallery, by preset id.
    *  Persisted (portable). Hiding is per taste, not per vault. */
   hiddenWorkflowPresets: string[]
@@ -2970,6 +2988,8 @@ interface Store {
   openTagView: (tag?: string) => Promise<void>
   /** Open the Workflows canvas as a tab in the active pane. */
   openWorkflowsView: () => Promise<void>
+  /** Open the Atlas map as a tab in the active pane. */
+  openAtlasView: () => Promise<void>
   /** Close the Tags tab in every pane and clear the selection. */
   closeTagView: () => void
   /** Open the built-in Help tab in the active pane. */
@@ -3188,6 +3208,7 @@ interface Store {
   /** Turn the whole Workflows feature on or off. Switching it off also closes
    *  any pane still showing the canvas. */
   setWorkflowsEnabled: (on: boolean) => void
+  setAtlasEnabled: (on: boolean) => void
   hideWorkflowPreset: (id: string) => void
   restoreWorkflowPreset: (id: string) => void
   /** Wholesale replacement, for Settings' Hide all / Restore all. The preset
@@ -4274,6 +4295,9 @@ export const useStore = create<Store>((set, get) => {
     if (!get().workflowsEnabled) {
       layout = rewritePathsInTree(layout, (path) => (isWorkflowsTabPath(path) ? null : path))
     }
+    if (!get().atlasEnabled) {
+      layout = rewritePathsInTree(layout, (path) => (isAtlasTabPath(path) ? null : path))
+    }
     const unreadable = new Set<string>()
     const contents: Record<string, NoteContent> = {}
     const dirty: Record<string, boolean> = {}
@@ -4524,6 +4548,7 @@ export const useStore = create<Store>((set, get) => {
   tagsCollapsed: loadPrefs().tagsCollapsed,
   nestedTags: loadPrefs().nestedTags,
   workflowsEnabled: loadPrefs().workflowsEnabled,
+  atlasEnabled: loadPrefs().atlasEnabled,
   hiddenWorkflowPresets: loadPrefs().hiddenWorkflowPresets,
   collapsedTagNodes: loadPrefs().collapsedTagNodes,
   autoCalendarPanel: loadPrefs().autoCalendarPanel,
@@ -7093,10 +7118,28 @@ export const useStore = create<Store>((set, get) => {
     set({ hideBuiltinTemplates: hidden })
     savePrefs(collectPrefs(get()))
   },
+
+  openAtlasView: async () => {
+    const state = get()
+    // Single funnel for every entry point (sidebar row, command, leader key),
+    // so the feature switch holds even if a caller forgets to check it.
+    if (!state.atlasEnabled) return
+    await get().openNoteInPane(state.activePaneId, ATLAS_TAB_PATH)
+    // Hand the keyboard over on EVERY open, not just the first: clicking the
+    // sidebar row leaves focus (and focusedPanel) on the sidebar, and the
+    // row click is also how people re-enter an already-open Atlas tab.
+    ;(document.activeElement as HTMLElement | null)?.blur?.()
+    set({ focusedPanel: 'atlas' })
+  },
   setWorkflowsEnabled: (on) => {
     set({ workflowsEnabled: on })
     savePrefs(collectPrefs(get()))
     if (!on) closeWorkflowsTabsEverywhere()
+  },
+  setAtlasEnabled: (on) => {
+    set({ atlasEnabled: on })
+    savePrefs(collectPrefs(get()))
+    if (!on) closeAtlasTabsEverywhere()
   },
   hideWorkflowPreset: (id) => {
     set((s) => ({
@@ -8211,6 +8254,7 @@ export const useStore = create<Store>((set, get) => {
     // canvas that can write to the vault may never come back past a switch that
     // turned it off.
     if (isWorkflowsTabPath(path) && !s.workflowsEnabled) return
+    if (isAtlasTabPath(path) && !s.atlasEnabled) return
     // Tasks / Tags / Help / Trash tabs are virtual — add them without touching disk.
     if (isWorkspaceVirtualTabPath(path)) {
       set((cur) => {
@@ -9595,6 +9639,20 @@ function closeWorkflowsTabsEverywhere(): void {
   }))
 }
 
+/** Drop the virtual Atlas tab from every pane, mirroring
+ *  `closeWorkflowsTabsEverywhere`, whenever the feature is switched off. */
+function closeAtlasTabsEverywhere(): void {
+  const state = useStore.getState()
+  for (const leaf of allLeaves(state.paneLayout)) {
+    if (leaf.tabs.includes(ATLAS_TAB_PATH)) {
+      void state.closeTabInPane(leaf.id, ATLAS_TAB_PATH)
+    }
+  }
+  useStore.setState((s) => ({
+    closedTabStack: s.closedTabStack.filter((entry) => !isAtlasTabPath(entry.path))
+  }))
+}
+
 // --- Portable config file sync (desktop) ------------------------------------
 
 /** Apply an externally-changed portable config (synced dotfile / hand-edit)
@@ -9619,6 +9677,7 @@ function applyPortableConfig(next: AppConfigPortable): void {
   // setState bypasses the setters on purpose (no write-back to the file), so
   // the tab cleanup that setWorkflowsEnabled does has to be repeated here.
   if (!merged.workflowsEnabled) closeWorkflowsTabsEverywhere()
+  if (!merged.atlasEnabled) closeAtlasTabsEverywhere()
 }
 
 let configSyncInitialized = false

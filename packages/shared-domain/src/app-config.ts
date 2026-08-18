@@ -119,6 +119,7 @@ export const PORTABLE_PREF_KEYS = [
   // features
   'workflowsEnabled',
   'hiddenWorkflowPresets',
+  'atlasEnabled',
   // view
   'systemFolderLabels',
   'noteSortOrder',
@@ -230,6 +231,7 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   monoFont: null,
   workflowsEnabled: false,
   hiddenWorkflowPresets: [],
+  atlasEnabled: true,
   systemFolderLabels: {},
   noteSortOrder: 'none',
   assetSortOrder: 'name-asc',

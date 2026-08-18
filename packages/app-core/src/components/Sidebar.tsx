@@ -19,6 +19,7 @@ import {
   isTasksViewActive,
   isTrashViewActive,
   isWorkflowsViewActive,
+  isAtlasViewActive,
   useStore,
 } from "../store";
 import { Button } from "./ui/Button";
@@ -56,6 +57,7 @@ import {
   TargetIcon,
   TrashIcon,
   WorkflowIcon,
+  AtlasIcon,
 } from "./icons";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { ResizeHandle } from "./ResizeHandle";
@@ -461,6 +463,9 @@ export function Sidebar(): JSX.Element {
   const openWorkflowsView = useStore((s) => s.openWorkflowsView);
   const workflowsViewActive = useStore(isWorkflowsViewActive);
   const workflowsEnabled = useStore((s) => s.workflowsEnabled);
+  const openAtlasView = useStore((s) => s.openAtlasView);
+  const atlasViewActive = useStore(isAtlasViewActive);
+  const atlasEnabled = useStore((s) => s.atlasEnabled);
   const openQuickNotesView = useStore((s) => s.openQuickNotesView);
   const quickNotesViewActive = useStore(isQuickNotesViewActive);
   const openHelpView = useStore((s) => s.openHelpView);
@@ -3343,6 +3348,20 @@ export function Sidebar(): JSX.Element {
               onClick={() => void openWorkflowsView()}
               label="Workflows"
               icon={<WorkflowIcon width={12} height={12} strokeWidth={2.15} />}
+              sidebarType="workflows"
+              sidebarIdx={idxCounter.current.value++}
+              vimHighlight={vimCursor === idxCounter.current.value - 1}
+              sidebarFocused={isSidebarFocused}
+            />
+          )}
+
+          {/* Same skip-before-props trick as Workflows above. */}
+          {atlasEnabled && (
+            <TaskSidebarRow
+              active={atlasViewActive}
+              onClick={() => void openAtlasView()}
+              label="Atlas"
+              icon={<AtlasIcon width={12} height={12} strokeWidth={2.15} />}
               sidebarType="workflows"
               sidebarIdx={idxCounter.current.value++}
               vimHighlight={vimCursor === idxCounter.current.value - 1}

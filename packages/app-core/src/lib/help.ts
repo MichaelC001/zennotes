@@ -520,6 +520,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'Space p', action: 'Note outline', detail: 'Jump to any heading in the active note via a searchable overlay.' },
       { keys: 'Space v', action: 'Switch vault', detail: 'Open the command palette directly to the local vault switcher.' },
       { keys: 'Space a', action: 'Open workflows', detail: 'Open the Workflows view, where saved pipelines over your notes are built and run. Workflows are off by default; turn them on under Settings → Workflows first.' },
+      { keys: 'Space g', action: 'Open atlas', detail: 'Open the Atlas view: the whole vault drawn as a map of notes and links.' },
       { keys: 'Space q', action: 'Quick capture window', detail: 'Open the floating, always-on-top capture window, same as the global hotkey.' },
       { keys: 'Space i', action: 'Insert template into note', detail: 'Pick a template and insert it at the cursor of the active note, instead of creating a new note from it.' },
       { keys: 'Space c', action: 'Toggle calendar', detail: 'Show or hide the calendar panel for the active pane.' },
@@ -633,6 +634,23 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: '/', action: 'Filter the view', detail: 'Focus the local filter box for tasks, tag matches, or trashed notes.' },
       { keys: ':', action: 'Open local ex prompt', detail: 'Run the view-specific command line inside Tasks or Tags.' },
       { keys: 'Esc', action: 'Clear the filter', detail: 'Clears an active filter. These views are tabs, so Esc no longer closes them — close with :q or the ✕ in the tab header.' }
+    ]
+  },
+  {
+    id: 'atlas-view',
+    title: 'Atlas view',
+    description:
+      'On by default; switch it off under Settings → Atlas. Single-letter keys are Vim-mode only; arrows, Enter, and Esc always work, and every action is also on the toolbar chips along the bottom.',
+    items: [
+      { keys: 'f', action: 'Hint jump', detail: 'Two-letter labels appear over visible notes; type one to fly there. The same hint mode as everywhere else in the app.' },
+      { keys: 'h j k l', action: 'Move the camera', detail: 'Pan the map in 2D; orbit and tilt the sky in 3D. Arrow keys do the same in either Vim mode.' },
+      { keys: '+ / -', action: 'Zoom', detail: 'Fly closer or further. The mouse wheel and pinch do the same.' },
+      { keys: 'v', action: 'Map or sky', detail: 'Toggle between the flat 2D map and the 3D sky. Both use the same frozen layout, so nothing ever shuffles.' },
+      { keys: '1 2 3 4', action: 'Lenses', detail: 'Structure, Heat (recent editing glows), Orphans (notes with no links), and Bridges (notes holding regions together).' },
+      { keys: '[ / ]', action: 'Previous / next region', detail: 'Fly between regions. Regions are your top-level folders.' },
+      { keys: 'c', action: 'Links quiet, all, off', detail: 'How much of the link web is drawn. Quiet keeps lines faint until a note is hovered or focused.' },
+      { keys: 'Enter', action: 'Open the focused note', detail: 'Click once to focus a note, twice (or Enter) to open it in the editor.' },
+      { keys: '/', action: 'Filter', detail: 'Dim every note not matching a title or tag search, live.' }
     ]
   },
   {
@@ -1055,6 +1073,12 @@ export const HELP_SETTINGS: HelpSettingsSection[] = [
     items: [
       { label: 'Show tasks from archived notes', detail: 'Off by default: archiving a note retires its tasks from the Tasks list, calendar, and Kanban. Turn this on to keep them visible everywhere, Archive column included. The raw key is `show_archived_tasks` in `config.toml`.' },
       { label: 'Kanban statuses', detail: 'Define the ordered columns of the custom-status Kanban board here; `kanban_statuses` under `[view]` in `config.toml` is the file-level equivalent.' }
+    ]
+  },
+  {
+    title: 'Atlas',
+    items: [
+      { label: 'Atlas', detail: 'On by default. The vault drawn as a map: every note a point sized by how linked it is, every wikilink a line, regions from your top-level folders, in 2D or 3D. Positions are computed once and cached so the map stays a place you know. Turning it off hides the sidebar row, the command, and the Space g binding. Theme authors can restyle it with the --z-atlas-bg and --z-atlas-region-1 through --z-atlas-region-8 variables.' }
     ]
   },
   {

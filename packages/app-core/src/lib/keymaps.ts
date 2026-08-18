@@ -50,6 +50,7 @@ export type KeymapId =
   | "vim.leaderPrefix"
   | "vim.leaderOpenBuffers"
   | "vim.leaderWorkflows"
+  | "vim.leaderAtlas"
   | "vim.leaderSearchNotes"
   | "vim.leaderSearchGroup"
   | "vim.leaderSearchVaultText"
@@ -442,6 +443,17 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     title: "Leader: open buffers",
     description: "Open the buffer switcher.",
     defaultBinding: "o",
+    vimOnly: true,
+    maxTokens: 1,
+  },
+  {
+    id: "vim.leaderAtlas",
+    kind: "sequence",
+    scope: "leader",
+    group: "vim",
+    title: "Leader: open atlas",
+    description: "Open the Atlas map of the vault.",
+    defaultBinding: "g",
     vimOnly: true,
     maxTokens: 1,
   },
