@@ -4,6 +4,15 @@
    looks the same in the editor and the preview on every theme. (#390-adjacent) */
 @import "katex/dist/katex.min.css";
 
+/* Math size (#623): one user-set factor scales inline and block math in both
+ * the editor and the reading view, for KaTeX and Typst alike. zoom keeps the
+ * surrounding layout honest where transform: scale would overlap lines. */
+:is(.prose-zen, .cm-editor) .katex,
+:is(.prose-zen, .cm-editor) .zen-typst-math,
+:is(.prose-zen, .cm-editor) :is(.cm-math-inline, .cm-math-block) > svg {
+  zoom: var(--z-math-scale, 1);
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

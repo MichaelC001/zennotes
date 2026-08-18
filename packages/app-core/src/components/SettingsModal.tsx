@@ -472,6 +472,8 @@ export function SettingsModal(): JSX.Element {
   const showArchivedTasks = useStore((s) => s.showArchivedTasks);
   const setShowArchivedTasks = useStore((s) => s.setShowArchivedTasks);
   const mathRenderer = useStore((s) => s.mathRenderer);
+  const mathFontScale = useStore((s) => s.mathFontScale);
+  const setMathFontScale = useStore((s) => s.setMathFontScale);
   const typstTagPreambles = useStore((s) => s.typstTagPreambles);
   const setTypstTagPreambles = useStore((s) => s.setTypstTagPreambles);
   const setMathRenderer = useStore((s) => s.setMathRenderer);
@@ -1862,6 +1864,13 @@ export function SettingsModal(): JSX.Element {
           ],
         },
         {
+          id: "math-font-scale",
+          title: "Math size",
+          description:
+            "Scale inline and block math relative to the surrounding text.",
+          keywords: ["math", "size", "scale", "font", "katex", "typst", "latex", "formula", "equation"],
+        },
+        {
           id: "math-renderer",
           title: "Math renderer",
           description:
@@ -2363,6 +2372,17 @@ export function SettingsModal(): JSX.Element {
                     { value: "typst", label: "Typst" },
                   ]}
                   onChange={(next) => setMathRenderer(next)}
+                />
+                <SliderRow
+                  label="Math size"
+                  description="Scale inline $…$ and block $$…$$ math relative to the surrounding text, in both the editor and the reading view."
+                  value={mathFontScale}
+                  min={50}
+                  max={200}
+                  step={5}
+                  unit="%"
+                  settingId="math-font-scale"
+                  onChange={setMathFontScale}
                 />
                 {mathRenderer === "typst" && (
                   <ToggleRow

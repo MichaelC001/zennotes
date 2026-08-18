@@ -551,6 +551,7 @@ interface Prefs {
   themeFamily: ThemeFamily
   themeMode: ThemeMode
   editorFontSize: number    // px — affects editor + preview
+  mathFontScale: number     // percent — inline + block math, both renderers (#623)
   editorLineHeight: number  // unitless multiplier
   editorTabSize: number     // columns used to render and indent a tab
   editorScrollOff: number   // vim scrolloff — lines kept above/below the cursor (0 = off)
@@ -987,6 +988,7 @@ export const DEFAULT_PREFS: Prefs = {
   enabledOverrides: {},
   themeTweaks: {},
   editorFontSize: 16,
+  mathFontScale: 100,
   editorLineHeight: 1.7,
   editorTabSize: 4,
   editorScrollOff: 0,
@@ -1175,6 +1177,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.editorFontSize === 'number'
         ? p.editorFontSize
         : DEFAULT_PREFS.editorFontSize,
+    mathFontScale:
+      typeof p.mathFontScale === 'number' && Number.isFinite(p.mathFontScale)
+        ? Math.min(200, Math.max(50, Math.round(p.mathFontScale)))
+        : DEFAULT_PREFS.mathFontScale,
     editorLineHeight:
       typeof p.editorLineHeight === 'number'
         ? p.editorLineHeight
@@ -2127,6 +2133,7 @@ function collectPrefs(s: {
   themeFamily: ThemeFamily
   themeMode: ThemeMode
   editorFontSize: number
+  mathFontScale: number
   editorLineHeight: number
   editorTabSize: number
   editorScrollOff: number
@@ -2219,6 +2226,7 @@ function collectPrefs(s: {
     themeFamily: s.themeFamily,
     themeMode: s.themeMode,
     editorFontSize: s.editorFontSize,
+    mathFontScale: s.mathFontScale,
     editorLineHeight: s.editorLineHeight,
     editorTabSize: s.editorTabSize,
     editorScrollOff: s.editorScrollOff,
@@ -2746,6 +2754,7 @@ interface Store {
   themeFamily: ThemeFamily
   themeMode: ThemeMode
   editorFontSize: number
+  mathFontScale: number
   editorLineHeight: number
   editorTabSize: number
   editorScrollOff: number
@@ -3225,6 +3234,7 @@ interface Store {
   ) => void
   setTheme: (next: { id: string; family: ThemeFamily; mode: ThemeMode }) => void
   setEditorFontSize: (px: number) => void
+  setMathFontScale: (percent: number) => void
   setEditorLineHeight: (mult: number) => void
   setEditorTabSize: (size: number) => void
   setEditorScrollOff: (lines: number) => void
@@ -4507,6 +4517,7 @@ export const useStore = create<Store>((set, get) => {
   themeFamily: loadPrefs().themeFamily,
   themeMode: loadPrefs().themeMode,
   editorFontSize: loadPrefs().editorFontSize,
+  mathFontScale: loadPrefs().mathFontScale,
   editorLineHeight: loadPrefs().editorLineHeight,
   editorTabSize: loadPrefs().editorTabSize,
   editorScrollOff: loadPrefs().editorScrollOff,
@@ -7231,6 +7242,10 @@ export const useStore = create<Store>((set, get) => {
   },
   setEditorFontSize: (px) => {
     set({ editorFontSize: px })
+    savePrefs(collectPrefs(get()))
+  },
+  setMathFontScale: (percent) => {
+    set({ mathFontScale: Math.min(200, Math.max(50, Math.round(percent))) })
     savePrefs(collectPrefs(get()))
   },
   setEditorLineHeight: (mult) => {

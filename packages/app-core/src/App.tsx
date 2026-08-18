@@ -364,6 +364,7 @@ function App(): JSX.Element {
   const enabledOverrides = useStore((s) => s.enabledOverrides)
   const themeTweaks = useStore((s) => s.themeTweaks)
   const editorFontSize = useStore((s) => s.editorFontSize)
+  const mathFontScale = useStore((s) => s.mathFontScale)
   const editorLineHeight = useStore((s) => s.editorLineHeight)
   const previewMaxWidth = useStore((s) => s.previewMaxWidth)
   const editorMaxWidth = useStore((s) => s.editorMaxWidth)
@@ -605,6 +606,7 @@ function App(): JSX.Element {
   useEffect(() => {
     const html = document.documentElement
     html.style.setProperty('--z-editor-font-size', `${editorFontSize}px`)
+    html.style.setProperty('--z-math-scale', String(mathFontScale / 100))
     html.style.setProperty('--z-editor-line-height', String(editorLineHeight))
     html.style.setProperty('--z-preview-max-width', `${previewMaxWidth}px`)
     html.style.setProperty('--z-editor-max-width', `${editorMaxWidth}px`)
@@ -632,7 +634,7 @@ function App(): JSX.Element {
       monoFont,
       '"SF Mono", "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace'
     )
-  }, [editorFontSize, editorLineHeight, previewMaxWidth, editorMaxWidth, contentAlign, completedTaskStyle, mathRenderer, lineNumberPosition, interfaceFont, textFont, monoFont])
+  }, [editorFontSize, mathFontScale, editorLineHeight, previewMaxWidth, editorMaxWidth, contentAlign, completedTaskStyle, mathRenderer, lineNumberPosition, interfaceFont, textFont, monoFont])
 
   // Keep the markdown/preview pipeline pointed at the active math engine, even
   // on surfaces that render markdown without the Preview component mounted

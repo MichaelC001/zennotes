@@ -144,6 +144,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'font_size',
     comment: 'editor + preview font size (px)'
   },
+  mathFontScale: {
+    section: 'editor',
+    tomlKey: 'math_font_scale',
+    comment: 'math size as a percentage (50-200); scales $…$ and $$…$$ in editor and preview'
+  },
   editorLineHeight: { section: 'editor', tomlKey: 'line_height', comment: 'line-height multiplier' },
   editorTabSize: {
     section: 'editor',
