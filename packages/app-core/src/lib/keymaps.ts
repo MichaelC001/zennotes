@@ -13,6 +13,7 @@ export type KeymapId =
   | "global.searchNotesNonVim"
   | "global.commandPalette"
   | "global.newQuickNote"
+  | "global.newNoteHere"
   | "global.openSettings"
   | "global.openFile"
   | "global.toggleSidebar"
@@ -176,6 +177,16 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     title: "New quick note",
     description: "Create a quick capture note and focus its title.",
     defaultBinding: "Shift+Mod+N",
+  },
+  {
+    id: "global.newNoteHere",
+    kind: "shortcut",
+    scope: "app",
+    group: "global",
+    title: "New note in current folder",
+    description:
+      "Create a note in the active note's folder (or the browsed folder when no note is open) and focus its title.",
+    defaultBinding: "Mod+N",
   },
   {
     id: "global.openSettings",

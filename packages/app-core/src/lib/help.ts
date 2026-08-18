@@ -466,6 +466,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'Mod+F', action: 'Search notes (non-Vim mode)', detail: 'Open the note search palette directly when Vim mode is off.' },
       { keys: 'Mod+F (in the editor)', action: 'Find and replace in the note', detail: 'In Edit and Split, open the editor’s find-and-replace bar: Tab moves between the Find and Replace fields, with match-case, whole-word, and regex toggles. Esc closes it.' },
       { keys: 'Shift+Mod+P', action: 'Open commands', detail: 'Open the command palette.' },
+      { keys: 'Mod+N', action: 'New note in current folder', detail: 'Create a note in the active note\u2019s folder (or the browsed folder when no note is open) and focus its title. Rebindable under Settings \u2192 Keymaps.' },
       { keys: 'Shift+Mod+N', action: 'New Quick Note', detail: 'Create a quick capture note in the main window and focus its title.' },
       { keys: 'Shift+Mod+Space', action: 'Open quick capture window', detail: 'Open the floating, always-on-top capture window. Bound system-wide (CommandOrControl+Shift+Space by default) so it works over any app; change it under Settings → Editor.' },
       { keys: 'Mod+,', action: 'Open Settings', detail: 'Open settings for appearance, editor behavior, fonts, vault controls, and app details.' },

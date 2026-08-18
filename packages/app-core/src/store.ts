@@ -3150,6 +3150,7 @@ interface Store {
    * — unlike the right-click menus — carry no implied location.
    */
   createNoteInChosenFolder: (opts?: { initialPath?: string }) => Promise<void>
+  createNoteInCurrentFolder: () => Promise<void>
   /**
    * Web counterpart of the desktop drag-to-open feature: for each
    * drag-and-dropped markdown File, read its contents, create a note from
@@ -6612,6 +6613,24 @@ export const useStore = create<Store>((set, get) => {
     }
   },
 
+  createNoteInCurrentFolder: async () => {
+    const s = get()
+    if (isTrashViewActive(s)) return
+    // "Current folder" is the folder of the active note (the one you're
+    // editing), not the sidebar's browse view; those drift apart when notes
+    // from different folders are open. (#403) Fall back to the browsed folder
+    // only when no note is open. (#614)
+    const active = s.activeNote
+    if (active && active.folder !== 'trash') {
+      await get().createAndOpen(active.folder, noteFolderSubpath(active, s.vaultSettings), {
+        focusTitle: true
+      })
+      return
+    }
+    const v = s.view
+    if (v.kind !== 'folder' || v.folder === 'trash') return
+    await get().createAndOpen(v.folder, v.subpath, { focusTitle: true })
+  },
   createNoteInChosenFolder: async (opts) => {
     const state = get()
     const entered = await promptApp(

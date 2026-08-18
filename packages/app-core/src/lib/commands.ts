@@ -260,6 +260,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       id: 'note.new.here',
       title: 'New Note in Current Folder',
       category: 'Note',
+      shortcut: shortcut('global.newNoteHere'),
       keywords: 'create add write',
       when: () => {
         const s = getState()
@@ -267,24 +268,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
         if (s.activeNote && s.activeNote.folder !== 'trash') return true
         return s.view.kind === 'folder' && s.view.folder !== 'trash'
       },
-      run: () => {
-        const s = getState()
-        if (isTrashViewActive(s)) return
-        // "Current folder" is the folder of the active note (the one you're
-        // editing), not the sidebar's browse view. Those drift apart when notes
-        // from different folders are open, since switching tabs doesn't move the
-        // view, so reading the view created the note in the wrong directory.
-        // (#403) Fall back to the browsed folder only when no note is open.
-        const active = s.activeNote
-        if (active && active.folder !== 'trash') {
-          return s.createAndOpen(active.folder, noteFolderSubpath(active, s.vaultSettings), {
-            focusTitle: true
-          })
-        }
-        const v = s.view
-        if (v.kind !== 'folder' || v.folder === 'trash') return
-        return s.createAndOpen(v.folder, v.subpath, { focusTitle: true })
-      }
+      run: () => getState().createNoteInCurrentFolder()
     },
     {
       id: 'note.save',

@@ -705,6 +705,12 @@ function App(): JSX.Element {
         void state.createAndOpen('quick', '', { title, focusTitle: true })
         return
       }
+      if (matchesShortcut(e, overrides, 'global.newNoteHere')) {
+        // ⌘N — new note in the current folder (#614)
+        e.preventDefault()
+        void state.createNoteInCurrentFolder()
+        return
+      }
       if (matchesShortcut(e, overrides, 'global.toggleWordWrap')) {
         // ⌥Z — toggle word wrap (matches VSCode/Sublime convention)
         e.preventDefault()
