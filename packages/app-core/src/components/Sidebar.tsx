@@ -974,6 +974,9 @@ export function Sidebar(): JSX.Element {
     y: number;
     tag: string;
   } | null>(null);
+  // Assets row menu (#621): the row advertised the `m` hint like every other
+  // sidebar row but had no context menu wired at all.
+  const [assetsRowMenu, setAssetsRowMenu] = useState<{ x: number; y: number } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{
     x: number;
     y: number;
@@ -2835,6 +2838,11 @@ export function Sidebar(): JSX.Element {
     [prepareContextSelection],
   );
 
+  const openAssetsRowMenu = useCallback((e: React.MouseEvent): void => {
+    e.preventDefault();
+    setAssetsRowMenu({ x: e.clientX, y: e.clientY });
+  }, []);
+
   const openAssetMenu = useCallback(
     (e: React.MouseEvent, asset: AssetMeta): void => {
       e.preventDefault();
@@ -3741,6 +3749,7 @@ export function Sidebar(): JSX.Element {
                 count={assetCount}
                 active={assetsViewActive}
                 onClick={() => void openAssetsView()}
+                onContextMenu={openAssetsRowMenu}
                 sidebarIdx={idxCounter.current.value++}
                 vimHighlight={vimCursor === idxCounter.current.value - 1}
                 sidebarFocused={isSidebarFocused}
@@ -3826,6 +3835,43 @@ export function Sidebar(): JSX.Element {
           y={folderMenu.y}
           items={folderMenuItems}
           onClose={() => setFolderMenu(null)}
+        />
+      )}
+      {assetsRowMenu && (
+        <ContextMenu
+          x={assetsRowMenu.x}
+          y={assetsRowMenu.y}
+          items={(() => {
+            const state = useStore.getState();
+            const current = state.assetSortOrder;
+            const sortItem = (
+              label: string,
+              field: "name" | "used" | "type" | "size" | "modified",
+            ): ContextMenuItem => {
+              const activeField = current.startsWith(field + "-");
+              const asc = current === field + "-asc";
+              return {
+                label: `Sort by ${label}`,
+                // Re-picking the active field flips its direction, like a
+                // list header; a fresh field starts ascending.
+                hint: activeField ? (asc ? "↑" : "↓") : undefined,
+                onSelect: () =>
+                  state.setAssetSortOrder(
+                    activeField && asc ? `${field}-desc` : `${field}-asc`,
+                  ),
+              };
+            };
+            return [
+              { label: "Open Assets", onSelect: () => void openAssetsView() },
+              { kind: "separator" as const },
+              sortItem("name", "name"),
+              sortItem("type", "type"),
+              sortItem("size", "size"),
+              sortItem("last modified", "modified"),
+              sortItem("times used", "used"),
+            ];
+          })()}
+          onClose={() => setAssetsRowMenu(null)}
         />
       )}
       {rootMenu && (
