@@ -1364,12 +1364,35 @@ export function WorkflowsView(): JSX.Element {
   // the drag that was made, and must record it against the file it was made on.
   const pendingLayoutWrite = useRef<PendingLayoutWrite | null>(null)
 
-  // Desktop owns local workflow files directly. The Docker web client owns
-  // them through a server that explicitly advertises journalled workflow
-  // support. Older servers and Electron remote workspaces stay read-only.
+  // Desktop owns local workflow files directly. Remote workspaces (web or
+  // Electron) own them through a server that explicitly advertises journalled
+  // workflow support; older servers stay read-only. For a desktop remote
+  // workspace the static preload capabilities describe the app, not the
+  // server, so ask the server itself. (#618)
   const appInfo = window.zen.getAppInfo()
   const capabilities = window.zen.getCapabilities()
-  const writableWorkspace = canManageWorkflows(appInfo.runtime, workspaceMode, capabilities)
+  const [remoteWorkflowsSupported, setRemoteWorkflowsSupported] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (workspaceMode !== 'remote' || appInfo.runtime !== 'desktop') return
+    let cancelled = false
+    window.zen
+      .getServerCapabilities()
+      .then((caps) => {
+        if (!cancelled) setRemoteWorkflowsSupported(caps?.supportsWorkflows === true)
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteWorkflowsSupported(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceMode])
+  const effectiveCapabilities =
+    appInfo.runtime === 'desktop' && workspaceMode === 'remote'
+      ? { ...capabilities, supportsWorkflows: remoteWorkflowsSupported === true }
+      : capabilities
+  const writableWorkspace = canManageWorkflows(appInfo.runtime, workspaceMode, effectiveCapabilities)
   const nativeLocalVault = appInfo.runtime === 'desktop' && workspaceMode !== 'remote'
   const canWrite = writableWorkspace && typeof window.zen.writeWorkflow === 'function'
   const canDelete = writableWorkspace && typeof window.zen.deleteWorkflow === 'function'

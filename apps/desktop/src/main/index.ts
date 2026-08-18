@@ -2990,17 +2990,31 @@ function registerIpc(): void {
 
   // Workflows are authored as files in the vault, so remote workspaces (which
   // have no local `.zennotes/workflows`) simply have none.
+  // Remote workspaces delegate every workflow call to the server's journalled
+  // workflow API from #608 when it is advertised; older servers stay
+  // read-only, matching the web client. (#618)
+  const requireRemoteWorkflows = async () => {
+    const client = requireRemoteWorkspaceClient();
+    if (!(await client.supportsWorkflows())) {
+      throw new Error(
+        "This ZenNotes server does not support workflows yet. Update the server and reconnect.",
+      );
+    }
+    return client;
+  };
+
   handle(IPC.VAULT_LIST_WORKFLOWS, async () => {
-    if (isRemoteWorkspaceActive()) return [];
+    if (isRemoteWorkspaceActive()) {
+      const client = requireRemoteWorkspaceClient();
+      return (await client.supportsWorkflows()) ? await client.listWorkflows() : [];
+    }
     const v = requireVault();
     return await listWorkflowFiles(v.root);
   });
 
-  // Authoring needs the local filesystem, so remote workspaces reject rather
-  // than resolve: a silent success would leave the editor believing it saved.
   handle(IPC.VAULT_WRITE_WORKFLOW, async (_e, input: WriteWorkflowInput) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error("Workflows are unavailable on remote vaults");
+      return await (await requireRemoteWorkflows()).writeWorkflow(input);
     }
     const v = requireVault();
     return await writeWorkflowFile(v.root, input);
@@ -3008,7 +3022,7 @@ function registerIpc(): void {
 
   handle(IPC.VAULT_DELETE_WORKFLOW, async (_e, sourcePath: string) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error("Workflows are unavailable on remote vaults");
+      return await (await requireRemoteWorkflows()).deleteWorkflow(sourcePath);
     }
     const v = requireVault();
     return await deleteWorkflowFile(v.root, sourcePath);
@@ -3080,7 +3094,7 @@ function registerIpc(): void {
   // the dry run and asked for it here.
   handle(IPC.VAULT_APPLY_WORKFLOW, async (_e, input: ApplyWorkflowInput) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error("Workflows are unavailable on remote vaults");
+      return await (await requireRemoteWorkflows()).applyWorkflow(input);
     }
     const v = requireVault();
     return await applyWorkflowOps(v.root, input);
@@ -3091,7 +3105,7 @@ function registerIpc(): void {
   // is unknown or already undone.
   handle(IPC.VAULT_UNDO_WORKFLOW_RUN, async (_e, runId: string) => {
     if (isRemoteWorkspaceActive()) {
-      throw new Error("Workflows are unavailable on remote vaults");
+      return await (await requireRemoteWorkflows()).undoWorkflowRun(runId);
     }
     const v = requireVault();
     return await undoWorkflowRun(v.root, runId);
@@ -3100,13 +3114,21 @@ function registerIpc(): void {
   // Run history is read from files in the vault, so a remote workspace simply
   // has none, matching how it reports workflows themselves.
   handle(IPC.VAULT_LIST_WORKFLOW_RUNS, async () => {
-    if (isRemoteWorkspaceActive()) return [];
+    if (isRemoteWorkspaceActive()) {
+      const client = requireRemoteWorkspaceClient();
+      return (await client.supportsWorkflows()) ? await client.listWorkflowRuns() : [];
+    }
     const v = requireVault();
     return await listWorkflowRuns(v.root);
   });
 
   handle(IPC.VAULT_DELETE_WORKFLOW_RUNS, async (_e, workflowId: string) => {
-    if (isRemoteWorkspaceActive()) return 0;
+    if (isRemoteWorkspaceActive()) {
+      if (typeof workflowId !== "string" || !workflowId) {
+        throw new Error("deleteWorkflowRuns needs a workflow id");
+      }
+      return await (await requireRemoteWorkflows()).deleteWorkflowRuns(workflowId);
+    }
     if (typeof workflowId !== "string" || !workflowId) {
       throw new Error("deleteWorkflowRuns needs a workflow id");
     }
