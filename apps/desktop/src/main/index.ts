@@ -5051,7 +5051,12 @@ app.whenReady().then(async () => {
 
   try {
     const cfg = await loadConfig();
-    const desired = cfg.quickCaptureHotkey || DEFAULT_QUICK_CAPTURE_HOTKEY;
+    // loadConfig always yields a normalized string here, and empty string is
+    // the user's explicit "disabled" choice — registerQuickCaptureHotkey("")
+    // is a clean no-op. Falling back to the default on falsey re-registered
+    // the shortcut on every launch, which on Wayland invoked the
+    // global-shortcuts portal and popped GNOME's shortcut dialog. (#615)
+    const desired = cfg.quickCaptureHotkey;
     const result = registerQuickCaptureHotkey(desired);
     if (!result.ok) console.warn(result.error ?? `Failed to bind ${desired}`);
   } catch (err) {
