@@ -157,6 +157,34 @@ function enclosingLinkRange(ref: SyntaxNodeRefLike): { from: number; to: number 
  * CommonMark's balanced-paren destinations, so a URL like
  * `https://en.wikipedia.org/wiki/Foo_(bar` still counts as unterminated.
  */
+/**
+ * The end offset of a balanced `(target)` sitting immediately after a `Link`
+ * node, or null when there is none. This is the parser-rejected-destination
+ * case (#617): CommonMark refuses an unescaped space in `[text](My Note.md)`,
+ * so the `Link` node ends at `]` and the target trails as plain text. The
+ * click/gd path (`markdownLinkAt`) accepts those targets, so rendering must
+ * treat the whole span as one link too.
+ */
+function terminatedLinkTailEnd(state: EditorView['state'], linkTo: number): number | null {
+  if (state.doc.sliceString(linkTo, linkTo + 1) !== '(') return null
+  const line = state.doc.lineAt(linkTo)
+  const rest = state.doc.sliceString(linkTo, line.to)
+  let depth = 0
+  for (let i = 0; i < rest.length; i++) {
+    const ch = rest[i]
+    if (ch === '\\') {
+      i += 1
+      continue
+    }
+    if (ch === '(') depth += 1
+    else if (ch === ')') {
+      depth -= 1
+      if (depth === 0) return i > 1 ? linkTo + i + 1 : null
+    }
+  }
+  return null
+}
+
 function hasUnterminatedLinkTarget(state: EditorView['state'], linkTo: number): boolean {
   if (state.doc.sliceString(linkTo, linkTo + 1) !== '(') return false
   const line = state.doc.lineAt(linkTo)
@@ -1364,11 +1392,25 @@ function computeDecorations(view: EditorView): DecorationSet {
         if (replacedLines.has(line)) return
         if (isLinkSyntax) {
           const linkRange = enclosingLinkRange(node)
-          if (linkRange && selectionTouchesRange(state, linkRange.from, linkRange.to)) return
+          // A spaced destination (`[text](My Note.md)`) is rejected by the
+          // parser, so the `(target)` trails outside the Link node as plain
+          // text. Treat the full `[label](target)` as the link: reveal it as
+          // one unit and hide the trailing target with the brackets. (#617)
+          const tailEnd = linkRange ? terminatedLinkTailEnd(state, linkRange.to) : null
+          if (linkRange && selectionTouchesRange(state, linkRange.from, tailEnd ?? linkRange.to))
+            return
           // `[label](` with no closing `)` yet isn't a link, so keep its
           // brackets visible: the label reads as source while the target is
           // typed or pasted, and collapses once the syntax is complete. (#471)
           if (linkRange && hasUnterminatedLinkTarget(state, linkRange.to)) return
+          if (
+            linkRange &&
+            tailEnd !== null &&
+            node.to === linkRange.to &&
+            state.doc.sliceString(node.to - 1, node.to) === ']'
+          ) {
+            pending.push({ from: linkRange.to, to: tailEnd, deco: hide })
+          }
         } else if (activeLines.has(line)) {
           // Reveal every marker on the active line, headings included: the
           // cursor anywhere in a heading shows its `##` prefix, matching the
