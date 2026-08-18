@@ -419,7 +419,6 @@ function markdownEditingExtensions(showHeadingLevelLabels = false): Extension[] 
     customCodeFenceHighlightExtension,
     vimAwareMarkdownKeymap,
     markdownListIndentPlugin,
-    frontmatterStyle,
     frontmatterTagExtension,
     orderedListRenumber,
     forwardOnCheckboxArrow,
@@ -454,6 +453,9 @@ function wysiwygExtensions(
 ): Extension[] {
   return [
     livePreviewPlugin,
+    // Frontmatter renders as compact properties only while Live Preview is
+    // on; with it off the block reads as plain --- markdown. (#616)
+    frontmatterStyle,
     codeBlockFlairPlugin,
     // Table widgets are gated on a setting — off keeps tables as plain editable
     // markdown for full keyboard/Vim editing (#232).
@@ -1843,6 +1845,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
                     const link = markdownLinkAt(doc, pos)
                     if (
                       link &&
+                      useStore.getState().livePreview &&
                       pointerOverRange(view, link.from, link.to, event.clientX, event.clientY)
                     ) {
                       const sel = view.state.selection.main
