@@ -200,7 +200,7 @@ function syncVimKeymaps(overrides: KeymapOverrides): void {
       {
         id: "vim.bufferNext",
         contexts: ["normal", "visual"],
-        action: "nextBuffer",
+        action: "nextBufferRelative",
         bindings: [
           toVimSequence(getKeymapBinding(overrides, "vim.bufferNext")),
         ].filter((binding): binding is string => !!binding),
@@ -730,6 +730,21 @@ function registerVimCommands(): void {
         return;
       }
       navigateActiveBuffer(useStore.getState(), 1);
+    },
+  );
+  // ]b is RELATIVE with a count ({count}]b walks forward count tabs), unlike
+  // gt whose {count} is vim's absolute tab number. [b shares previousBuffer
+  // with gT and was already relative. (#622)
+  Vim.defineAction(
+    "nextBufferRelative",
+    (
+      _cm: unknown,
+      actionArgs?: { repeat?: number; repeatIsExplicit?: boolean },
+    ) => {
+      const repeat = actionArgs?.repeatIsExplicit
+        ? (actionArgs.repeat ?? 1)
+        : 1;
+      navigateActiveBuffer(useStore.getState(), repeat);
     },
   );
 
