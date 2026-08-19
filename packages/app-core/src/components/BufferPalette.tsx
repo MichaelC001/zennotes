@@ -47,6 +47,14 @@ function fallbackTitle(path: string): string {
   return filename.replace(/\.md$/i, '') || path
 }
 
+/** The row's secondary column: the note's folder, not the full path — the
+ *  filename part would just repeat the title, and it was crowding the title
+ *  out of the row (#635). The full path stays searchable via keywords. */
+function parentDir(path: string): string {
+  const idx = path.lastIndexOf('/')
+  return idx > 0 ? path.slice(0, idx) : ''
+}
+
 interface BuildDeps {
   paneLayout: ReturnType<typeof useStore.getState>['paneLayout']
   activePaneId: string
@@ -193,7 +201,7 @@ function buildEntries(deps: BuildDeps): BufferEntry[] {
     entries.push({
       path,
       title,
-      subtitle: path,
+      subtitle: parentDir(path),
       keywords: [title, path, meta?.folder].filter(Boolean).join(' '),
       badge,
       current: isCurrent,
@@ -352,7 +360,11 @@ export function BufferPalette(): JSX.Element {
                   i === active ? 'bg-paper-200' : 'hover:bg-paper-200/70'
                 ].join(' ')}
               >
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-900">
+                {/* The title is what the user is switching by, so it wins the
+                    space fight: natural width, truncating only when it alone
+                    overflows the row. The folder column takes whatever is
+                    left (flex-1, basis 0) and collapses first. (#635) */}
+                <span className="min-w-0 truncate text-sm font-medium text-ink-900">
                   {entry.title}
                   {entry.dirty && (
                     <span
@@ -363,8 +375,12 @@ export function BufferPalette(): JSX.Element {
                     </span>
                   )}
                 </span>
-                <span className="shrink-0 truncate text-xs text-ink-400">
-                  {entry.virtual ? 'virtual' : entry.subtitle}
+                {/* dir="rtl" moves the ellipsis to the left edge, so a folder
+                    that no longer fits keeps its distinguishing tail visible
+                    (…ZenNotes/Enhancements). The LRE/PDF bidi embedding keeps
+                    the path itself rendering left-to-right inside it. */}
+                <span dir="rtl" className="min-w-0 flex-1 truncate text-xs text-ink-400">
+                  {`\u202A${entry.virtual ? 'virtual' : entry.subtitle}\u202C`}
                 </span>
                 <span className="shrink-0 text-xs uppercase tracking-wide text-ink-400">
                   {entry.badge}
