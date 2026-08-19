@@ -67,6 +67,42 @@ export interface CloudSyncMutationResponse {
   cursor: number;
 }
 
+export interface CloudSyncUploadRequest {
+  operation_id: string;
+  item_id: string;
+  base_revision: number | null;
+  path: string;
+  kind: CloudSyncItemKind;
+  content: Pick<
+    CloudSyncContent,
+    "encoding" | "sha256" | "byte_length" | "media_type"
+  >;
+}
+
+export interface CloudSyncUploadInitiationResponse {
+  data: {
+    id: string;
+    operation_id: string;
+    status: "initiated" | "uploading";
+    expected_bytes: number;
+    expires_at: string;
+    upload: {
+      method: "PUT";
+      url: string;
+      headers: Record<string, string>;
+    };
+  };
+}
+
+export interface CloudSyncUploadCompletionResponse {
+  data: {
+    id: string;
+    operation_id: string;
+    status: "completed";
+    result: CloudSyncMutationResponse;
+  };
+}
+
 export interface CloudSyncManifestItem {
   item_id: string;
   path: string;
