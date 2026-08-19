@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TASKS_TAB_PATH, type VaultTask } from '@shared/tasks'
+import { TAGS_TAB_PATH } from '@shared/tags'
 import { WORKFLOWS_TAB_PATH } from '@shared/workflows-view'
 import { databaseTabPath, type DatabaseDoc } from '@shared/databases'
 import { assetTabPath } from './lib/asset-tabs'
@@ -981,6 +982,59 @@ describe('note jump history with database tabs', () => {
     // Ctrl+O → jump back to the grid.
     await useStore.getState().jumpToPreviousNote()
     expect(useStore.getState().selectedPath).toBe(dbTab)
+  })
+})
+
+describe('note jump history with the Tasks and Tags views (#633)', () => {
+  // The panels are destinations the user navigates to on purpose, so the
+  // jumplist must both return TO them and record the note they were opened
+  // FROM. Before #633 they were excluded on both sides: Ctrl+O skipped the
+  // panel, and the origin note never entered the backstack.
+  it('Ctrl+O returns to the Tasks view, then to the note it was opened from', async () => {
+    installZen({
+      readNote: vi
+        .fn()
+        .mockImplementation(async (path: string) => makeNote('body text', path))
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().selectNote('inbox/From.md')
+    await useStore.getState().openTasksView()
+    expect(useStore.getState().selectedPath).toBe(TASKS_TAB_PATH)
+    expect(useStore.getState().noteBackstack.map((l) => l.path)).toContain('inbox/From.md')
+
+    await useStore.getState().selectNote('inbox/Other.md')
+    expect(useStore.getState().noteBackstack.map((l) => l.path)).toContain(TASKS_TAB_PATH)
+
+    await useStore.getState().jumpToPreviousNote()
+    expect(useStore.getState().selectedPath).toBe(TASKS_TAB_PATH)
+    await useStore.getState().jumpToPreviousNote()
+    expect(useStore.getState().selectedPath).toBe('inbox/From.md')
+
+    // And Ctrl+I walks forward through the panel again.
+    await useStore.getState().jumpToNextNote()
+    expect(useStore.getState().selectedPath).toBe(TASKS_TAB_PATH)
+    await useStore.getState().jumpToNextNote()
+    expect(useStore.getState().selectedPath).toBe('inbox/Other.md')
+  })
+
+  it('the Tags view round-trips the same way', async () => {
+    installZen({
+      readNote: vi
+        .fn()
+        .mockImplementation(async (path: string) => makeNote('body text', path))
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().selectNote('inbox/From.md')
+    await useStore.getState().openTagView('demo')
+    expect(useStore.getState().selectedPath).toBe(TAGS_TAB_PATH)
+
+    await useStore.getState().selectNote('inbox/Other.md')
+    await useStore.getState().jumpToPreviousNote()
+    expect(useStore.getState().selectedPath).toBe(TAGS_TAB_PATH)
+    await useStore.getState().jumpToPreviousNote()
+    expect(useStore.getState().selectedPath).toBe('inbox/From.md')
   })
 })
 

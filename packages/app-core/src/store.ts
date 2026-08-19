@@ -1613,12 +1613,15 @@ function isDatabaseSurfaceTabPath(path: string | null | undefined): path is stri
 
 /**
  * Tabs worth recording in the note jump history (Ctrl+O / Ctrl+I): real notes,
- * plus database surfaces — so opening a row's record page and pressing Ctrl+O
- * jumps back to the grid. Other virtual tabs (tasks, tags, plain assets…) stay
- * excluded.
+ * database surfaces — so opening a row's record page and pressing Ctrl+O jumps
+ * back to the grid — and the Tasks and Tags views, which are destinations the
+ * user navigates to on purpose and expects the jumplist to return to (#633).
+ * Other virtual tabs (plain assets, help, trash…) stay excluded.
  */
 function isJumpHistoryTabPath(path: string | null | undefined): path is string {
-  return !!path && (!isWorkspaceVirtualTabPath(path) || isDatabaseSurfaceTabPath(path))
+  if (!path) return false
+  if (!isWorkspaceVirtualTabPath(path)) return true
+  return isDatabaseSurfaceTabPath(path) || isTasksTabPath(path) || isTagsTabPath(path)
 }
 
 function captureNoteJumpLocation(state: {
@@ -1626,6 +1629,20 @@ function captureNoteJumpLocation(state: {
   editorViewRef: EditorView | null
 }): NoteJumpLocation | null {
   if (!isJumpHistoryTabPath(state.selectedPath)) return null
+  // Panel surfaces (Tasks, Tags, a database grid) render no editor, so a
+  // lingering editorViewRef belongs to some other note; capturing its scroll
+  // would smuggle meaningless numbers into the entry and defeat the
+  // consecutive-duplicate dedup. Only the place itself is worth recording.
+  if (isWorkspaceVirtualTabPath(state.selectedPath)) {
+    return {
+      path: state.selectedPath,
+      editorSelectionAnchor: 0,
+      editorSelectionHead: 0,
+      editorScrollTop: 0,
+      previewScrollTop: 0,
+      editorScrollMode: 'preserve'
+    }
+  }
   const selection = state.editorViewRef?.state.selection.main
   return {
     path: state.selectedPath,
@@ -4204,17 +4221,14 @@ export const useStore = create<Store>((set, get) => {
     set({ loadingNote: true })
     while (source.length > 0) {
       const target = source.pop() ?? null
-      if (
-        !target ||
-        target.path === get().selectedPath ||
-        (isWorkspaceVirtualTabPath(target.path) && !isDatabaseSurfaceTabPath(target.path))
-      ) {
+      if (!target || target.path === get().selectedPath || !isJumpHistoryTabPath(target.path)) {
         continue
       }
-      // A database surface in the history — e.g. the grid a record page was
-      // opened from. Reopen the tab instead of loading note content, and record
-      // the current location on the opposite stack so the jump stays reversible.
-      if (isDatabaseSurfaceTabPath(target.path)) {
+      // A virtual surface in the history — a database grid a record page was
+      // opened from, or the Tasks/Tags view (#633). Reopen the tab instead of
+      // loading note content, and record the current location on the opposite
+      // stack so the jump stays reversible.
+      if (isWorkspaceVirtualTabPath(target.path)) {
         const latest = get()
         const opposite =
           direction === 'back' ? latest.noteForwardstack : latest.noteBackstack
@@ -4225,7 +4239,14 @@ export const useStore = create<Store>((set, get) => {
           noteBackstack: direction === 'back' ? source : nextOpposite,
           noteForwardstack: direction === 'back' ? nextOpposite : source
         })
-        await selectNoteImpl(target.path, 'preserve')
+        // Tasks/Tags go through focusTabInPane, which carries each panel's
+        // reopen semantics (focus claim, task refresh) and records no history
+        // of its own; database surfaces keep their selectNote path.
+        if (isDatabaseSurfaceTabPath(target.path)) {
+          await selectNoteImpl(target.path, 'preserve')
+        } else {
+          await get().focusTabInPane(latest.activePaneId, target.path)
+        }
         return
       }
       try {
@@ -4721,8 +4742,11 @@ export const useStore = create<Store>((set, get) => {
   openTasksView: async () => {
     const state = get()
     // Reset the panel's session state every time we open it — stale cursor/
-    // filter from a prior visit would feel weird.
-    set({ tasksFilter: '', taskCursorIndex: 0 })
+    // filter from a prior visit would feel weird. Opening the panel is also a
+    // jump worth undoing: record where the user came from so Ctrl+O returns
+    // there, and the panel itself joins the trail (#633). `openNoteInPane`
+    // below is the raw tab primitive and keeps no history of its own.
+    set({ tasksFilter: '', taskCursorIndex: 0, ...noteHistoryAfterJump(state, TASKS_TAB_PATH) })
     // Add (or focus) the virtual Tasks tab in the currently active pane.
     await get().openNoteInPane(state.activePaneId, TASKS_TAB_PATH)
     // Hand keyboard focus to the Tasks panel so vim-style navigation works
@@ -4785,6 +4809,9 @@ export const useStore = create<Store>((set, get) => {
       }
     }
 
+    // Same as openTasksView: opening the panel is a jump, record the origin
+    // so Ctrl+O returns to it and the panel joins the trail (#633).
+    set(noteHistoryAfterJump(get(), TAGS_TAB_PATH))
     await get().openNoteInPane(state.activePaneId, TAGS_TAB_PATH)
     ;(document.activeElement as HTMLElement | null)?.blur?.()
     set({ focusedPanel: 'tags' })
