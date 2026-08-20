@@ -673,7 +673,7 @@ function queueMarkdownFileOpen(
 function handleStartupMarkdownArgs(
   argv: string[],
   reuseMainWindow: boolean,
-): void {
+): number {
   // Candidates include directories (temporary folder session); the opener stats
   // each path and ignores anything that isn't a markdown file or a folder. The
   // app's own path is filtered by value (#579): launchers that run
@@ -681,18 +681,46 @@ function handleStartupMarkdownArgs(
   // skipping by index alone let the app dir through as a folder to open.
   const isUnpackagedElectronLaunch =
     (process as NodeJS.Process & { defaultApp?: boolean }).defaultApp === true;
+  let queued = 0;
   for (const candidate of candidatePathsFromArgv(
     argv,
     isUnpackagedElectronLaunch,
     app.getAppPath(),
   )) {
     queueMarkdownFileOpen(candidate, reuseMainWindow);
+    queued += 1;
   }
+  return queued;
 }
 
 // Returns true when at least one file produced (or focused) a window, so
 // the caller can skip opening a redundant default-vault window.
-async function flushPendingFileOpens(): Promise<boolean> {
+// Flushes still opening their windows. `second-instance` waits on these
+// before deciding whether a default window is needed at all (#649).
+const inFlightFileOpens = new Set<Promise<boolean>>();
+
+function flushPendingFileOpens(): Promise<boolean> {
+  const run = drainPendingFileOpens();
+  inFlightFileOpens.add(run);
+  void run.finally(() => inFlightFileOpens.delete(run));
+  return run;
+}
+
+async function settleFileOpens(): Promise<void> {
+  while (inFlightFileOpens.size > 0) {
+    await Promise.allSettled([...inFlightFileOpens]);
+  }
+}
+
+function hasWorkspaceWindow(): boolean {
+  // Count only real workspace windows: a hidden quick-capture panel (or
+  // other utility window) must not pass for a usable window.
+  return BrowserWindow.getAllWindows().some(
+    (win) => !win.isDestroyed() && isWorkspaceWindow(win),
+  );
+}
+
+async function drainPendingFileOpens(): Promise<boolean> {
   if (!app.isReady() || pendingFileOpens.length === 0) return false;
   const items = pendingFileOpens.splice(0);
   let openedAny = false;
@@ -5091,13 +5119,8 @@ app.whenReady().then(async () => {
   }
 
   app.on("activate", () => {
-    // Count only real workspace windows: a hidden quick-capture panel
-    // (or other utility window) must not stop the dock click from
-    // bringing back a usable window.
-    const hasWorkspaceWindow = BrowserWindow.getAllWindows().some(
-      (win) => !win.isDestroyed() && isWorkspaceWindow(win),
-    );
-    if (!hasWorkspaceWindow) void ensureMainWindow();
+    // A dock click must bring back a usable window when none is left.
+    if (!hasWorkspaceWindow()) void ensureMainWindow();
   });
 
   app.on("new-window-for-tab", () => {
@@ -5139,8 +5162,20 @@ app.on("open-file", (event, filePath) => {
 // process.
 app.on("second-instance", (_event, argv) => {
   const deepLinkResult = handleStartupDeepLinks(argv);
-  handleStartupMarkdownArgs(argv, false);
+  const queued = handleStartupMarkdownArgs(argv, false);
   if (deepLinkResult === "quick-capture") return;
+  if (queued > 0) {
+    // Every forwarded path opens or focuses a window of its own. Raising the
+    // main window on top of that used to resurrect the last vault next to the
+    // folder `zn open` asked for whenever every window had been closed first
+    // (macOS keeps the app alive without windows, #649). A default window is
+    // only the right answer when nothing could be opened and no workspace
+    // window is left to show.
+    void settleFileOpens().then(() => {
+      if (!hasWorkspaceWindow()) return ensureMainWindow();
+    });
+    return;
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     focusWindow(mainWindow);
     return;
