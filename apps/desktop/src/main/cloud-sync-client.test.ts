@@ -11,9 +11,9 @@ const temporaryDirectories: string[] = []
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { recursive: true, force: true })
-    )
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true }))
   )
 })
 
@@ -36,7 +36,9 @@ describe('createCloudSyncClient', () => {
     expect(fetchImplementation).toHaveBeenCalledWith(
       'https://zennotes.org/api/v1/vaults',
       expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: 'Bearer secret-token' })
+        headers: expect.objectContaining({
+          Authorization: 'Bearer secret-token'
+        })
       })
     )
     expect(fetchImplementation.mock.calls[0]?.[0]).not.toContain('secret-token')
@@ -67,7 +69,9 @@ describe('createCloudSyncClient', () => {
       new Response(
         JSON.stringify({
           message: 'The mutations.0.path field is required.',
-          errors: { 'mutations.0.path': ['The mutations.0.path field is required.'] }
+          errors: {
+            'mutations.0.path': ['The mutations.0.path field is required.']
+          }
         }),
         { status: 422, headers: { 'Content-Type': 'application/json' } }
       )
@@ -100,11 +104,13 @@ describe('createCloudSyncClient', () => {
     )
     const client = createCloudSyncClient('https://zennotes.org', 'token', fetchImplementation)
 
-    await expect(client.publishNote({
-      note_path: 'Empty.md',
-      title: 'Empty',
-      markdown: ''
-    })).rejects.toEqual(
+    await expect(
+      client.publishNote({
+        note_path: 'Empty.md',
+        title: 'Empty',
+        markdown: ''
+      })
+    ).rejects.toEqual(
       expect.objectContaining<Partial<CloudServiceRequestError>>({
         status: 422,
         code: 'VALIDATION_FAILED',
@@ -115,10 +121,17 @@ describe('createCloudSyncClient', () => {
 
   it('lets fetch set the multipart boundary for published-note assets', async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ id: 42, slug: 'photo', url: 'https://zennotes.org/s/photo' }), {
-        status: 201,
-        headers: { 'Content-Type': 'application/json' }
-      })
+      new Response(
+        JSON.stringify({
+          id: 42,
+          slug: 'photo',
+          url: 'https://zennotes.org/s/photo'
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      )
     )
     const client = createCloudSyncClient('https://zennotes.org', 'token', fetchImplementation)
 
@@ -126,7 +139,14 @@ describe('createCloudSyncClient', () => {
       note_path: 'Photo.md',
       title: 'Photo',
       markdown: '![Photo](photo.png)',
-      assets: [{ ref: 'photo.png', name: 'photo.png', mime: 'image/png', base64: 'AQID' }]
+      assets: [
+        {
+          ref: 'photo.png',
+          name: 'photo.png',
+          mime: 'image/png',
+          base64: 'AQID'
+        }
+      ]
     })
 
     const options = fetchImplementation.mock.calls[0]?.[1]
@@ -145,7 +165,9 @@ describe('createCloudSyncClient', () => {
     })
 
     expect(fetchImplementation).toHaveBeenCalledTimes(1)
-    expect(fetchImplementation.mock.calls[0]?.[0]).toBe('https://zennotes.org/api/v1/vaults/vault-1/mutations')
+    expect(fetchImplementation.mock.calls[0]?.[0]).toBe(
+      'https://zennotes.org/api/v1/vaults/vault-1/mutations'
+    )
   })
 
   it('uploads files above the inline limit directly without sending the bearer token', async () => {
@@ -218,7 +240,11 @@ describe('createCloudSyncClient', () => {
       }
       throw new Error(`Unexpected request: ${url}`)
     })
-    const client = createCloudSyncClient('https://zennotes.org/', 'secret-token', fetchImplementation)
+    const client = createCloudSyncClient(
+      'https://zennotes.org/',
+      'secret-token',
+      fetchImplementation
+    )
 
     const result = await client.mutate('vault-1', { mutations: [mutation] })
 
@@ -263,7 +289,9 @@ describe('createCloudSyncClient', () => {
     expect(uploadedBodies[0]?.at(-1)).toBe(7)
 
     const completion = fetchImplementation.mock.calls[3]
-    expect(completion?.[0]).toBe('https://zennotes.org/api/v1/vaults/vault-1/uploads/upload-1/complete')
+    expect(completion?.[0]).toBe(
+      'https://zennotes.org/api/v1/vaults/vault-1/uploads/upload-1/complete'
+    )
     expect(new Headers(completion?.[1]?.headers).get('Authorization')).toBe('Bearer secret-token')
   })
 
@@ -320,20 +348,23 @@ describe('createCloudSyncClient', () => {
     const fetchImplementation = vi.fn<typeof fetch>(async (input, options) => {
       const url = String(input)
       if (url.endsWith('/uploads') && options?.method === 'POST') {
-        return jsonResponse({
-          data: {
-            id: 'upload-insecure',
-            operation_id: mutation.operation_id,
-            status: 'uploading',
-            expected_bytes: bytes.byteLength,
-            expires_at: '2026-08-19T18:30:00.000Z',
-            upload: {
-              method: 'PUT',
-              url: 'http://objects.example.test/upload-insecure',
-              headers: { 'Content-Type': 'application/octet-stream' }
+        return jsonResponse(
+          {
+            data: {
+              id: 'upload-insecure',
+              operation_id: mutation.operation_id,
+              status: 'uploading',
+              expected_bytes: bytes.byteLength,
+              expires_at: '2026-08-19T18:30:00.000Z',
+              upload: {
+                method: 'PUT',
+                url: 'http://objects.example.test/upload-insecure',
+                headers: { 'Content-Type': 'application/octet-stream' }
+              }
             }
-          }
-        }, 201)
+          },
+          201
+        )
       }
       if (url.endsWith('/uploads/upload-insecure') && options?.method === 'DELETE') {
         return new Response(null, { status: 204 })
@@ -359,20 +390,23 @@ describe('createCloudSyncClient', () => {
     const fetchImplementation = vi.fn<typeof fetch>(async (input, options) => {
       const url = String(input)
       if (url.endsWith('/uploads') && options?.method === 'POST') {
-        return jsonResponse({
-          data: {
-            id: 'upload-mismatch',
-            operation_id: mutation.operation_id,
-            status: 'uploading',
-            expected_bytes: bytes.byteLength - 1,
-            expires_at: '2026-08-19T18:30:00.000Z',
-            upload: {
-              method: 'PUT',
-              url: 'https://objects.example.test/upload-mismatch',
-              headers: { 'Content-Type': 'application/octet-stream' }
+        return jsonResponse(
+          {
+            data: {
+              id: 'upload-mismatch',
+              operation_id: mutation.operation_id,
+              status: 'uploading',
+              expected_bytes: bytes.byteLength - 1,
+              expires_at: '2026-08-19T18:30:00.000Z',
+              upload: {
+                method: 'PUT',
+                url: 'https://objects.example.test/upload-mismatch',
+                headers: { 'Content-Type': 'application/octet-stream' }
+              }
             }
-          }
-        }, 201)
+          },
+          201
+        )
       }
       if (url.endsWith('/uploads/upload-mismatch') && options?.method === 'DELETE') {
         return new Response(null, { status: 204 })
@@ -425,6 +459,57 @@ describe('createCloudSyncClient', () => {
           code: 'REVISION_CONFLICT',
           current_revision: 4,
           current_path: 'attachments/archive.zip'
+        }
+      ],
+      cursor: 0
+    })
+  })
+
+  it('preserves structured capacity details from a direct-upload conflict', async () => {
+    const bytes = Buffer.alloc(INLINE_UPLOAD_LIMIT_BYTES + 1, 15)
+    const mutation = upsertMutation(bytes.byteLength, bytes.toString('base64'))
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/uploads')) {
+        return jsonResponse(
+          {
+            error: {
+              code: 'CAPACITY_EXCEEDED',
+              message: 'This upload would exceed the current Cloud capacity.',
+              details: {
+                dimension: 'sync_active_items',
+                used: 100,
+                reserved: 0,
+                limit: 100,
+                projected: 101,
+                can_retry_after_reduction: true
+              }
+            }
+          },
+          409
+        )
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const client = createCloudSyncClient('https://zennotes.org', 'token', fetchImplementation)
+
+    await expect(client.mutate('vault-1', { mutations: [mutation] })).resolves.toEqual({
+      acknowledged: [],
+      conflicts: [
+        {
+          operation_id: mutation.operation_id,
+          item_id: mutation.item_id,
+          code: 'CAPACITY_EXCEEDED',
+          current_revision: null,
+          current_path: null,
+          capacity: {
+            dimension: 'sync_active_items',
+            used: 100,
+            reserved: 0,
+            limit: 100,
+            projected: 101,
+            can_retry_after_reduction: true
+          }
         }
       ],
       cursor: 0

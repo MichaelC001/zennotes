@@ -2630,6 +2630,9 @@ function registerIpc(): void {
   handle(IPC.CLOUD_VAULT_LINK_DELETE, () =>
     getCloudSyncService().unlink(requireLocalCloudVaultRoot()),
   );
+  handle(IPC.CLOUD_VAULT_DELETE, () =>
+    getCloudSyncService().deleteLinkedVault(requireLocalCloudVaultRoot()),
+  );
   handle(IPC.CLOUD_VAULT_SYNC, () =>
     getCloudSyncService().sync(requireLocalCloudVaultRoot()),
   );

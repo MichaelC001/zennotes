@@ -1397,6 +1397,7 @@ export const httpBridge: ZenBridge = {
   linkCloudVault: async () => notImplemented('linkCloudVault'),
   createAndLinkCloudVault: async () => notImplemented('createAndLinkCloudVault'),
   unlinkCloudVault: async () => notImplemented('unlinkCloudVault'),
+  deleteCloudVault: async () => notImplemented('deleteCloudVault'),
   syncCloudVault: async () => notImplemented('syncCloudVault'),
   getCloudSettingsConflict: async () => null,
   resolveCloudSettingsConflict: async () => notImplemented('resolveCloudSettingsConflict'),

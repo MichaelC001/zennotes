@@ -140,6 +140,25 @@ describe('CloudSyncApiClient', () => {
     )
   })
 
+  it('permanently deletes an encoded cloud vault', async () => {
+    const requests: CloudSyncHttpRequest[] = []
+    const client = new CloudSyncApiClient({
+      async request<Response>(request: CloudSyncHttpRequest): Promise<Response> {
+        requests.push(request)
+        return {} as Response
+      }
+    })
+
+    await client.deleteVault('vault/1')
+
+    expect(requests).toEqual([
+      {
+        method: 'DELETE',
+        path: '/api/v1/vaults/vault%2F1'
+      }
+    ])
+  })
+
   it('addresses backup schedules, snapshot items, and one-note restores', async () => {
     const requests: CloudSyncHttpRequest[] = []
     const client = new CloudSyncApiClient({

@@ -7,6 +7,7 @@ import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import type {
+  CloudSyncCapacityConflict,
   CloudSyncConflict,
   CloudSyncConflictCode,
   CloudSyncMutation,
@@ -28,7 +29,9 @@ const SYNC_CONFLICT_CODES = new Set<CloudSyncConflictCode>([
   'REVISION_CONFLICT',
   'PATH_CONFLICT',
   'ITEM_DELETED',
-  'QUOTA_EXCEEDED'
+  'QUOTA_EXCEEDED',
+  'CAPACITY_EXCEEDED',
+  'FILE_SIZE_LIMIT_EXCEEDED'
 ])
 
 export class CloudServiceRequestError extends Error {
@@ -191,11 +194,12 @@ class BearerFetchTransport implements CloudSyncHttpTransport {
         Authorization: `Bearer ${this.token}`,
         ...(request.body === undefined || multipart ? {} : { 'Content-Type': 'application/json' })
       },
-      body: request.body === undefined
-        ? undefined
-        : request.body instanceof FormData
-          ? request.body
-          : JSON.stringify(request.body),
+      body:
+        request.body === undefined
+          ? undefined
+          : request.body instanceof FormData
+            ? request.body
+            : JSON.stringify(request.body),
       signal: AbortSignal.timeout(request.timeoutMs ?? 30_000)
     })
     const payload = await parseJson(response)
@@ -244,7 +248,11 @@ function asErrorPayload(payload: unknown): {
   }
   const candidate =
     response.error && typeof response.error === 'object'
-      ? (response.error as { code?: unknown; details?: unknown; message?: unknown })
+      ? (response.error as {
+          code?: unknown
+          details?: unknown
+          message?: unknown
+        })
       : response
   const validationMessage = firstValidationMessage(response.errors)
 
@@ -255,15 +263,19 @@ function asErrorPayload(payload: unknown): {
       : typeof candidate.message === 'string'
         ? { message: candidate.message }
         : {}),
-    ...(candidate.details && typeof candidate.details === 'object' && !Array.isArray(candidate.details)
+    ...(candidate.details &&
+    typeof candidate.details === 'object' &&
+    !Array.isArray(candidate.details)
       ? { details: candidate.details as Record<string, unknown> }
       : {})
   }
 }
 
 function usesDirectUpload(mutation: CloudSyncMutation): mutation is CloudSyncUpsertMutation {
-  return mutation.type === 'upsert' &&
+  return (
+    mutation.type === 'upsert' &&
     mutation.content.byte_length > CLOUD_SYNC_INLINE_UPLOAD_LIMIT_BYTES
+  )
 }
 
 function uploadRequest(mutation: CloudSyncUpsertMutation): CloudSyncUploadRequest {
@@ -327,7 +339,11 @@ function secureDirectUploadUrl(value: string): string {
 
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
   const loopback = hostname === 'localhost' || hostname === '::1' || hostname.startsWith('127.')
-  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) || url.username || url.password) {
+  if (
+    (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) ||
+    url.username ||
+    url.password
+  ) {
     throw insecureDirectUploadUrl()
   }
 
@@ -361,7 +377,9 @@ function directUploadInstruction(
 
 function uploadSessionId(initiation: CloudSyncUploadInitiationResponse): string | null {
   const candidate = initiation as unknown as { data?: unknown }
-  return isRecord(candidate.data) && typeof candidate.data.id === 'string' && candidate.data.id !== ''
+  return isRecord(candidate.data) &&
+    typeof candidate.data.id === 'string' &&
+    candidate.data.id !== ''
     ? candidate.data.id
     : null
 }
@@ -395,18 +413,42 @@ function directUploadConflict(
   }
   if (!SYNC_CONFLICT_CODES.has(error.code as CloudSyncConflictCode)) return null
 
+  const capacity = capacityConflictDetails(error.details)
+
   return {
     operation_id: mutation.operation_id,
     item_id: mutation.item_id,
     code: error.code as CloudSyncConflictCode,
     current_revision:
-      typeof error.details?.current_revision === 'number'
-        ? error.details.current_revision
-        : null,
+      typeof error.details?.current_revision === 'number' ? error.details.current_revision : null,
     current_path:
-      typeof error.details?.current_path === 'string'
-        ? error.details.current_path
-        : null
+      typeof error.details?.current_path === 'string' ? error.details.current_path : null,
+    ...(capacity ? { capacity } : {})
+  }
+}
+
+function capacityConflictDetails(
+  details: Record<string, unknown> | null
+): CloudSyncCapacityConflict | null {
+  if (
+    !details ||
+    typeof details.dimension !== 'string' ||
+    typeof details.used !== 'number' ||
+    typeof details.reserved !== 'number' ||
+    typeof details.limit !== 'number' ||
+    typeof details.projected !== 'number' ||
+    typeof details.can_retry_after_reduction !== 'boolean'
+  ) {
+    return null
+  }
+
+  return {
+    dimension: details.dimension,
+    used: details.used,
+    reserved: details.reserved,
+    limit: details.limit,
+    projected: details.projected,
+    can_retry_after_reduction: details.can_retry_after_reduction
   }
 }
 
@@ -419,7 +461,9 @@ function firstValidationMessage(errors: unknown): string | null {
 
   for (const messages of Object.values(errors)) {
     if (Array.isArray(messages)) {
-      const message = messages.find((candidate): candidate is string => typeof candidate === 'string')
+      const message = messages.find(
+        (candidate): candidate is string => typeof candidate === 'string'
+      )
       if (message) return message
     }
   }

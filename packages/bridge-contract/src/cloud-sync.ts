@@ -51,7 +51,18 @@ export type CloudSyncConflictCode =
   | "REVISION_CONFLICT"
   | "PATH_CONFLICT"
   | "ITEM_DELETED"
-  | "QUOTA_EXCEEDED";
+  | "QUOTA_EXCEEDED"
+  | "CAPACITY_EXCEEDED"
+  | "FILE_SIZE_LIMIT_EXCEEDED";
+
+export interface CloudSyncCapacityConflict {
+  dimension: string;
+  used: number;
+  reserved: number;
+  limit: number;
+  projected: number;
+  can_retry_after_reduction: boolean;
+}
 
 export interface CloudSyncConflict {
   operation_id: string;
@@ -59,6 +70,7 @@ export interface CloudSyncConflict {
   code: CloudSyncConflictCode;
   current_revision: number | null;
   current_path: string | null;
+  capacity?: CloudSyncCapacityConflict;
 }
 
 export interface CloudSyncMutationResponse {
@@ -310,6 +322,10 @@ export interface CloudUsage {
   sync: {
     vaults: number;
     items: number;
+    markdown_items?: number;
+    binary_items?: number;
+    other_items?: number;
+    metadata_items?: number;
   };
   backup: {
     snapshots: number;

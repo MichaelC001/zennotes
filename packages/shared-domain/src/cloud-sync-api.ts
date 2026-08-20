@@ -49,6 +49,13 @@ export class CloudSyncApiClient {
     return this.http.request({ method: 'POST', path: '/api/v1/vaults', body: { name } })
   }
 
+  async deleteVault(vaultId: string): Promise<void> {
+    await this.http.request({
+      method: 'DELETE',
+      path: `/api/v1/vaults/${encodeURIComponent(vaultId)}`
+    })
+  }
+
   async listPublishedNotes(): Promise<CloudPublishedNoteCollection> {
     return this.http.request({ method: 'GET', path: '/api/v1/shares' })
   }

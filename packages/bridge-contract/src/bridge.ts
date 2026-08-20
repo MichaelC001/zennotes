@@ -143,6 +143,7 @@ export interface ZenBridge {
   linkCloudVault(vaultId: string): Promise<CloudVaultLink>
   createAndLinkCloudVault(name: string): Promise<CloudVaultLink>
   unlinkCloudVault(): Promise<void>
+  deleteCloudVault(): Promise<void>
   syncCloudVault(): Promise<CloudSyncRunSummary>
   getCloudSettingsConflict(): Promise<CloudSyncSettingsConflict | null>
   resolveCloudSettingsConflict(choice: CloudSyncSettingsChoice): Promise<void>
