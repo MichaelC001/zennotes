@@ -24,6 +24,7 @@ import {
 } from "../store";
 import { Button } from "./ui/Button";
 import { confirmMoveToTrash } from "../lib/confirm-trash";
+import { moveNoteToTrash } from "../lib/trash-note";
 import { buildMoveNotePrompt, parseMoveNoteTarget } from "../lib/move-note";
 import { buildTagTree, extractTags, flattenTagTree } from "../lib/tags";
 import { isTypstPreamblePath, resolveTypstPreambleFolder } from "../lib/typst-preamble";
@@ -1746,7 +1747,9 @@ export function Sidebar(): JSX.Element {
           });
           if (!ok) return;
           for (const note of liveNotes) {
-            await window.zen.moveToTrash(note.path);
+            await moveNoteToTrash(note.path, {
+              temporarySession: vault?.temporary === true,
+            });
           }
           if (selectedActiveNote) await selectNote(null);
           await refreshAndClear();
@@ -2433,7 +2436,12 @@ export function Sidebar(): JSX.Element {
         danger: true,
         onSelect: async () => {
           if (!(await confirmMoveToTrash(n.title))) return;
-          await window.zen.moveToTrash(n.path);
+          if (
+            !(await moveNoteToTrash(n.path, {
+              temporarySession: vault?.temporary === true,
+            }))
+          )
+            return;
           await refreshNotes();
           if (selectedPath === n.path) await selectNote(null);
         },
@@ -2454,7 +2462,12 @@ export function Sidebar(): JSX.Element {
         danger: true,
         onSelect: async () => {
           if (!(await confirmMoveToTrash(n.title))) return;
-          await window.zen.moveToTrash(n.path);
+          if (
+            !(await moveNoteToTrash(n.path, {
+              temporarySession: vault?.temporary === true,
+            }))
+          )
+            return;
           await refreshNotes();
           if (selectedPath === n.path) await selectNote(null);
         },

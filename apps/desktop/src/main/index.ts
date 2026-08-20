@@ -83,6 +83,7 @@ import {
   moveNote,
   moveAsset,
   moveToTrash,
+  trashNoteToSystem,
   readNoteComments,
   readNote,
   renameFolder,
@@ -3493,12 +3494,13 @@ function registerIpc(): void {
       return await requireRemoteWorkspaceClient().moveToTrash(relPath);
     }
     const v = requireVault();
-    // Trash would create a `trash/` folder inside a temporary session's folder.
-    // Keep it pristine: refuse rather than litter (edits still save in place).
+    // A vault trash would create a `trash/` folder inside a temporary
+    // session's folder. Keep it pristine, but do not refuse: refusing used to
+    // be silent, so the note stayed put with nothing to explain why (#650).
+    // The operating system's Trash takes the file instead, and can give it
+    // back.
     if (isEphemeralRoot(v.root)) {
-      throw new Error(
-        "Move to Trash is not available in a temporary folder session.",
-      );
+      return await trashNoteToSystem(v.root, relPath);
     }
     return await moveToTrash(v.root, relPath);
   });

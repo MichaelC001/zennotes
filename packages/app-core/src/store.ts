@@ -101,6 +101,8 @@ import type { CustomCodeLanguage } from '@shared/custom-code-languages'
 import { customCodeLanguageRegistry } from './lib/custom-code-languages'
 import { formatMarkdown } from './lib/format-markdown'
 import { confirmMoveToTrash } from './lib/confirm-trash'
+import { humanIpcError } from './lib/ipc-error'
+import { moveNoteToTrash } from './lib/trash-note'
 import { confirmApp } from './lib/confirm-requests'
 import { pickServerDirectoryApp } from './lib/server-directory-picker-requests'
 import { promptApp } from './lib/prompt-requests'
@@ -3529,15 +3531,6 @@ const PATH_SAVE_DEBOUNCE_MS = 350
 const lastWrittenByPath = new Map<string, string>()
 
 // --- CSV database debounced persistence + echo suppression ---
-/** A user-showable message from a rejected bridge call. Electron wraps main
- *  process rejections as "Error invoking remote method 'x': Error: <real>";
- *  a toast should carry only the real sentence. */
-function humanIpcError(err: unknown, fallback: string): string {
-  const raw = err instanceof Error ? err.message : ''
-  const message = raw.replace(/^Error invoking remote method '[^']*':\s*(Error:\s*)?/, '').trim()
-  return message || fallback
-}
-
 const DATABASE_SAVE_DEBOUNCE_MS = 400
 const databaseSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 /** A pending write that touched the schema must persist the sidecar too. */
@@ -5089,11 +5082,7 @@ export const useStore = create<Store>((set, get) => {
 
     if (trashNotes) {
       for (const pagePath of prunedPaths) {
-        try {
-          await window.zen.moveToTrash(pagePath)
-        } catch (err) {
-          console.error('trash record page failed', err)
-        }
+        await moveNoteToTrash(pagePath, { temporarySession: get().vault?.temporary === true })
       }
     }
   },
@@ -5534,13 +5523,10 @@ export const useStore = create<Store>((set, get) => {
     if (task.kind === 'file') {
       if (!(await confirmMoveToTrash(task.noteTitle))) return
       set((s) => ({ vaultTasks: s.vaultTasks.filter((t) => t.sourcePath !== path) }))
-      try {
-        await window.zen.moveToTrash(path)
+      if (await moveNoteToTrash(path, { temporarySession: get().vault?.temporary === true })) {
         await get().refreshNotes()
-      } catch (err) {
-        console.error('deleteTaskFromList moveToTrash failed', err)
-        void get().refreshTasks()
       }
+      else void get().refreshTasks()
       return
     }
     const openBuffer = get().noteContents[path]
@@ -6747,8 +6733,8 @@ export const useStore = create<Store>((set, get) => {
     if (!path) return
     const title = state.notes.find((note) => note.path === path)?.title
     if (!(await confirmMoveToTrash(title))) return
-    try {
-      await window.zen.moveToTrash(path)
+    if (!(await moveNoteToTrash(path, { temporarySession: state.vault?.temporary === true }))) return
+    {
       set((s) => {
         const nextLayout = rewritePathsInTree(s.paneLayout, (p) => (p === path ? null : p))
         const ensured = ensureActivePane(nextLayout, s.activePaneId)
@@ -6767,8 +6753,6 @@ export const useStore = create<Store>((set, get) => {
         }
       })
       await get().refreshNotes()
-    } catch (err) {
-      console.error('moveToTrash failed', err)
     }
   },
 
