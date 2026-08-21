@@ -1,4 +1,5 @@
 import { CodeMirror, Vim } from '@replit/codemirror-vim'
+import type { InputStateInterface } from '@replit/codemirror-vim'
 import type { EditorView } from '@codemirror/view'
 import type { VimWrappedLineMotionMode } from '@shared/app-config'
 import { displayRowEdge } from './cm-display-row'
@@ -63,6 +64,8 @@ type VimMotionState = {
   lastHPos?: number
   inputState?: { operator?: unknown }
 }
+
+type VimMotionInputState = Pick<InputStateInterface, 'prefixRepeat' | 'motionRepeat'>
 
 type VimBoundaryMotionArgs = {
   forward?: boolean
@@ -181,15 +184,21 @@ export function zenMoveByDisplayLine(
   cm: VimMotionCm,
   head: { line: number; ch: number },
   motionArgs: { forward?: boolean; repeat?: number; repeatIsExplicit?: boolean },
-  vim: VimMotionState
+  vim: VimMotionState,
+  inputState?: VimMotionInputState
 ): { line: number; ch: number } {
   const forward = !!motionArgs.forward
   const repeat = motionArgs.repeat || 1
+  // codemirror-vim leaves repeatIsExplicit unset for custom j/k mappings, but
+  // passes the original digit buffers as the motion's fifth argument (#660).
+  const countWasTyped =
+    !!motionArgs.repeatIsExplicit ||
+    !!(inputState && (inputState.prefixRepeat.length || inputState.motionRepeat.length))
   if (
     vim.visualLine ||
     vim.visualBlock ||
     vim.inputState?.operator ||
-    motionArgs.repeatIsExplicit
+    countWasTyped
   ) {
     const target = Math.max(
       cm.firstLine(),

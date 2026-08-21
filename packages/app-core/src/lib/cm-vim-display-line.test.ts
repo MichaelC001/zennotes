@@ -19,7 +19,8 @@ type VimState = Parameters<typeof zenMoveByDisplayLine>[3]
 function run(
   args: MotionArgs,
   vim: VimState = {},
-  head: { line: number; ch: number } = { line: 10, ch: 3 }
+  head: { line: number; ch: number } = { line: 10, ch: 3 },
+  inputState?: { prefixRepeat: string[]; motionRepeat: string[] }
 ): { res: { line: number; ch: number }; findPosV: ReturnType<typeof vi.fn> } {
   const findPosV = vi.fn(() => ({ line: 99, ch: 7 }))
   const cm = {
@@ -28,7 +29,7 @@ function run(
     findPosV,
     charCoords: () => ({ left: 42 })
   } as unknown as Cm
-  const res = zenMoveByDisplayLine(cm, head, args, vim)
+  const res = zenMoveByDisplayLine(cm, head, args, vim, inputState)
   return { res, findPosV }
 }
 
@@ -44,6 +45,18 @@ describe('zenMoveByDisplayLine (#290 display-line j/k, #314 count fallback)', ()
     expect(findPosV).not.toHaveBeenCalled()
     expect(res.line).toBe(13) // 10 + 3 logical lines — matches the relativenumber gutter
     expect(res.ch).toBe(3) // keeps the column
+  })
+
+  it('reads a typed 8j count from the adapter input state (#660)', () => {
+    const { res, findPosV } = run(
+      { forward: true, repeat: 8 },
+      {},
+      { line: 0, ch: 0 },
+      { prefixRepeat: ['8'], motionRepeat: [] }
+    )
+
+    expect(findPosV).not.toHaveBeenCalled()
+    expect(res.line).toBe(8)
   })
 
   it('an explicit count upward (4k) moves logical lines up (#314)', () => {
