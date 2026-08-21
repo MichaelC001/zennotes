@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, isAtlasViewActive } from '../store'
 import {
   applyExtraLinkEdges,
+  atlasRegionDirection,
   buildAtlasGraph,
   collectAtlasPositions,
   layoutAtlas,
@@ -681,7 +682,8 @@ export function AtlasView(): JSX.Element {
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return
       const fp = useStore.getState().focusedPanel
       if (fp != null && fp !== 'atlas') return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const regionDirection = atlasRegionDirection(e)
+      if ((e.metaKey || e.ctrlKey || e.altKey) && regionDirection === 0) return
       const st = stateRef.current
       const w = world.current
       const cam = w.cam
@@ -746,6 +748,12 @@ export function AtlasView(): JSX.Element {
         return
       }
       if (!vim) return
+      if (regionDirection !== 0) {
+        jumpRegion(regionDirection)
+        touch()
+        consume()
+        return
+      }
       switch (e.key) {
         case 'h':
           if (st.mode3d) cam.yawT -= 0.14
@@ -791,12 +799,6 @@ export function AtlasView(): JSX.Element {
           break
         case 'c':
           setEdgeMode((m) => (m + 1) % 3)
-          break
-        case '[':
-          jumpRegion(-1)
-          break
-        case ']':
-          jumpRegion(1)
           break
         case '0':
           fitAll()
@@ -924,6 +926,7 @@ export function AtlasView(): JSX.Element {
     'cursor-pointer rounded-full border border-paper-300 bg-paper-100 px-2.5 py-1 font-mono text-[11px] text-ink-600 hover:text-ink-800'
   return (
     <div
+      data-atlas-view
       className="relative flex min-h-0 flex-1 flex-col bg-paper-100 text-ink-900"
       onMouseDownCapture={() => setFocusedPanel('atlas')}
       onFocusCapture={() => setFocusedPanel('atlas')}

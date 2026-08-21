@@ -66,6 +66,26 @@ export function atlasRegionKey(path: string): string {
   return slash === -1 ? '' : path.slice(0, slash)
 }
 
+/**
+ * Resolve Atlas region navigation across keyboard layouts and Linux
+ * compositor event shapes. Brackets produced through AltGr are typed keys,
+ * while dead/process events may need the physical bracket code as a fallback.
+ */
+export function atlasRegionDirection(event: KeyboardEvent): -1 | 0 | 1 {
+  const typed = event.key === '[' ? -1 : event.key === ']' ? 1 : 0
+  const altGraph =
+    event.getModifierState('AltGraph') ||
+    (typed !== 0 && event.ctrlKey && event.altKey)
+
+  if (event.metaKey || ((event.ctrlKey || event.altKey) && !altGraph)) return 0
+  if (typed !== 0) return typed
+  if (event.ctrlKey || event.altKey) return 0
+  if (!['', 'Dead', 'Process', 'Unidentified'].includes(event.key)) return 0
+  if (event.code === 'BracketLeft') return -1
+  if (event.code === 'BracketRight') return 1
+  return 0
+}
+
 export function buildAtlasGraph(notes: readonly NoteMeta[]): AtlasGraph {
   const usable = notes.filter((n) => n.folder !== 'trash')
   const regionKeys = new Map<string, number>()
