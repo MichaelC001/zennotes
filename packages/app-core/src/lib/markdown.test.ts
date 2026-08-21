@@ -5,6 +5,14 @@ import { renderMarkdown } from './markdown'
 import { setMarkdownMathRenderer } from './markdown-settings'
 
 describe('renderMarkdown', () => {
+  it('keeps source newlines soft while preserving explicit hard breaks (#656)', () => {
+    const soft = renderMarkdown('Preview should reflow this prose\nwhen the pane changes width.')
+    const hard = renderMarkdown('Keep this explicit break.  \nStart a new visual line.')
+
+    expect(soft).not.toContain('<br>')
+    expect(hard).toContain('<br>')
+  })
+
   it('hides leading YAML/TOML frontmatter in preview output', () => {
     const yaml = renderMarkdown('---\ntitle: Hidden\ntags: [a, b]\n---\n\n# Visible')
     expect(yaml).toContain('<h1 data-source-line="6">Visible</h1>')

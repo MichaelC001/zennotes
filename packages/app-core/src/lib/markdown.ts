@@ -2,7 +2,6 @@ import { unified } from 'unified'
 import DOMPurify from 'dompurify'
 import remarkParse from 'remark-parse'
 import remarkGfm from 'remark-gfm'
-import remarkBreaks from 'remark-breaks'
 import remarkMath from 'remark-math'
 import remarkFrontmatter from 'remark-frontmatter'
 import remarkRehype from 'remark-rehype'
@@ -603,11 +602,10 @@ function remarkCallouts() {
       const type = marker[1].toLowerCase()
 
       // Split the paragraph's inline children into the title line and the
-      // body. remark-breaks runs earlier, so soft breaks arrive as `break`
-      // nodes and the first one ends the title; the delimiter itself is
-      // dropped, or the body paragraph opens with a stray <br> that reads as
-      // a phantom empty line. Raw newlines are handled too, in case the
-      // plugin ever runs without remark-breaks.
+      // body. Explicit Markdown breaks arrive as `break` nodes, while ordinary
+      // source newlines remain inside text nodes. The first one ends the title;
+      // the delimiter itself is dropped, or the body paragraph opens with a
+      // stray <br> that reads as a phantom empty line.
       type Inline = (typeof first.children)[number]
       const titleChildren: Inline[] = []
       const bodyChildren: Inline[] = []
@@ -992,7 +990,6 @@ function createProcessor(mathRenderer: 'katex' | 'typst') {
     .use(remarkParse)
     .use(remarkFrontmatter, ['yaml', 'toml'])
     .use(remarkGfm)
-    .use(remarkBreaks)
     .use(remarkMath)
     .use(remarkCurrencyGuard)
 
