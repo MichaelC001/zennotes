@@ -46,7 +46,7 @@ import { renderMarkdown } from './markdown'
 import { getCM } from '@replit/codemirror-vim'
 import { undo, redo } from '@codemirror/commands'
 import { useStore } from '../store'
-import { matchesSequenceToken } from './keymaps'
+import { matchesSequenceToken, matchesShortcutBinding } from './keymaps'
 import { followLinkTarget } from './follow-link'
 import { extractLinkAtCursor } from './internal-links'
 
@@ -744,6 +744,19 @@ class TableWidget extends WidgetType {
     const cols = this.model.headers.length
     const rowsCount = this.model.rows.length
 
+    if (editable.getAttribute('contenteditable') === 'true') {
+      const marker = matchesShortcutBinding(event, 'Mod+B')
+        ? '**'
+        : matchesShortcutBinding(event, 'Mod+I')
+          ? '*'
+          : null
+      if (marker && this.toggleCellFormatting(editable, marker)) {
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
+    }
+
     if (vimEnabled()) {
       if (this.cellMode === 'insert') {
         // INSERT: Escape (or the configurable insert-escape sequence, e.g. jk)
@@ -1222,6 +1235,26 @@ class TableWidget extends WidgetType {
     placeCaretAt(cell, caretOffset)
   }
 
+  /** Apply or remove a Markdown marker around the native selection in an
+   *  editable cell. Cell edits do not pass through CodeMirror's keymap, so the
+   *  widget mirrors the editor's bold and italic toggle locally. */
+  private toggleCellFormatting(cell: HTMLElement, marker: string): boolean {
+    const selection = cellSelectionOffsets(cell)
+    if (!selection) return false
+    const change = toggleCellTextWrap(
+      cell.textContent ?? '',
+      selection.from,
+      selection.to,
+      marker
+    )
+    cell.textContent = change.text
+    cell.dataset.raw = change.text
+    cell.dataset.rendered = 'false'
+    this.dirty = true
+    placeCellSelection(cell, change.from, change.to)
+    return true
+  }
+
   /** Commit the focused cell and drop from INSERT back to NORMAL. Optionally
    *  removes `removeBefore` chars just before the caret first, used to strip a
    *  typed insert-escape prefix (the `j` of `jk`) before exiting. (#341) */
@@ -1698,6 +1731,109 @@ function placeCaretAt(el: HTMLElement, offset: number): void {
   const sel = window.getSelection()
   sel?.removeAllRanges()
   sel?.addRange(range)
+}
+
+/** Native selection offsets measured against an editable cell's plain text. */
+function cellSelectionOffsets(el: HTMLElement): { from: number; to: number } | null {
+  const selection = el.ownerDocument.getSelection()
+  if (
+    !selection?.anchorNode ||
+    !selection.focusNode ||
+    !el.contains(selection.anchorNode) ||
+    !el.contains(selection.focusNode)
+  ) {
+    return null
+  }
+  const offsetOf = (node: Node, offset: number): number => {
+    const range = el.ownerDocument.createRange()
+    range.setStart(el, 0)
+    range.setEnd(node, offset)
+    return range.toString().length
+  }
+  const anchor = offsetOf(selection.anchorNode, selection.anchorOffset)
+  const head = offsetOf(selection.focusNode, selection.focusOffset)
+  return { from: Math.min(anchor, head), to: Math.max(anchor, head) }
+}
+
+type CellTextWrap = { text: string; from: number; to: number }
+
+/** Toggle a symmetric Markdown marker around one cell selection. */
+function toggleCellTextWrap(
+  text: string,
+  from: number,
+  to: number,
+  marker: string
+): CellTextWrap {
+  const markerLength = marker.length
+  if (from === to) {
+    const before = text.slice(Math.max(0, from - markerLength), from)
+    const after = text.slice(from, from + markerLength)
+    const insideLongerPair =
+      marker === '*' && text.slice(from - 2, from) === '**' && text.slice(from, from + 2) === '**'
+    if (before === marker && after === marker && !insideLongerPair) {
+      return {
+        text: text.slice(0, from - markerLength) + text.slice(from + markerLength),
+        from: from - markerLength,
+        to: from - markerLength
+      }
+    }
+    return {
+      text: text.slice(0, from) + marker + marker + text.slice(from),
+      from: from + markerLength,
+      to: from + markerLength
+    }
+  }
+
+  const before = text.slice(Math.max(0, from - markerLength), from)
+  const after = text.slice(to, to + markerLength)
+  if (before === marker && after === marker) {
+    return {
+      text: text.slice(0, from - markerLength) + text.slice(from, to) + text.slice(to + markerLength),
+      from: from - markerLength,
+      to: to - markerLength
+    }
+  }
+
+  const selected = text.slice(from, to)
+  if (
+    selected.length >= markerLength * 2 &&
+    selected.startsWith(marker) &&
+    selected.endsWith(marker)
+  ) {
+    return {
+      text:
+        text.slice(0, from) +
+        selected.slice(markerLength, selected.length - markerLength) +
+        text.slice(to),
+      from,
+      to: to - markerLength * 2
+    }
+  }
+
+  return {
+    text: text.slice(0, from) + marker + selected + marker + text.slice(to),
+    from: from + markerLength,
+    to: to + markerLength
+  }
+}
+
+/** Restore a native selection after replacing a cell's textContent. */
+function placeCellSelection(el: HTMLElement, from: number, to: number): void {
+  const text = el.textContent ?? ''
+  const start = Math.max(0, Math.min(from, text.length))
+  const end = Math.max(start, Math.min(to, text.length))
+  const node = el.firstChild
+  const range = el.ownerDocument.createRange()
+  if (node?.nodeType === Node.TEXT_NODE) {
+    range.setStart(node, start)
+    range.setEnd(node, end)
+  } else {
+    range.setStart(el, 0)
+    range.setEnd(el, 0)
+  }
+  const selection = el.ownerDocument.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
 }
 
 function buildDecorations(state: EditorState): DecorationSet {

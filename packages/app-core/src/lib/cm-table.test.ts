@@ -18,6 +18,7 @@ import {
   findChar
 } from './cm-table'
 import { closeTableContextMenu } from './cm-table-menu'
+import { isMacPlatform } from './keymaps'
 import { useStore } from '../store'
 
 const TABLE_DOC = `Intro text.
@@ -45,6 +46,16 @@ function mount(doc: string): EditorView {
   view.dispatch({ changes: { from: 0, to: 1 } })
   return view
 }
+
+function selectCellText(cell: HTMLElement): void {
+  const range = document.createRange()
+  range.selectNodeContents(cell)
+  const selection = window.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+}
+
+const modKey = isMacPlatform() ? { metaKey: true } : { ctrlKey: true }
 
 describe('tablePlugin', () => {
   it('renders a GFM table as an editable table widget without throwing', () => {
@@ -141,6 +152,67 @@ describe('tablePlugin', () => {
     const xEv = new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true })
     cell.dispatchEvent(xEv)
     expect(xEv.defaultPrevented).toBe(false)
+    view.destroy()
+  })
+
+  it('toggles bold Markdown around selected text in an editable cell (#664)', () => {
+    const view = mount(TABLE_DOC)
+    const cell = view.dom.querySelector<HTMLElement>(
+      '.cm-table-widget [data-row="0"][data-col="0"]'
+    )!
+    cell.focus()
+    cell.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'i', bubbles: true, cancelable: true })
+    )
+    selectCellText(cell)
+
+    const bold = (): KeyboardEvent =>
+      new KeyboardEvent('keydown', {
+        key: 'b',
+        code: 'KeyB',
+        ...modKey,
+        bubbles: true,
+        cancelable: true
+      })
+    const apply = bold()
+    cell.dispatchEvent(apply)
+    expect(apply.defaultPrevented).toBe(true)
+    expect(cell.dataset.raw).toBe('**Alice**')
+    expect(window.getSelection()?.toString()).toBe('Alice')
+
+    const remove = bold()
+    cell.dispatchEvent(remove)
+    expect(remove.defaultPrevented).toBe(true)
+    expect(cell.dataset.raw).toBe('Alice')
+    expect(window.getSelection()?.toString()).toBe('Alice')
+    view.destroy()
+  })
+
+  it('wraps selected text in italic Markdown in an editable cell (#664)', () => {
+    const view = mount(TABLE_DOC)
+    const cell = view.dom.querySelector<HTMLElement>(
+      '.cm-table-widget [data-row="1"][data-col="0"]'
+    )!
+    cell.focus()
+    cell.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'i', bubbles: true, cancelable: true })
+    )
+    selectCellText(cell)
+
+    const italic = new KeyboardEvent('keydown', {
+      key: 'i',
+      code: 'KeyI',
+      ...modKey,
+      bubbles: true,
+      cancelable: true
+    })
+    cell.dispatchEvent(italic)
+    expect(italic.defaultPrevented).toBe(true)
+    expect(cell.dataset.raw).toBe('*Bob*')
+    expect(window.getSelection()?.toString()).toBe('Bob')
+
+    view.focus()
+    expect(view.state.doc.toString()).toMatch(/\| \*Bob\* \| 25\s+\|/)
     view.destroy()
   })
 
