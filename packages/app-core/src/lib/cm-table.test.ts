@@ -261,6 +261,87 @@ describe('tablePlugin', () => {
     view.destroy()
   })
 
+  it('keeps char-wise visual mode when `l` crosses into the next cell (#665)', () => {
+    const view = mount(TABLE_DOC)
+    const name = view.dom.querySelector<HTMLElement>(
+      '.cm-table-widget [data-row="0"][data-col="0"]'
+    )!
+    const age = view.dom.querySelector<HTMLElement>(
+      '.cm-table-widget [data-row="0"][data-col="1"]'
+    )!
+    name.focus()
+
+    for (const key of ['v', '$', 'l']) {
+      ;(document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+      )
+    }
+
+    expect(document.activeElement).toBe(age)
+    expect(name.classList.contains('is-vim-visual')).toBe(true)
+    expect(age.classList.contains('is-vim-visual')).toBe(true)
+
+    age.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }))
+    expect(name.dataset.raw).toBe('')
+    expect(age.dataset.raw).toBe('0')
+    view.destroy()
+  })
+
+  it('extends char-wise visual mode through intervening cells with `j` (#665)', () => {
+    const view = mount(TABLE_DOC)
+    const alice = view.dom.querySelector<HTMLElement>(
+      '.cm-table-widget [data-row="0"][data-col="0"]'
+    )!
+    const bob = view.dom.querySelector<HTMLElement>(
+      '.cm-table-widget [data-row="1"][data-col="0"]'
+    )!
+    alice.focus()
+    alice.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', bubbles: true, cancelable: true }))
+    alice.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
+
+    expect(document.activeElement).toBe(bob)
+    expect(view.dom.querySelectorAll('.cm-table-cell.is-vim-visual')).toHaveLength(3)
+    view.destroy()
+  })
+
+  it('continues visual `w` at the start of the next cell (#665)', () => {
+    const view = mount(TABLE_DOC)
+    const alice = view.dom.querySelector<HTMLElement>(
+      '.cm-table-widget [data-row="0"][data-col="0"]'
+    )!
+    const age = view.dom.querySelector<HTMLElement>(
+      '.cm-table-widget [data-row="0"][data-col="1"]'
+    )!
+    alice.focus()
+    alice.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', bubbles: true, cancelable: true }))
+    alice.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', bubbles: true, cancelable: true }))
+
+    expect(document.activeElement).toBe(age)
+    expect(view.dom.querySelectorAll('.cm-table-cell.is-vim-visual')).toHaveLength(2)
+    view.destroy()
+  })
+
+  it('uses `V` to select complete table rows (#665)', () => {
+    const view = mount(TABLE_DOC)
+    const age = view.dom.querySelector<HTMLElement>(
+      '.cm-table-widget [data-row="0"][data-col="1"]'
+    )!
+    const lastCell = view.dom.querySelector<HTMLElement>(
+      '.cm-table-widget [data-row="1"][data-col="1"]'
+    )!
+    age.focus()
+    age.dispatchEvent(new KeyboardEvent('keydown', { key: 'V', bubbles: true, cancelable: true }))
+    age.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
+
+    expect(document.activeElement).toBe(lastCell)
+    const selected = Array.from(
+      view.dom.querySelectorAll<HTMLElement>('.cm-table-cell.is-vim-visual')
+    )
+    expect(selected).toHaveLength(4)
+    expect(selected.map((cell) => cell.dataset.raw)).toEqual(['Alice', '30', 'Bob', '25'])
+    view.destroy()
+  })
+
   it('u commits the pending cell edit and undoes it', () => {
     const view = mount(TABLE_DOC)
     const cell = view.dom.querySelector<HTMLElement>(
