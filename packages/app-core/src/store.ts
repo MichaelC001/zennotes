@@ -704,6 +704,7 @@ export type TagMatchMode = 'all' | 'any'
 export type TaskMutation =
   | { kind: 'set-checked'; checked: boolean }
   | { kind: 'set-waiting'; waiting: boolean }
+  | { kind: 'set-in-progress'; inProgress: boolean }
   | { kind: 'set-priority'; priority: TaskLinePriority | null }
   | { kind: 'set-due'; due: string | null }
   | { kind: 'set-field'; key: string; value: string | null }
@@ -1846,6 +1847,14 @@ function applyTaskMutationsToTask(task: VaultTask, mutations: TaskMutation[]): V
               : { ...next, waiting: m.waiting }
         }
         break
+      case 'set-in-progress':
+        if (next.inProgress !== m.inProgress) {
+          next =
+            next.kind === 'file'
+              ? withFileTaskStatus(next, m.inProgress ? 'in-progress' : 'open')
+              : withInlineTaskMarker(next, m.inProgress ? 'in-progress' : 'open')
+        }
+        break
       case 'set-priority': {
         const priority = m.priority ?? undefined
         if (next.priority !== priority) next = { ...next, priority }
@@ -1891,6 +1900,9 @@ function fileTaskMutationUpdates(
         break
       case 'set-waiting':
         updates.status = m.waiting ? 'waiting' : 'open'
+        break
+      case 'set-in-progress':
+        updates.status = m.inProgress ? 'in-progress' : 'open'
         break
       case 'set-priority':
         updates.priority = taskFilePriorityValue(m.priority)
@@ -5463,6 +5475,9 @@ export const useStore = create<Store>((set, get) => {
                 break
               case 'set-waiting':
                 nextBody = setTaskWaitingAtIndex(nextBody, task.taskIndex, m.waiting)
+                break
+              case 'set-in-progress':
+                nextBody = setTaskInProgressAtIndex(nextBody, task.taskIndex, m.inProgress)
                 break
               case 'set-priority':
                 nextBody = setTaskPriorityAtIndex(nextBody, task.taskIndex, m.priority)
