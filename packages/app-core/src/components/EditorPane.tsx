@@ -3175,7 +3175,17 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               </button>
             )}
             <button
-              onClick={() => void focusTabInPane(paneId, tab.path)}
+              onClick={(e) => {
+                // A mouse click parks DOM focus on this button, so the next
+                // keystrokes went to the tab (and drew its focus ring) instead
+                // of the note (#679). Land in the editor the way a hint or a
+                // palette pick does; a panel tab just lets go of the button.
+                const button = e.currentTarget
+                void focusTabInPane(paneId, tab.path).then(() => {
+                  if (isVirtual) button.blur()
+                  else focusEditorNormalMode({ attempts: 10, delayMs: 24 })
+                })
+              }}
               onDoubleClick={() => {
                 if (tab.preview) promoteTabInPane(paneId, tab.path)
               }}
