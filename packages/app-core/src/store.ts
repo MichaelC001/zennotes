@@ -1802,6 +1802,25 @@ function writeManualOrder(root: string, order: ManualNoteOrder): void {
 // Which vault root the in-memory manual order was loaded for; reloaded on switch.
 let manualOrderLoadedForRoot: string | null = null
 
+/** Roughly 8 MB of image per picture; larger ones fall back to alt text so a
+ *  paste never stalls a mail client. */
+const EMAIL_IMAGE_MAX_BASE64 = 11_000_000
+const EMAIL_IMAGE_MIME: Record<string, string> = {
+  png: 'image/png',
+  apng: 'image/apng',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+  avif: 'image/avif'
+}
+function emailImageMime(relPath: string): string {
+  const ext = relPath.slice(relPath.lastIndexOf('.') + 1).toLowerCase()
+  return EMAIL_IMAGE_MIME[ext] ?? 'application/octet-stream'
+}
+
 type InlineTaskMarker = 'open' | 'done' | 'forwarded' | 'cancelled' | 'in-progress'
 
 /** A checkbox line has exactly one state character. Mirror that exclusivity in
@@ -6994,8 +7013,24 @@ export const useStore = create<Store>((set, get) => {
     try {
       // Lazy: the renderer chain rides the markdown vendor chunk, which has
       // no business on the boot path for a clipboard command.
-      const { renderNoteEmailHtml } = await import('./lib/note-email-html')
-      const { html } = renderNoteEmailHtml(body, active.title)
+      const { renderNoteEmailHtml, collectEmailImageRefs } = await import('./lib/note-email-html')
+      const { resolveAssetVaultRelativePath } = await import('./lib/local-assets')
+      // Every local image rides along as a data: URI (#628). Anything the
+      // vault cannot serve, or that is too big for a mail body, keeps the
+      // alt-text fallback.
+      const images = new Map<string, string>()
+      for (const ref of collectEmailImageRefs(body)) {
+        const rel = resolveAssetVaultRelativePath(s.vault?.root, active.path, ref)
+        if (!rel) continue
+        try {
+          const base64 = await window.zen.readVaultAssetBase64(rel)
+          if (base64.length > EMAIL_IMAGE_MAX_BASE64) continue
+          images.set(ref, `data:${emailImageMime(rel)};base64,${base64}`)
+        } catch {
+          /* unreadable: the alt text stands in */
+        }
+      }
+      const { html } = renderNoteEmailHtml(body, active.title, { images })
       // Both flavors: rich for mail clients, the markdown itself for editors.
       await navigator.clipboard.write([
         new ClipboardItem({
