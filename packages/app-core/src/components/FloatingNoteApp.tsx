@@ -36,6 +36,7 @@ import { applyVimInsertEscape } from '../lib/vim-insert-escape'
 import { registerDisplayLineMotion } from '../lib/cm-vim-display-line'
 import { registerHeadingMotion } from '../lib/cm-vim-heading-motion'
 import { registerReflowOperator } from '../lib/cm-vim-reflow'
+import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
 import { markdownListIndentPlugin } from '../lib/cm-markdown-list-indent'
 import { appMarkdownSnippetExtension } from '../lib/markdown-snippets-config'
 import { syntaxHighlighting, HighlightStyle, defaultHighlightStyle } from '@codemirror/language'
@@ -101,6 +102,7 @@ export interface FloatingPrefs {
   vimMode: boolean
   vimInsertEscape: string
   vimWrappedLineMotions: VimWrappedLineMotionMode
+  vimBlockImeInNormalMode: boolean
   livePreview: boolean
   themeId: string
   themeFamily: ThemeFamily
@@ -121,6 +123,7 @@ export function loadFloatingPrefs(): FloatingPrefs {
     vimMode: true,
     vimInsertEscape: '',
     vimWrappedLineMotions: 'display',
+    vimBlockImeInNormalMode: true,
     livePreview: true,
     themeId: DEFAULT_THEME_ID,
     themeFamily: 'gruvbox',
@@ -150,6 +153,7 @@ export function loadFloatingPrefs(): FloatingPrefs {
       ...parsed,
       vimWrappedLineMotions:
         parsed.vimWrappedLineMotions === 'logical' ? 'logical' : 'display',
+      vimBlockImeInNormalMode: parsed.vimBlockImeInNormalMode !== false,
       themeFamily: (parsed.themeFamily as ThemeFamily) ?? fallback.themeFamily,
       themeMode: (parsed.themeMode as ThemeMode) ?? fallback.themeMode,
       lineNumberMode,
@@ -331,6 +335,7 @@ export function FloatingNoteApp({ notePath }: { notePath: string }): JSX.Element
         extensions: [
           appMarkdownSnippetExtension(),
           new Compartment().of(prefs.vimMode ? vim() : []),
+          vimImeGuard(() => prefs.vimBlockImeInNormalMode && !isTouchPrimaryDevice()),
           vimVisualHighlightExtension,
           history(),
           drawSelection(),

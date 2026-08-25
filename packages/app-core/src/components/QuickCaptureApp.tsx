@@ -46,6 +46,7 @@ import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { registerDisplayLineMotion } from '../lib/cm-vim-display-line'
 import { registerHeadingMotion } from '../lib/cm-vim-heading-motion'
 import { registerReflowOperator } from '../lib/cm-vim-reflow'
+import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
 import { toggleWrap, wrapLink } from '../lib/cm-format'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { resolveCodeLanguage } from '../lib/cm-code-languages'
@@ -90,6 +91,7 @@ interface QuickCapturePrefs {
   vimMode: boolean
   vimInsertEscape: string
   vimWrappedLineMotions: VimWrappedLineMotionMode
+  vimBlockImeInNormalMode: boolean
   themeId: string
   themeFamily: ThemeFamily
   themeMode: ThemeMode
@@ -107,6 +109,7 @@ function loadPrefs(): QuickCapturePrefs {
     vimMode: true,
     vimInsertEscape: '',
     vimWrappedLineMotions: 'display',
+    vimBlockImeInNormalMode: true,
     themeId: DEFAULT_THEME_ID,
     themeFamily: 'gruvbox',
     themeMode: 'dark',
@@ -127,6 +130,7 @@ function loadPrefs(): QuickCapturePrefs {
       ...parsed,
       vimWrappedLineMotions:
         parsed.vimWrappedLineMotions === 'logical' ? 'logical' : 'display',
+      vimBlockImeInNormalMode: parsed.vimBlockImeInNormalMode !== false,
       themeFamily: (parsed.themeFamily as ThemeFamily) ?? fallback.themeFamily,
       themeMode: (parsed.themeMode as ThemeMode) ?? fallback.themeMode,
       editorTabSize: normalizeEditorTabSize(parsed.editorTabSize)
@@ -450,6 +454,7 @@ export function QuickCaptureApp(): JSX.Element {
         extensions: [
           appMarkdownSnippetExtension(),
           new Compartment().of(prefs.vimMode ? vim() : []),
+          vimImeGuard(() => prefs.vimBlockImeInNormalMode && !isTouchPrimaryDevice()),
           vimVisualHighlightExtension,
           // #312: inline-format shortcuts (bold/italic/code/strike/highlight/
           // math/link) — the same markers the main editor's VimNav binds — so

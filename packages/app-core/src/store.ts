@@ -493,6 +493,9 @@ interface Prefs {
   /** When true, Vim yank/delete/change also copy to the system clipboard and
    *  `p` / `P` paste from it (like `set clipboard=unnamed`). */
   vimYankToClipboard: boolean
+  /** Make the editor non-editable outside Vim insert mode so a CJK input
+   *  method cannot compose over normal-mode keys (#84, #464). */
+  vimBlockImeInNormalMode: boolean
   /** Whether unprefixed Vim line-boundary motions follow visible display rows
    *  or the complete logical line when word wrap is enabled. */
   vimWrappedLineMotions: VimWrappedLineMotionMode
@@ -967,6 +970,7 @@ export const DEFAULT_PREFS: Prefs = {
   vimMode: true,
   vimInsertEscape: '',
   vimYankToClipboard: false,
+  vimBlockImeInNormalMode: true,
   vimWrappedLineMotions: 'display',
   keymapOverrides: {},
   whichKeyHints: true,
@@ -1088,6 +1092,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.vimYankToClipboard === 'boolean'
         ? p.vimYankToClipboard
         : DEFAULT_PREFS.vimYankToClipboard,
+    vimBlockImeInNormalMode:
+      typeof p.vimBlockImeInNormalMode === 'boolean'
+        ? p.vimBlockImeInNormalMode
+        : DEFAULT_PREFS.vimBlockImeInNormalMode,
     vimWrappedLineMotions:
       p.vimWrappedLineMotions === 'logical' || p.vimWrappedLineMotions === 'display'
         ? p.vimWrappedLineMotions
@@ -2145,6 +2153,7 @@ function collectPrefs(s: {
   vimMode: boolean
   vimInsertEscape: string
   vimYankToClipboard: boolean
+  vimBlockImeInNormalMode: boolean
   vimWrappedLineMotions: VimWrappedLineMotionMode
   keymapOverrides: KeymapOverrides
   enabledOverrides: Record<string, string>
@@ -2239,6 +2248,7 @@ function collectPrefs(s: {
     vimMode: s.vimMode,
     vimInsertEscape: s.vimInsertEscape,
     vimYankToClipboard: s.vimYankToClipboard,
+    vimBlockImeInNormalMode: s.vimBlockImeInNormalMode,
     vimWrappedLineMotions: s.vimWrappedLineMotions,
     keymapOverrides: s.keymapOverrides,
     enabledOverrides: s.enabledOverrides,
@@ -2742,6 +2752,7 @@ interface Store {
   vimInsertEscape: string
   /** When true, Vim yank/delete/change also copy to the system clipboard. Persisted. */
   vimYankToClipboard: boolean
+  vimBlockImeInNormalMode: boolean
   /** Display-row or logical-line semantics for $, I, A and dependent operators. */
   vimWrappedLineMotions: VimWrappedLineMotionMode
   keymapOverrides: KeymapOverrides
@@ -3239,6 +3250,7 @@ interface Store {
   setVimMode: (on: boolean) => void
   setVimInsertEscape: (sequence: string) => void
   setVimYankToClipboard: (on: boolean) => void
+  setVimBlockImeInNormalMode: (on: boolean) => void
   setVimWrappedLineMotions: (mode: VimWrappedLineMotionMode) => void
   setKeymapBinding: (id: KeymapId, binding: string | null) => void
   resetAllKeymaps: () => void
@@ -4528,6 +4540,7 @@ export const useStore = create<Store>((set, get) => {
   vimMode: loadPrefs().vimMode,
   vimInsertEscape: loadPrefs().vimInsertEscape,
   vimYankToClipboard: loadPrefs().vimYankToClipboard,
+  vimBlockImeInNormalMode: loadPrefs().vimBlockImeInNormalMode,
   vimWrappedLineMotions: loadPrefs().vimWrappedLineMotions,
   keymapOverrides: loadPrefs().keymapOverrides,
   enabledOverrides: loadPrefs().enabledOverrides,
@@ -7064,6 +7077,10 @@ export const useStore = create<Store>((set, get) => {
   },
   setVimYankToClipboard: (on) => {
     set({ vimYankToClipboard: on })
+    savePrefs(collectPrefs(get()))
+  },
+  setVimBlockImeInNormalMode: (on) => {
+    set({ vimBlockImeInNormalMode: on })
     savePrefs(collectPrefs(get()))
   },
   setVimWrappedLineMotions: (mode) => {

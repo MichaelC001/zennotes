@@ -233,6 +233,7 @@ import {
 } from './icons'
 import { focusEditorNormalMode } from '../lib/editor-focus'
 import { reflowParagraph } from '../lib/cm-reflow'
+import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
 import {
   getSystemFolderLabel,
   resolveSystemFolderLabels
@@ -1749,6 +1750,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         extensions: [
           appMarkdownSnippetExtension(),
           vimCompartment.of(s0.vimMode ? vim() : []),
+          // No text input outside Vim insert mode, so a CJK input method
+          // cannot compose over motions (#84, #464). Reads the pref live.
+          vimImeGuard(
+            () => useStore.getState().vimBlockImeInNormalMode && !isTouchPrimaryDevice()
+          ),
           historyCompartment.of(history()),
           drawSelectionCompartment.of(
             drawSelection({ cursorBlinkRate: s0.cursorBlink ? 1200 : 0 })
