@@ -232,6 +232,7 @@ import {
   ZapIcon
 } from './icons'
 import { focusEditorNormalMode } from '../lib/editor-focus'
+import { reflowParagraph } from '../lib/cm-reflow'
 import {
   getSystemFolderLabel,
   resolveSystemFolderLabels
@@ -368,6 +369,12 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
     {
       key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.toggleCheckbox')),
       run: toggleCheckbox
+    },
+    // Join a hard-wrapped paragraph back into one line so the pane wraps it
+    // (#676). Mode-agnostic like the line moves; Vim mode also has `gq`.
+    {
+      key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.reflowParagraph')),
+      run: reflowParagraph
     },
     // Step across inline markers, so a formatted word can be finished without
     // reaching for the arrow keys. Mode-agnostic like the line moves. (#490)

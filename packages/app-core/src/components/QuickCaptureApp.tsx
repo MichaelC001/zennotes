@@ -45,6 +45,7 @@ import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-def
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { registerDisplayLineMotion } from '../lib/cm-vim-display-line'
 import { registerHeadingMotion } from '../lib/cm-vim-heading-motion'
+import { registerReflowOperator } from '../lib/cm-vim-reflow'
 import { toggleWrap, wrapLink } from '../lib/cm-format'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { resolveCodeLanguage } from '../lib/cm-code-languages'
@@ -218,6 +219,7 @@ function registerCaptureVimCommands(
   // #312: this window is a separate Electron renderer with its own Vim, so it
   // needs its own registration to get the main editor's j/k display-line motion.
   registerHeadingMotion()
+  registerReflowOperator()
 
   Vim.defineEx('write', 'w', () => {
     setTimeout(() => {
