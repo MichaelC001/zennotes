@@ -9,6 +9,21 @@ import { EditorView } from '@codemirror/view'
 import { vim } from '@replit/codemirror-vim'
 import { vimImeGuard } from './cm-vim-ime-guard'
 
+// jsdom has no layout. Focusing the editor makes CodeMirror measure on the
+// next frame, and without these two methods that measurement throws from a
+// deferred callback, which Vitest reports as an unhandled error (it failed CI
+// while passing locally by timing luck). Empty geometry is all we need.
+const rangeProto = Range.prototype as Range & {
+  getClientRects?: () => DOMRectList
+  getBoundingClientRect?: () => DOMRect
+}
+if (typeof rangeProto.getClientRects !== 'function') {
+  rangeProto.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList
+}
+if (typeof rangeProto.getBoundingClientRect !== 'function') {
+  rangeProto.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0)
+}
+
 let view: EditorView | null = null
 
 afterEach(() => {
