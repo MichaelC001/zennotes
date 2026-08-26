@@ -11,6 +11,15 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "@excalidraw/excalidraw": {
+      "nanoid": "3.3.18"
+    },
+    "@excalidraw/mermaid-to-excalidraw": {
+      "@mermaid-js/parser": "1.2.1",
+      "nanoid": "5.1.16"
+    }
+  },
   "scripts": {
     "dev": "npm run dev:desktop",
     "dev:desktop": "npm run dev --workspace @zennotes/desktop",
