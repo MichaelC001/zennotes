@@ -6610,6 +6610,13 @@ export const useStore = create<Store>((set, get) => {
   renameNote: async (oldPath, nextTitle) => {
     if (!oldPath) return
     try {
+      // Renaming rewrites every inbound wikilink on disk. Flush open buffers
+      // first so that rewrite cannot race a pending save and get overwritten
+      // by stale editor contents immediately afterwards.
+      await get().flushDirtyNotes()
+      if (Object.values(get().noteDirty).some(Boolean)) {
+        throw new Error('Could not rename while notes still have unsaved changes')
+      }
       const meta = await window.zen.renameNote(oldPath, nextTitle)
       set((s) => renameNoteState(s, oldPath, meta))
       await get().applyFavorites(
