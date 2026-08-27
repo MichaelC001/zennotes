@@ -59,7 +59,8 @@ import {
   markdownListIndentPlugin
 } from '../lib/cm-markdown-list-indent'
 import { forwardOnCheckboxArrow } from '../lib/cm-forward-task'
-import { hopMarkerBackward, hopMarkerForward } from '../lib/cm-marker-hop'
+import { markerHopCommands } from '../lib/cm-marker-hop'
+import { isInMarkdownCode } from '../lib/cm-auto-pairs'
 import { toggleCheckbox } from '../lib/cm-toggle-checkbox'
 import { completionKeymapForEditor, completionNavKeymap } from '../lib/cm-completion-nav'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
@@ -339,6 +340,13 @@ function pointerOverRange(
   return true
 }
 
+// Straight quotes join the hop's markers exactly where they auto-pair: with the
+// prose setting on, or inside code, where auto-pair always closes them (#685).
+const markerHop = markerHopCommands({
+  quotesAreMarkers: (state, pos) =>
+    useStore.getState().autoPairQuotesInProse || isInMarkdownCode(state, pos)
+})
+
 function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extension {
   return keymap.of([
     // Home/End on the display row the user can see. Listed before
@@ -382,11 +390,11 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
     // reaching for the arrow keys. Mode-agnostic like the line moves. (#490)
     {
       key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.hopMarkerForward')),
-      run: hopMarkerForward
+      run: markerHop.forward
     },
     {
       key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.hopMarkerBackward')),
-      run: hopMarkerBackward
+      run: markerHop.backward
     },
     {
       key: toCodeMirrorKey(getKeymapBinding(overrides, 'editor.foldHeading')),
