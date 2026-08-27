@@ -180,6 +180,20 @@ beforeAll(async () => {
       }
       case 'POST /api/folders/rename':
         return send({ subpath: 'Renamed' })
+      case 'GET /api/vault':
+        return send({ root: '/srv/notes', name: 'notes' })
+      case 'GET /api/vault/settings':
+        return send({ primaryNotesLocation: 'root', systemFolderPaths: null })
+      case 'GET /api/assets':
+        return send([
+          { path: 'assets/pic.png', name: 'pic.png', kind: 'image', siblingOrder: 0, size: 4, updatedAt: 9 }
+        ])
+      case 'POST /api/notes/empty-trash': {
+        for (const key of [...vault.notes.keys()]) if (key.startsWith('trash/')) vault.notes.delete(key)
+        res.writeHead(204)
+        res.end()
+        return
+      }
       default:
         res.writeHead(404)
         res.end('no route')
@@ -392,5 +406,49 @@ describe('local and remote edits produce identical bytes', () => {
 
     expect(remoteMeta.path).toBe(localMeta.path)
     expect(vault.notes.get(remoteMeta.path)).toBe((await readNoteLocal(root, localMeta.path)).body)
+  })
+})
+
+describe('RemoteBackend: what the MCP needs beyond the CLI (#688)', () => {
+  it('describes the server vault from /api/vault and its layout settings', async () => {
+    expect(await remote().describe()).toEqual({
+      kind: 'remote',
+      baseUrl,
+      name: 'test',
+      vaultPath: '/srv/notes',
+      vaultName: 'notes',
+      primaryNotesLocation: 'root',
+      authConfigured: true
+    })
+    expect(await remote(null).describe()).toMatchObject({ authConfigured: false })
+  })
+
+  it('lists assets in the local shape', async () => {
+    expect(await remote().listAssets()).toEqual([
+      { path: 'assets/pic.png', name: 'pic.png', size: 4, updatedAt: 9 }
+    ])
+  })
+
+  it('empties the trash through the server route', async () => {
+    vault.notes.set('trash/Old.md', '# Old')
+    await remote().emptyTrash()
+    expect(vault.requests.at(-1)?.url).toBe('/api/notes/empty-trash')
+    expect(vault.notes.has('trash/Old.md')).toBe(false)
+  })
+
+  it('inserts at a line as read-then-write', async () => {
+    await remote().insertAtLine('inbox/Daily.md', 2, '- zero')
+    expect(vault.notes.get('inbox/Daily.md')).toBe('# Daily\n\n- zero\n- [ ] first\n- [ ] second\n')
+  })
+
+  it('replaces in a note, and skips the write when nothing matched', async () => {
+    const backend = remote()
+    expect((await backend.replaceInNote('inbox/Daily.md', 'first', '1st', 'first')).replacements).toBe(1)
+    expect(vault.notes.get('inbox/Daily.md')).toContain('- [ ] 1st')
+    const before = vault.requests.length
+    const miss = await backend.replaceInNote('inbox/Daily.md', 'absent', 'x', 'all')
+    expect(miss.replacements).toBe(0)
+    expect(miss.meta.path).toBe('inbox/Daily.md')
+    expect(vault.requests.slice(before).map((r) => r.url)).not.toContain('/api/notes/write')
   })
 })
