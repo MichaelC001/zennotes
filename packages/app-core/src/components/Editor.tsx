@@ -68,6 +68,7 @@ import { listContinuationPrefix } from "../lib/list-continuation";
 import { focusEditorNormalMode } from "../lib/editor-focus";
 import { toVimSequence } from "../lib/vim-key-sequence";
 import { registerNoteMoveExCommands } from "../lib/vim-ex-commands";
+import { promptImageWidth, setImageWidthFromInput } from "../lib/image-resize";
 
 let vimCommandsRegistered = false;
 let syncedVimBindings: Partial<Record<KeymapId, string[]>> = {};
@@ -451,6 +452,23 @@ function registerVimCommands(): void {
   Vim.defineEx("format", "format", () => {
     void useStore.getState().formatActiveNote();
   });
+  // `:imgwidth 480` (`:imgw`) writes the `|480` size hint into the image on
+  // the cursor line, the same edit as dragging the widget's handle; `auto`
+  // (or 0) strips it, and no argument opens the Resize Image prompt (#684).
+  Vim.defineEx(
+    "imgwidth",
+    "imgw",
+    (_cm: unknown, params: { argString?: string } | undefined) => {
+      const view = useStore.getState().editorViewRef;
+      if (!view) return;
+      const arg = (params?.argString ?? "").trim();
+      if (!arg) {
+        void promptImageWidth(view);
+        return;
+      }
+      setImageWidthFromInput(view, arg);
+    },
+  );
   Vim.defineEx("quit", "q", () => {
     const state = useStore.getState();
     if (isTasksViewActive(state)) {

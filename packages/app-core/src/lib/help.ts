@@ -392,7 +392,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Links are actionable',
     body:
-      'Use [[wikilinks]] or markdown links. Following a link — click it, Cmd/Ctrl-click it, or use the follow-link motion (`gd`) in normal mode — opens the note under the cursor and pins PDFs into the reference pane. If the note does not exist yet, following the link offers to create it (after you confirm) rather than leaving a dead link. Prefix a wikilink with `!` to embed rather than link: `![[Note]]` inlines the target note content in the reading view and PDF export — recursively, with cycle protection — so a master note can pull in sub-notes and export to PDF as one document. `![[image.png]]` embeds an image and `![[drawing.excalidraw]]` embeds an Excalidraw drawing as a PNG preview; both take optional `|width` or `|WxH` size hints (`![[image.png|300]]`, `![[image.png|600x400]]`), and the markdown form carries the same hint after the alt text (`![caption|300](image.png)`).'
+      'Use [[wikilinks]] or markdown links. Following a link — click it, Cmd/Ctrl-click it, or use the follow-link motion (`gd`) in normal mode — opens the note under the cursor and pins PDFs into the reference pane. If the note does not exist yet, following the link offers to create it (after you confirm) rather than leaving a dead link. Prefix a wikilink with `!` to embed rather than link: `![[Note]]` inlines the target note content in the reading view and PDF export — recursively, with cycle protection — so a master note can pull in sub-notes and export to PDF as one document. `![[image.png]]` embeds an image and `![[drawing.excalidraw]]` embeds an Excalidraw drawing as a PNG preview; both take optional `|width` or `|WxH` size hints (`![[image.png|300]]`, `![[image.png|600x400]]`), and the markdown form carries the same hint after the alt text (`![caption|300](image.png)`). In the editor, drag the handle on a picture\'s right edge to resize it; the width is written back as that hint, so the reading view, exports and Obsidian all show the same size. Resize Image… in the command palette (or `:imgwidth 480` in Vim mode, `:imgw auto` to reset) sets it by number for the image under the cursor.'
   },
   {
     title: 'Point at one block, not a whole note',
@@ -737,6 +737,11 @@ export const HELP_VIM_COMMANDS: HelpExCommand[] = [
     command: ':format',
     summary: 'Format markdown',
     detail: 'Runs markdown formatting on the active note.'
+  },
+  {
+    command: ':imgwidth {px}',
+    summary: 'Resize the image on the cursor line',
+    detail: 'Writes the `|width` size hint into the image embed under the cursor, the same edit as dragging the handle on the picture. `:imgw auto` strips the hint; `:imgw` with no argument opens the Resize Image prompt.'
   },
   {
     command: ':tasks',

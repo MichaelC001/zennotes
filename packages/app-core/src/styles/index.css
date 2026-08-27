@@ -3290,6 +3290,78 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   font-size: 1rem;
 }
 
+/* Resize handle (#684, editor only). The sizer hugs the picture so the handle
+   rides on the picture's right edge whatever the frame's width; dragging it
+   writes the `|width` hint into the note. */
+.cm-editor .local-image-embed-sizer {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+.cm-editor .local-image-embed-resize {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 8px;
+  height: 44px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.92);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.35),
+    0 2px 8px rgb(0 0 0 / 0.35);
+  transform: translateY(-50%);
+  cursor: ew-resize;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.cm-editor .local-image-embed:hover .local-image-embed-resize,
+.cm-editor .local-image-embed.is-resizing .local-image-embed-resize {
+  opacity: 1;
+}
+
+.cm-editor .local-image-embed-size {
+  position: absolute;
+  right: 22px;
+  bottom: 10px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgb(20 19 18 / 0.82);
+  color: rgb(255 255 255 / 0.94);
+  font-family: var(
+    --z-mono-font,
+    "SF Mono",
+    "SFMono-Regular",
+    ui-monospace,
+    "JetBrains Mono",
+    Menlo,
+    Consolas,
+    monospace
+  );
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.cm-editor .local-image-embed.is-resizing {
+  cursor: ew-resize;
+  user-select: none;
+}
+
+.cm-editor .local-image-embed.is-resizing .local-image-embed-size {
+  opacity: 1;
+}
+
+.cm-editor .local-image-embed.is-resizing .local-image-embed-controls {
+  opacity: 0;
+}
+
 :is(.prose-zen, .cm-editor) .local-image-embed-caption {
   margin-top: 0.55rem;
   text-align: center;

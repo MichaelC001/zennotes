@@ -19,6 +19,7 @@ import { forwardTaskWithPicker, taskAtEditorCursor } from './forward-task'
 import { canManageWorkflows } from './workflow-workspace'
 import { toggleCheckbox } from './cm-toggle-checkbox'
 import { reflowParagraph } from './cm-reflow'
+import { promptImageWidth } from './image-resize'
 import { getKeymapDisplay, type KeymapId } from './keymaps'
 import { dispatchKeyboardContextMenu, findTabContextMenuTarget } from './keyboard-context-menu'
 import { resolveSystemFolderLabels } from './system-folder-labels'
@@ -908,6 +909,18 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
         if (!view) return
         reflowParagraph(view)
         view.focus()
+      }
+    },
+    {
+      id: 'editor.resize-image',
+      title: 'Resize Image…',
+      category: 'Editor',
+      keywords: 'image picture width size resize embed px hint shrink grow',
+      when: () => !!getState().editorViewRef && !!getState().activeNote,
+      run: async () => {
+        const view = getState().editorViewRef
+        if (!view) return
+        await promptImageWidth(view)
       }
     },
     {
