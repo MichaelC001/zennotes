@@ -3250,6 +3250,9 @@ interface Store {
   closeActiveNote: () => Promise<void>
   reopenLastClosedTab: () => Promise<void>
   trashActive: () => Promise<void>
+  /** Move any note to the Trash the way trashing the active note does (confirm,
+   *  move, drop its tabs and buffers). Resolves true when the note moved. */
+  trashNote: (path: string) => Promise<boolean>
   restoreActive: () => Promise<void>
   archiveActive: () => Promise<void>
   unarchiveActive: () => Promise<void>
@@ -6789,12 +6792,18 @@ export const useStore = create<Store>((set, get) => {
   },
 
   trashActive: async () => {
-    const state = get()
-    const path = state.selectedPath
+    const path = get().selectedPath
     if (!path) return
+    await get().trashNote(path)
+  },
+
+  trashNote: async (path) => {
+    const state = get()
     const title = state.notes.find((note) => note.path === path)?.title
-    if (!(await confirmMoveToTrash(title))) return
-    if (!(await moveNoteToTrash(path, { temporarySession: state.vault?.temporary === true }))) return
+    if (!(await confirmMoveToTrash(title))) return false
+    if (!(await moveNoteToTrash(path, { temporarySession: state.vault?.temporary === true }))) {
+      return false
+    }
     {
       set((s) => {
         const nextLayout = rewritePathsInTree(s.paneLayout, (p) => (p === path ? null : p))
@@ -6815,6 +6824,7 @@ export const useStore = create<Store>((set, get) => {
       })
       await get().refreshNotes()
     }
+    return true
   },
 
   restoreActive: async () => {

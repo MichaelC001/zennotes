@@ -473,6 +473,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
     description: 'These work across the main app shell.',
     items: [
       { keys: 'Mod+P', action: 'Search notes', detail: 'Open the note search palette.' },
+      { keys: 'Ctrl+D (in Search notes)', action: 'Move the highlighted note to Trash', detail: 'Trash a note straight from the search results, with the usual confirmation; the palette stays open, so a clean-up pass is search, Ctrl+D, search, Ctrl+D.' },
       { keys: 'Mod+F', action: 'Search notes (non-Vim mode)', detail: 'Open the note search palette directly when Vim mode is off.' },
       { keys: 'Mod+F (in the editor)', action: 'Find and replace in the note', detail: 'In Edit and Split, open the editor’s find-and-replace bar: Tab moves between the Find and Replace fields, with match-case, whole-word, and regex toggles. Esc closes it.' },
       { keys: 'Shift+Mod+P', action: 'Open commands', detail: 'Open the command palette.' },
