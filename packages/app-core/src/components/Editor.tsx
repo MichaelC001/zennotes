@@ -69,6 +69,7 @@ import { focusEditorNormalMode } from "../lib/editor-focus";
 import { toVimSequence } from "../lib/vim-key-sequence";
 import { registerNoteMoveExCommands } from "../lib/vim-ex-commands";
 import { promptImageWidth, setImageWidthFromInput } from "../lib/image-resize";
+import { copyLinkAtCursor } from "../lib/link-copy";
 
 let vimCommandsRegistered = false;
 let syncedVimBindings: Partial<Record<KeymapId, string[]>> = {};
@@ -361,6 +362,13 @@ function registerVimCommands(): void {
     {},
     { context: "visual" },
   );
+  // `gy` copies the link under the cursor (a web URL, or the address behind
+  // a mailto:), the keyboard twin of the right-click "Copy link".
+  Vim.defineAction("zenCopyLink", (cm: ReturnType<typeof getCM>) => {
+    const view = (cm as unknown as { cm6?: EditorView }).cm6;
+    if (view) copyLinkAtCursor(view);
+  });
+  Vim.mapCommand("gy", "action", "zenCopyLink", {}, { context: "normal" });
   Vim.mapCommand(
     "K",
     "action",

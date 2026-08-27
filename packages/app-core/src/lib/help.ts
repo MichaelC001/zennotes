@@ -392,7 +392,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Links are actionable',
     body:
-      'Use [[wikilinks]] or markdown links. Following a link — click it, Cmd/Ctrl-click it, or use the follow-link motion (`gd`) in normal mode — opens the note under the cursor and pins PDFs into the reference pane. If the note does not exist yet, following the link offers to create it (after you confirm) rather than leaving a dead link. Prefix a wikilink with `!` to embed rather than link: `![[Note]]` inlines the target note content in the reading view and PDF export — recursively, with cycle protection — so a master note can pull in sub-notes and export to PDF as one document. `![[image.png]]` embeds an image and `![[drawing.excalidraw]]` embeds an Excalidraw drawing as a PNG preview; both take optional `|width` or `|WxH` size hints (`![[image.png|300]]`, `![[image.png|600x400]]`), and the markdown form carries the same hint after the alt text (`![caption|300](image.png)`). In the editor, drag the handle on a picture\'s right edge to resize it; the width is written back as that hint, so the reading view, exports and Obsidian all show the same size. Resize Image… in the command palette (or `:imgwidth 480` in Vim mode, `:imgw auto` to reset) sets it by number for the image under the cursor.'
+      'Use [[wikilinks]] or markdown links. Following a link — click it, Cmd/Ctrl-click it, or use the follow-link motion (`gd`) in normal mode — opens the note under the cursor and pins PDFs into the reference pane. If the note does not exist yet, following the link offers to create it (after you confirm) rather than leaving a dead link. Prefix a wikilink with `!` to embed rather than link: `![[Note]]` inlines the target note content in the reading view and PDF export — recursively, with cycle protection — so a master note can pull in sub-notes and export to PDF as one document. `![[image.png]]` embeds an image and `![[drawing.excalidraw]]` embeds an Excalidraw drawing as a PNG preview; both take optional `|width` or `|WxH` size hints (`![[image.png|300]]`, `![[image.png|600x400]]`), and the markdown form carries the same hint after the alt text (`![caption|300](image.png)`). In the editor, drag the handle on a picture\'s right edge to resize it; the width is written back as that hint, so the reading view, exports and Obsidian all show the same size. Resize Image… in the command palette (or `:imgwidth 480` in Vim mode, `:imgw auto` to reset) sets it by number for the image under the cursor. Right-click a web link or an email address, in the editor or the reading view, to open it or copy it (the address itself, without `mailto:`); `gy` in normal mode, or Copy Link Under Cursor in the palette, copies the one under the caret.'
   },
   {
     title: 'Point at one block, not a whole note',
@@ -852,6 +852,11 @@ export const HELP_VIM_COMMANDS: HelpExCommand[] = [
     command: 'gd',
     summary: 'Follow the link under the cursor',
     detail: 'Open wikilinks, open external links, create missing notes, or pin PDFs into the reference pane.'
+  },
+  {
+    command: 'gy',
+    summary: 'Copy the link under the cursor',
+    detail: 'Copies a web link\'s URL, or the address behind a `mailto:` link, to the clipboard. The same as right-clicking the link and choosing Copy link.'
   },
   {
     command: 'o / O',
