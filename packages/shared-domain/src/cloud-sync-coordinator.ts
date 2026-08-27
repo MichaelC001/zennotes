@@ -202,14 +202,31 @@ export class CloudSyncCoordinator {
       nextChangeByItem.set(change.item_id, change)
     }
 
+    // `previous` tells the repository what it last wrote for an item, which is
+    // how it vouches for the local file before replacing it. A coalesced
+    // upsert is reduced into `state` (cursor and revision stay exact) but is
+    // never written, so from then on the live state describes the server's
+    // history rather than this device's file. Handing that to `apply` made a
+    // device that had touched nothing park every multi-revision catch-up as a
+    // conflict copy, then re-upload its stale bytes over the revision it had
+    // just received. Remember what was on disk before the first skipped
+    // revision and give the change that finally lands that instead.
+    const onDisk = new Map<string, CloudSyncTrackedItem | undefined>()
     for (const change of changes) {
       const acknowledged = acknowledgedSequences.has(change.sequence)
-      if (!acknowledged) {
-        if (!supersededUpserts.has(change.sequence)) {
-          const previous = state.items[change.item_id]
-          const conflict = await this.repository.apply(change, previous)
-          if (conflict) localConflicts.push(conflict)
-        }
+      if (acknowledged) {
+        // This device's own push: the file already holds these bytes.
+        onDisk.delete(change.item_id)
+      } else if (supersededUpserts.has(change.sequence)) {
+        if (!onDisk.has(change.item_id)) onDisk.set(change.item_id, state.items[change.item_id])
+        pulled++
+      } else {
+        const previous = onDisk.has(change.item_id)
+          ? onDisk.get(change.item_id)
+          : state.items[change.item_id]
+        onDisk.delete(change.item_id)
+        const conflict = await this.repository.apply(change, previous)
+        if (conflict) localConflicts.push(conflict)
         pulled++
       }
       state = reduceCloudSyncChange(state, change)
