@@ -140,10 +140,20 @@ export class CloudSyncCoordinator {
 
     for (const batch of mutationBatches(plan.mutations)) {
       const response = await this.remote.mutate(this.vaultId, batch)
+      const before = state
       const resolution = resolveCloudSyncMutations(state, batch, response)
       state = resolution.state
       pushed += response.acknowledged.length
-      conflicts.push(...resolution.conflicts)
+      // The server names rejected operations by id; the file they were about
+      // is only known here. Attach it so the user can be told which file
+      // needs attention instead of how many.
+      const byOperation = new Map(batch.mutations.map((mutation) => [mutation.operation_id, mutation]))
+      conflicts.push(
+        ...resolution.conflicts.map((conflict) => ({
+          ...conflict,
+          path: conflictPath(conflict, byOperation.get(conflict.operation_id), before)
+        }))
+      )
       mutationCursor = Math.max(mutationCursor, response.cursor)
       for (const acknowledgement of response.acknowledged) {
         acknowledgedSequences.add(acknowledgement.sequence)
@@ -319,6 +329,17 @@ export class CloudSyncCoordinator {
 
     throw new Error('Vault changed repeatedly while the initial sync manifest was loading')
   }
+}
+
+/** The local path a rejected mutation was about: the path it sent, or for a
+ *  delete the path the item had on this device before the run. */
+function conflictPath(
+  conflict: CloudSyncConflict,
+  mutation: CloudSyncMutation | undefined,
+  state: CloudSyncState
+): string | null {
+  if (mutation && mutation.type !== 'delete') return mutation.path
+  return state.items[conflict.item_id]?.path ?? conflict.current_path ?? null
 }
 
 function mutationBatches(mutations: CloudSyncMutation[]): CloudSyncMutationRequest[] {

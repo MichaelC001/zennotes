@@ -866,3 +866,41 @@ describe('CloudSyncCoordinator: catching up on a file this device never touched'
     expect(fs.files.get('inbox/Plan (cloud conflict).md')).toBe('v3')
   })
 })
+
+describe('CloudSyncCoordinator: rejected mutations name their file', () => {
+  it('annotates server conflicts with the local path, a delete with the path the item had here', async () => {
+    const states = memoryState({
+      version: 1,
+      vault_id: 'vault-1',
+      cursor: 1,
+      items: {
+        kept: tracked('kept', 'inbox/Kept.md', 1, 'v1'),
+        gone: tracked('gone', 'inbox/Gone.md', 1, 'v1')
+      }
+    })
+    // Kept.md was edited here; Gone.md was deleted here.
+    const repository = memoryRepository([
+      { path: 'inbox/Kept.md', kind: 'text', content: realContent('v2') }
+    ])
+    const server = remote({
+      mutate: (body) => ({
+        acknowledged: [],
+        conflicts: body.mutations.map((mutation) => ({
+          operation_id: mutation.operation_id,
+          item_id: mutation.item_id,
+          code: mutation.type === 'delete' ? ('ITEM_DELETED' as const) : ('REVISION_CONFLICT' as const),
+          current_revision: 3,
+          current_path: null
+        })),
+        cursor: 1
+      })
+    })
+
+    const result = await new CloudSyncCoordinator('vault-1', server, repository, states, ids()).sync()
+
+    expect(result.conflicts.map((c) => [c.item_id, c.code, c.path])).toEqual([
+      ['gone', 'ITEM_DELETED', 'inbox/Gone.md'],
+      ['kept', 'REVISION_CONFLICT', 'inbox/Kept.md']
+    ])
+  })
+})
