@@ -69,6 +69,13 @@ import {
   type DatabaseVaultLayout
 } from '@shared/database-ops'
 import { createAbsenceAwareReader } from '@shared/remote-absence'
+import { setCell } from '@shared/database-records'
+import {
+  csvPathForFormDir,
+  formDirContaining,
+  type DatabaseDoc,
+  type DatabaseSidecar
+} from '@shared/databases'
 import { RemoteRequestError } from '../main/remote/connection.js'
 import { CliRemoteClient } from './remote/client.js'
 import type { VaultTarget } from './vault-target.js'
@@ -151,6 +158,53 @@ export function createBackend(target: VaultTarget): VaultBackend {
   return target.kind === 'remote' ? new RemoteBackend(target) : new LocalBackend(target.root)
 }
 
+function sidecarOf(doc: DatabaseDoc): DatabaseSidecar {
+  return {
+    version: 1,
+    idFieldId: doc.idFieldId,
+    fields: doc.fields,
+    views: doc.views,
+    activeViewId: doc.activeViewId,
+    ...(doc.pages ? { pages: doc.pages } : {})
+  }
+}
+
+/**
+ * A note inside a `<Name>.base/` folder is a record's page: the database's
+ * sidecar points at it by path and its title column carries the page's name.
+ * Renaming the file alone left that pointer dangling and the row reading the
+ * old name (#691), and `zn rename` looked like it had succeeded. The app's
+ * grid renames in the other direction (title cell, then file) and keeps both
+ * in step; this keeps them in step from the file side, for `zn rename` and
+ * the MCP's rename_note on local and remote vaults alike. Best effort: a
+ * database that cannot be read leaves the rename standing, since the note
+ * itself moved correctly.
+ */
+async function followRecordPageRename(
+  ops: DatabaseOps,
+  oldRel: string,
+  meta: NoteMeta
+): Promise<void> {
+  const formDir = formDirContaining(oldRel)
+  if (!formDir || meta.path === oldRel) return
+  const csvPath = csvPathForFormDir(formDir)
+  let doc: DatabaseDoc
+  try {
+    doc = await ops.openDatabase(csvPath)
+  } catch {
+    return
+  }
+  const oldKey = normalizeRelPath(oldRel)
+  const rowId = Object.entries(doc.pages ?? {}).find(
+    ([, pagePath]) => normalizeRelPath(pagePath) === oldKey
+  )?.[0]
+  if (!rowId) return
+  let next: DatabaseDoc = { ...doc, pages: { ...(doc.pages ?? {}), [rowId]: meta.path } }
+  const titleFieldId = doc.fields.find((field) => field.id !== doc.idFieldId)?.id
+  if (titleFieldId) next = setCell(next, rowId, titleFieldId, meta.title)
+  await ops.writeDatabaseSchema(csvPath, sidecarOf(next), next.rows)
+}
+
 /** A vault on this machine. Every method is vault-ops bound to one root. */
 class LocalBackend implements VaultBackend {
   readonly kind = 'local' as const
@@ -181,8 +235,11 @@ class LocalBackend implements VaultBackend {
     appendToNote(this.root, rel, text)
   prependToNote = (rel: string, text: string): Promise<NoteMeta> =>
     prependToNote(this.root, rel, text)
-  renameNote = (rel: string, nextTitle: string): Promise<NoteMeta> =>
-    renameNote(this.root, rel, nextTitle)
+  renameNote = async (rel: string, nextTitle: string): Promise<NoteMeta> => {
+    const meta = await renameNote(this.root, rel, nextTitle)
+    await followRecordPageRename(this.databaseOps(), rel, meta)
+    return meta
+  }
   moveNote = (rel: string, folder: NoteFolder, subpath: string): Promise<NoteMeta> =>
     moveNote(this.root, rel, folder, subpath)
   archiveNote = (rel: string): Promise<NoteMeta> => archiveNote(this.root, rel)
@@ -300,8 +357,11 @@ class RemoteBackend implements VaultBackend {
     return await this.client.writeNote(rel, prependToBody(note.body, text))
   }
 
-  renameNote = (rel: string, nextTitle: string): Promise<NoteMeta> =>
-    this.client.renameNote(rel, nextTitle)
+  renameNote = async (rel: string, nextTitle: string): Promise<NoteMeta> => {
+    const meta = await this.client.renameNote(rel, nextTitle)
+    await followRecordPageRename(this.databaseOps(), rel, meta)
+    return meta
+  }
   moveNote = (rel: string, folder: NoteFolder, subpath: string): Promise<NoteMeta> =>
     this.client.moveNote(rel, folder, subpath)
   archiveNote = (rel: string): Promise<NoteMeta> => this.client.archiveNote(rel)

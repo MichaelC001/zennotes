@@ -163,6 +163,15 @@ beforeAll(async () => {
         vault.notes.set(rel, seeded)
         return send(metaFor(rel, seeded))
       }
+      case 'POST /api/notes/rename': {
+        const payload = await readJsonBody(req) as { path: string; title: string }
+        const body = vault.notes.get(payload.path) ?? ''
+        const dir = payload.path.slice(0, payload.path.lastIndexOf('/') + 1)
+        const next = `${dir}${payload.title}.md`
+        vault.notes.delete(payload.path)
+        vault.notes.set(next, body)
+        return send(metaFor(next, body))
+      }
       case 'POST /api/notes/trash': {
         const payload = await readJsonBody(req) as { path: string }
         const body = vault.notes.get(payload.path) ?? ''
@@ -450,5 +459,37 @@ describe('RemoteBackend: what the MCP needs beyond the CLI (#688)', () => {
     expect(miss.replacements).toBe(0)
     expect(miss.meta.path).toBe('inbox/Daily.md')
     expect(vault.requests.slice(before).map((r) => r.url)).not.toContain('/api/notes/write')
+  })
+})
+
+describe('RemoteBackend: renaming a record page keeps its row in step (#691)', () => {
+  it('updates the sidecar page pointer and the title cell after the server renames the file', async () => {
+    vault.notes.set('inbox/Meetings.base/data.csv', 'id,Name,Project\nrow-1,Kickoff,\n')
+    vault.notes.set(
+      'inbox/Meetings.base/schema.json',
+      JSON.stringify({
+        version: 1,
+        idFieldId: 'f_id',
+        fields: [
+          { id: 'f_id', name: 'id', type: 'text', hidden: true },
+          { id: 'f_name', name: 'Name', type: 'text' },
+          { id: 'f_project', name: 'Project', type: 'text' }
+        ],
+        views: [{ id: 'v1', name: 'Table', type: 'table', filters: [], sorts: [] }],
+        activeViewId: 'v1',
+        pages: { 'row-1': 'Kickoff.md' }
+      })
+    )
+    vault.notes.set('inbox/Meetings.base/Kickoff.md', '---\nProject:\n---\n# Kickoff\n\nagenda\n')
+
+    const meta = await remote().renameNote('inbox/Meetings.base/Kickoff.md', 'Kickoff notes')
+    expect(meta.path).toBe('inbox/Meetings.base/Kickoff notes.md')
+    expect(vault.notes.has('inbox/Meetings.base/Kickoff.md')).toBe(false)
+
+    const schema = JSON.parse(vault.notes.get('inbox/Meetings.base/schema.json') ?? '{}') as {
+      pages?: Record<string, string>
+    }
+    expect(schema.pages).toEqual({ 'row-1': 'Kickoff notes.md' })
+    expect(vault.notes.get('inbox/Meetings.base/data.csv')).toContain('row-1,Kickoff notes,')
   })
 })
