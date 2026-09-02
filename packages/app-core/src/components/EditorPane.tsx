@@ -63,7 +63,7 @@ import { markerHopCommands } from '../lib/cm-marker-hop'
 import { isInMarkdownCode } from '../lib/cm-auto-pairs'
 import { toggleCheckbox } from '../lib/cm-toggle-checkbox'
 import { completionKeymapForEditor, completionNavKeymap } from '../lib/cm-completion-nav'
-import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
+import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
 import { isVimAwaitingArgument } from '../lib/vim-nav'
 import { toCodeMirrorKey, vimHalfPageKeymap } from '../lib/vim-half-page-keymap'
 import { scrollOff } from '../lib/cm-scrolloff'
@@ -94,7 +94,6 @@ import {
   unfoldHeadingAtCursor
 } from '../lib/cm-heading-fold'
 import { tags as t } from '@lezer/highlight'
-import { searchKeymap } from '@codemirror/search'
 import { autocompletion } from '@codemirror/autocomplete'
 import { useStore } from '../store'
 import type { LineNumberMode } from '../store'
@@ -405,7 +404,7 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
     indentWithTab,
     ...vimAwareDefaultKeymap(vimMode),
     ...historyKeymap,
-    ...searchKeymap,
+    ...vimAwareSearchKeymap(vimMode),
     ...completionKeymapForEditor
   ])
 }

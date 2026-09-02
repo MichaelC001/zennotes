@@ -15,7 +15,7 @@ import { Annotation, Compartment, EditorState, type Transaction } from '@codemir
 import { EditorView, drawSelection, highlightActiveLine, keymap } from '@codemirror/view'
 import { Vim, vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
+import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { resolveCodeLanguage } from '../lib/cm-code-languages'
@@ -24,7 +24,6 @@ import { applyVimInsertEscape } from '../lib/vim-insert-escape'
 import { markdownListIndentPlugin } from '../lib/cm-markdown-list-indent'
 import { appMarkdownSnippetExtension } from '../lib/markdown-snippets-config'
 import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
-import { searchKeymap } from '@codemirror/search'
 import type { ExternalFileContent } from '@shared/ipc'
 import { livePreviewPlugin } from '../lib/cm-live-preview'
 import { headingFolding } from '../lib/cm-heading-fold'
@@ -182,7 +181,7 @@ export function ExternalFileApp(): JSX.Element {
             indentWithTab,
             ...vimAwareDefaultKeymap(prefs.vimMode),
             ...historyKeymap,
-            ...searchKeymap
+            ...vimAwareSearchKeymap(prefs.vimMode)
           ]),
           EditorView.domEventHandlers({
             mousedown: (event, view) => {
