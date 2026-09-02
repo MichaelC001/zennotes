@@ -41,6 +41,7 @@ import type {
   DeletedAsset,
   DirectoryBrowseResult,
   ExternalFileContent,
+  ExternalFileLink,
   FolderEntry,
   ImportedAsset,
   LinkMetadata,
@@ -1198,6 +1199,10 @@ async function moveExternalFileToVault(): Promise<MoveExternalFileResult> {
   return notImplemented('moveExternalFileToVault')
 }
 
+async function followExternalFileLink(_link: ExternalFileLink): Promise<{ ok: boolean; error?: string }> {
+  return { ok: false, error: 'desktop-only' }
+}
+
 async function openMarkdownFile(_absPath: string): Promise<boolean> {
   // The web client has no OS filesystem to open standalone markdown files
   // from; drag-and-drop-to-open is a desktop-only capability.
@@ -1529,6 +1534,7 @@ export const httpBridge: ZenBridge = {
   readExternalFile,
   writeExternalFile,
   moveExternalFileToVault,
+  followExternalFileLink,
   openMarkdownFile,
   openFileDialog,
   openFolderTemporary,

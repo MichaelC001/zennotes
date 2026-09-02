@@ -261,6 +261,7 @@ import {
   candidatePathsFromArgv,
   resolveMarkdownOpenTarget,
 } from "./file-open";
+import { isStandaloneLink, resolveStandaloneLink } from "./standalone-links";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nodeRequire = createRequire(import.meta.url);
@@ -4249,6 +4250,36 @@ function registerIpc(): void {
         throw new Error("No markdown file is bound to this window.");
       }
       await fsp.writeFile(abs, body, "utf8");
+    },
+  );
+
+  // A link followed inside a standalone window resolves against that
+  // window's own file, never against a path the renderer supplies (#626).
+  handle(
+    IPC.APP_FOLLOW_EXTERNAL_FILE_LINK,
+    async (event, link: unknown): Promise<{ ok: boolean; error?: string }> => {
+      const win = requireEventWindow(event);
+      const abs = externalFileWindows.get(win.id);
+      if (!abs || !isMarkdownFilePath(abs)) {
+        throw new Error("No markdown file is bound to this window.");
+      }
+      if (!isStandaloneLink(link)) return { ok: false, error: "Not a link." };
+      const target = await resolveStandaloneLink(abs, link);
+      if (!target) {
+        const named = link.kind === "wikilink" ? `[[${link.target}]]` : link.href;
+        return {
+          ok: false,
+          error: `Nothing named ${named} next to ${path.basename(abs)}.`,
+        };
+      }
+      if (target.kind === "markdown") {
+        const opened = await openMarkdownFileFromOS(target.absPath, false);
+        return opened
+          ? { ok: true }
+          : { ok: false, error: `Could not open ${target.absPath}.` };
+      }
+      const failure = await shell.openPath(target.absPath);
+      return failure ? { ok: false, error: failure } : { ok: true };
     },
   );
 

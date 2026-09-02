@@ -68,6 +68,7 @@ import { isVimAwaitingArgument } from '../lib/vim-nav'
 import { toCodeMirrorKey, vimHalfPageKeymap } from '../lib/vim-half-page-keymap'
 import { scrollOff } from '../lib/cm-scrolloff'
 import { followLinkTarget } from '../lib/follow-link'
+import { pointerOverRange } from '../lib/cm-pointer-range'
 import { setHoveredLink } from '../lib/hovered-link'
 import {
   setYankToClipboardEnabled,
@@ -317,29 +318,6 @@ const LARGE_DOC_EDITOR_HYDRATE_DELAY_MS = 180
 // chords are stripped from `defaultKeymap` so Vim's `<C-d>` & co. work (see
 // cm-vim-default-keymap). Built behind a compartment and reconfigured on Vim
 // toggle or keymap-override changes.
-/**
- * Whether the pointer actually rests on the rendered glyphs of [from, to].
- * posAtCoords clamps coordinates in the blank space beside a line to the
- * nearest caret, and live preview hides a link's closing syntax, so that
- * caret lands inside a link that merely ends its line; without this check the
- * whole blank stretch after the line hovers and follows like the link (#587).
- */
-function pointerOverRange(
-  view: EditorView,
-  from: number,
-  to: number,
-  x: number,
-  y: number
-): boolean {
-  const start = view.coordsAtPos(from, 1)
-  const end = view.coordsAtPos(to, -1)
-  if (!start || !end) return false
-  if (y < start.top || y > end.bottom) return false
-  if (y <= start.bottom && x < start.left) return false
-  if (y >= end.top && x > end.right) return false
-  return true
-}
-
 // Straight quotes join the hop's markers exactly where they auto-pair: with the
 // prose setting on, or inside code, where auto-pair always closes them (#685).
 const markerHop = markerHopCommands({
