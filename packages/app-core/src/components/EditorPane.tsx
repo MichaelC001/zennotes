@@ -852,6 +852,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const updateNoteBody = useStore((s) => s.updateNoteBody)
   const persistNote = useStore((s) => s.persistNote)
   const trashActive = useStore((s) => s.trashActive)
+  const deleteActivePermanently = useStore((s) => s.deleteActivePermanently)
   const archiveActive = useStore((s) => s.archiveActive)
   const restoreActive = useStore((s) => s.restoreActive)
   const unarchiveActive = useStore((s) => s.unarchiveActive)
@@ -3360,9 +3361,17 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             <ArchiveIcon />
           </IconBtn>
         )}
-        <IconBtn title={`Move to ${folderLabels.trash.toLowerCase()}`} onClick={() => void trashActive()}>
-          <TrashIcon />
-        </IconBtn>
+        {folder === 'trash' ? (
+          // A trashed note cannot be trashed again; here the bin icon means the
+          // only thing left that it can mean (#712).
+          <IconBtn title="Delete permanently" onClick={() => void deleteActivePermanently()}>
+            <TrashIcon />
+          </IconBtn>
+        ) : (
+          <IconBtn title={`Move to ${folderLabels.trash.toLowerCase()}`} onClick={() => void trashActive()}>
+            <TrashIcon />
+          </IconBtn>
+        )}
       </div>
     )
   }, [
@@ -3380,6 +3389,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     calendarOpen,
     toggleCalendarPanel,
     trashActive,
+    deleteActivePermanently,
     archiveActive,
     restoreActive,
     unarchiveActive,

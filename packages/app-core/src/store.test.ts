@@ -2036,3 +2036,81 @@ describe('flushDirtyNotes drains queued task writes (#503)', () => {
     expect(disk).toBe('- [x] alpha')
   })
 })
+
+describe('deleteActivePermanently (#712)', () => {
+  const TRASHED = 'trash/Old idea.md'
+  function trashedNote() {
+    return { ...makeNote('gone soon', TRASHED), folder: 'trash' as const }
+  }
+
+  it('deletes the trashed note for good on confirm and drops its tab and buffer', async () => {
+    const deleteNote = vi.fn().mockResolvedValue(undefined)
+    installZen({ deleteNote, listNotes: vi.fn().mockResolvedValue([]) })
+    const { useStore } = await loadStore()
+    const { getConfirmRequest, settleConfirmRequest } = await import('./lib/confirm-requests')
+    const note = trashedNote()
+    useStore.setState({
+      notes: [note],
+      selectedPath: TRASHED,
+      activeNote: note,
+      noteContents: { [TRASHED]: note }
+    })
+
+    const p = useStore.getState().deleteActivePermanently()
+    const req = getConfirmRequest()
+    expect(req?.options.title).toBe('Delete "Old idea" permanently?')
+    expect(req?.options.confirmLabel).toBe('Delete permanently')
+    expect(req?.options.danger).toBe(true)
+    settleConfirmRequest(req!, true)
+    await p
+
+    expect(deleteNote).toHaveBeenCalledWith(TRASHED)
+    expect(useStore.getState().noteContents[TRASHED]).toBeUndefined()
+    expect(useStore.getState().selectedPath).not.toBe(TRASHED)
+  })
+
+  it('does nothing when the confirmation is declined', async () => {
+    const deleteNote = vi.fn().mockResolvedValue(undefined)
+    installZen({ deleteNote })
+    const { useStore } = await loadStore()
+    const { getConfirmRequest, settleConfirmRequest } = await import('./lib/confirm-requests')
+    const note = trashedNote()
+    useStore.setState({ notes: [note], selectedPath: TRASHED, activeNote: note, noteContents: { [TRASHED]: note } })
+
+    const p = useStore.getState().deleteActivePermanently()
+    settleConfirmRequest(getConfirmRequest()!, false)
+    await p
+
+    expect(deleteNote).not.toHaveBeenCalled()
+    expect(useStore.getState().selectedPath).toBe(TRASHED)
+    expect(useStore.getState().noteContents[TRASHED]).toBeDefined()
+  })
+
+  it('keeps the note open and says so when the host refuses', async () => {
+    const deleteNote = vi.fn().mockRejectedValue(new Error('EACCES'))
+    installZen({ deleteNote })
+    const { useStore } = await loadStore()
+    const { getConfirmRequest, settleConfirmRequest } = await import('./lib/confirm-requests')
+    const { useToastStore } = await import('./lib/toast')
+    const note = trashedNote()
+    useStore.setState({ notes: [note], selectedPath: TRASHED, activeNote: note, noteContents: { [TRASHED]: note } })
+
+    const p = useStore.getState().deleteActivePermanently()
+    settleConfirmRequest(getConfirmRequest()!, true)
+    await p
+
+    expect(deleteNote).toHaveBeenCalledWith(TRASHED)
+    expect(useStore.getState().selectedPath).toBe(TRASHED)
+    expect(useToastStore.getState().toasts.some((t) => /Could not delete/.test(t.message))).toBe(true)
+  })
+
+  it('is a no-op with no active note', async () => {
+    const deleteNote = vi.fn().mockResolvedValue(undefined)
+    installZen({ deleteNote })
+    const { useStore } = await loadStore()
+    useStore.setState({ selectedPath: null, activeNote: null })
+    await useStore.getState().deleteActivePermanently()
+    expect(deleteNote).not.toHaveBeenCalled()
+  })
+})
+

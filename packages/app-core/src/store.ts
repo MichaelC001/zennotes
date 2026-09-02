@@ -104,9 +104,9 @@ import type { Override } from '@shared/overrides'
 import type { CustomCodeLanguage } from '@shared/custom-code-languages'
 import { customCodeLanguageRegistry } from './lib/custom-code-languages'
 import { formatMarkdown } from './lib/format-markdown'
-import { confirmMoveToTrash } from './lib/confirm-trash'
+import { confirmDeletePermanently, confirmMoveToTrash } from './lib/confirm-trash'
 import { humanIpcError } from './lib/ipc-error'
-import { moveNoteToTrash } from './lib/trash-note'
+import { deleteNotePermanently, moveNoteToTrash } from './lib/trash-note'
 import { confirmApp } from './lib/confirm-requests'
 import { pickServerDirectoryApp } from './lib/server-directory-picker-requests'
 import { promptApp } from './lib/prompt-requests'
@@ -3253,6 +3253,13 @@ interface Store {
   /** Move any note to the Trash the way trashing the active note does (confirm,
    *  move, drop its tabs and buffers). Resolves true when the note moved. */
   trashNote: (path: string) => Promise<boolean>
+  /** Delete the active note for good. Offered where the note is already in
+   *  the Trash, where Move to Trash would be a no-op with a misleading
+   *  prompt (#712). */
+  deleteActivePermanently: () => Promise<void>
+  /** Delete any note for good (confirm, delete, drop its tabs and buffers).
+   *  Resolves true when the file is gone. */
+  deleteNotePermanently: (path: string) => Promise<boolean>
   restoreActive: () => Promise<void>
   archiveActive: () => Promise<void>
   unarchiveActive: () => Promise<void>
@@ -4088,6 +4095,29 @@ async function prefetchInitialVisibleNotes(state: Store): Promise<void> {
     mode: 'scheduled'
   })
   scheduleBackgroundPrefetch()
+}
+
+/**
+ * The workspace with `path` gone: its tabs closed, its buffer and dirty flag
+ * dropped, the reference pane unpinned if it was showing it. The one shape
+ * trashing, archiving and deleting a note all leave behind.
+ */
+function withoutNoteInWorkspace(s: Store, path: string): Partial<Store> {
+  const nextLayout = rewritePathsInTree(s.paneLayout, (p) => (p === path ? null : p))
+  const ensured = ensureActivePane(nextLayout, s.activePaneId)
+  const { [path]: _drop, ...contents } = s.noteContents
+  const { [path]: _d, ...dirty } = s.noteDirty
+  void _drop
+  void _d
+  return {
+    paneLayout: ensured.layout,
+    activePaneId: ensured.activePaneId,
+    noteContents: contents,
+    noteDirty: dirty,
+    pendingJumpLocation: null,
+    pinnedRefPath: s.pinnedRefPath === path ? null : s.pinnedRefPath,
+    ...activeFieldsFrom(ensured.layout, ensured.activePaneId, contents, dirty)
+  }
 }
 
 export const useStore = create<Store>((set, get) => {
@@ -6804,26 +6834,23 @@ export const useStore = create<Store>((set, get) => {
     if (!(await moveNoteToTrash(path, { temporarySession: state.vault?.temporary === true }))) {
       return false
     }
-    {
-      set((s) => {
-        const nextLayout = rewritePathsInTree(s.paneLayout, (p) => (p === path ? null : p))
-        const ensured = ensureActivePane(nextLayout, s.activePaneId)
-        const { [path]: _drop, ...contents } = s.noteContents
-        const { [path]: _d, ...dirty } = s.noteDirty
-        void _drop
-        void _d
-        return {
-          paneLayout: ensured.layout,
-          activePaneId: ensured.activePaneId,
-          noteContents: contents,
-          noteDirty: dirty,
-          pendingJumpLocation: null,
-          pinnedRefPath: s.pinnedRefPath === path ? null : s.pinnedRefPath,
-          ...activeFieldsFrom(ensured.layout, ensured.activePaneId, contents, dirty)
-        }
-      })
-      await get().refreshNotes()
-    }
+    set((s) => withoutNoteInWorkspace(s, path))
+    await get().refreshNotes()
+    return true
+  },
+
+  deleteActivePermanently: async () => {
+    const path = get().selectedPath
+    if (!path) return
+    await get().deleteNotePermanently(path)
+  },
+
+  deleteNotePermanently: async (path) => {
+    const title = get().notes.find((note) => note.path === path)?.title
+    if (!(await confirmDeletePermanently(title))) return false
+    if (!(await deleteNotePermanently(path))) return false
+    set((s) => withoutNoteInWorkspace(s, path))
+    await get().refreshNotes()
     return true
   },
 
@@ -6869,23 +6896,7 @@ export const useStore = create<Store>((set, get) => {
     if (!path) return
     if (!(await get().confirmArchiveNotes([path]))) return
     await window.zen.archiveNote(path)
-    set((s) => {
-      const nextLayout = rewritePathsInTree(s.paneLayout, (p) => (p === path ? null : p))
-      const ensured = ensureActivePane(nextLayout, s.activePaneId)
-      const { [path]: _drop, ...contents } = s.noteContents
-      const { [path]: _d, ...dirty } = s.noteDirty
-      void _drop
-      void _d
-      return {
-        paneLayout: ensured.layout,
-        activePaneId: ensured.activePaneId,
-        noteContents: contents,
-        noteDirty: dirty,
-        pendingJumpLocation: null,
-        pinnedRefPath: s.pinnedRefPath === path ? null : s.pinnedRefPath,
-        ...activeFieldsFrom(ensured.layout, ensured.activePaneId, contents, dirty)
-      }
-    })
+    set((s) => withoutNoteInWorkspace(s, path))
     await get().refreshNotes()
   },
 

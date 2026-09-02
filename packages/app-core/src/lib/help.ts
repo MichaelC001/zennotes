@@ -447,7 +447,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Destructive actions ask first',
     body:
-      'Moving a note to Trash now asks for confirmation before anything is deleted from the active workspace, and the Trash view separates restore from permanent delete. “Empty Trash” clears the whole bin in one confirmed step, and assets deleted from the Files view land in Trash too, restorable to their original location.'
+      'Moving a note to Trash now asks for confirmation before anything is deleted from the active workspace, and the Trash view separates restore from permanent delete. Open a trashed note and the editor header offers the same two actions, Restore and Delete permanently, in place of Archive and Move to Trash. “Empty Trash” clears the whole bin in one confirmed step, and assets deleted from the Files view land in Trash too, restorable to their original location.'
   },
   {
     title: 'Updates are release-driven',
