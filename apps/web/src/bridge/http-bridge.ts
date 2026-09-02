@@ -1140,6 +1140,7 @@ const unsupportedUpdateState: AppUpdateState = {
   transferredBytes: null,
   totalBytes: null,
   bytesPerSecond: null,
+  installable: false,
   message: 'The web build updates automatically when you reload.'
 }
 

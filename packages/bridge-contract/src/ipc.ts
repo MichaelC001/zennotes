@@ -279,6 +279,13 @@ export interface RaycastExtensionStatus {
 
 export interface AppUpdateState {
   phase: AppUpdatePhase
+  /**
+   * Whether the host can download and install an update itself. False for
+   * installs a package manager owns (the AUR package, a tarball install):
+   * there the app only reports that a newer version exists, and the user
+   * installs it the way they installed ZenNotes.
+   */
+  installable: boolean
   currentVersion: string
   availableVersion: string | null
   releaseName: string | null
