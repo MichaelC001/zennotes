@@ -2114,3 +2114,83 @@ describe('deleteActivePermanently (#712)', () => {
   })
 })
 
+describe('renaming the open note while the watcher reports the move (#713)', () => {
+  const OLD = 'inbox/Hello.md'
+  const NEW = 'inbox/Hello again.md'
+  const oldNote = { ...makeNote('# Hello\n\nplain note', OLD) }
+  const newNote = { ...makeNote('# Hello\n\nplain note', NEW) }
+
+  function installRenameZen(renameNote: ReturnType<typeof vi.fn>, listNotes: ReturnType<typeof vi.fn>) {
+    installZen({
+      renameNote,
+      listNotes,
+      readNote: vi.fn().mockImplementation(async (path: string) => (path === NEW ? newNote : oldNote)),
+      writeNote: vi.fn().mockResolvedValue(undefined),
+      setVaultSettings: vi.fn().mockImplementation(async (settings: unknown) => settings)
+    })
+  }
+
+  it('keeps the tab when the unlink of the old path lands before the rename reply, then moves it', async () => {
+    let settle: (meta: typeof newNote) => void = () => {}
+    const renameNote = vi.fn().mockImplementation(() => new Promise<typeof newNote>((resolve) => { settle = resolve }))
+    // The listing the watcher-triggered refresh sees mid-rename: the old file
+    // is gone and the new one is not indexed yet.
+    const listNotes = vi.fn().mockResolvedValue([])
+    installRenameZen(renameNote, listNotes)
+    const { useStore } = await loadStore()
+    useStore.setState({ notes: [oldNote], syncTitleHeadingOnRename: false })
+    await useStore.getState().selectNote(OLD)
+    expect(useStore.getState().selectedPath).toBe(OLD)
+
+    const rename = useStore.getState().renameActive('Hello again')
+    await vi.waitFor(() => expect(renameNote).toHaveBeenCalledWith(OLD, 'Hello again'))
+
+    // inotify: the move is an unlink of the old path and an add of the new
+    // one, both delivered before the host has answered the rename.
+    await useStore.getState().applyChange({ kind: 'unlink', path: OLD, folder: 'inbox' })
+    await useStore.getState().applyChange({ kind: 'add', path: NEW, folder: 'inbox' })
+    await useStore.getState().refreshNotes()
+    expect(useStore.getState().selectedPath).toBe(OLD)
+    expect(JSON.stringify(useStore.getState().paneLayout)).toContain(OLD)
+
+    listNotes.mockResolvedValue([newNote])
+    settle(newNote)
+    await rename
+
+    expect(useStore.getState().selectedPath).toBe(NEW)
+    expect(JSON.stringify(useStore.getState().paneLayout)).toContain(NEW)
+    expect(JSON.stringify(useStore.getState().paneLayout)).not.toContain(OLD)
+    expect(useStore.getState().noteContents[NEW]).toBeDefined()
+    expect(useStore.getState().noteContents[OLD]).toBeUndefined()
+  })
+
+  it('still closes a note that was really deleted', async () => {
+    const renameNote = vi.fn()
+    installRenameZen(renameNote, vi.fn().mockResolvedValue([oldNote]))
+    const { useStore } = await loadStore()
+    useStore.setState({ notes: [oldNote] })
+    await useStore.getState().selectNote(OLD)
+
+    await useStore.getState().applyChange({ kind: 'unlink', path: OLD, folder: 'inbox' })
+
+    expect(JSON.stringify(useStore.getState().paneLayout)).not.toContain(OLD)
+    expect(useStore.getState().noteContents[OLD]).toBeUndefined()
+    expect(renameNote).not.toHaveBeenCalled()
+  })
+
+  it('forgets the rename once the host has refused it, so a later unlink counts again', async () => {
+    const renameNote = vi.fn().mockRejectedValue(new Error('EEXIST'))
+    installRenameZen(renameNote, vi.fn().mockResolvedValue([oldNote]))
+    const { useStore } = await loadStore()
+    useStore.setState({ notes: [oldNote], syncTitleHeadingOnRename: false })
+    await useStore.getState().selectNote(OLD)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await useStore.getState().renameActive('Taken')
+    expect(useStore.getState().selectedPath).toBe(OLD)
+
+    await useStore.getState().applyChange({ kind: 'unlink', path: OLD, folder: 'inbox' })
+    expect(JSON.stringify(useStore.getState().paneLayout)).not.toContain(OLD)
+  })
+})
+
