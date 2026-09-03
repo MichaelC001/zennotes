@@ -360,12 +360,17 @@ export function cloudSyncAttentionMessage(
     return "Cloud capacity reached. Remove files or increase your Cloud capacity.";
   }
 
-  if (summary.bootstrap_conflicts.length > 0) {
-    const count = summary.bootstrap_conflicts.length;
+  const decisionCount =
+    (summary.pending_conflicts?.length ?? 0) + summary.bootstrap_conflicts.length;
+  if (decisionCount > 0) {
+    const count = decisionCount;
     return `Cloud sync needs attention: ${count} ${count === 1 ? "file differs" : "files differ"} on this device and in Cloud.`;
   }
   if (summary.local_conflicts.length > 0) {
     const count = summary.local_conflicts.length;
+    if (summary.local_conflicts.every((conflict) => conflict.code === "SETTINGS_CONFLICT")) {
+      return "Vault settings differ on this device and in Cloud. Choose which settings to use.";
+    }
     return `Cloud sync kept both versions of ${count} changed ${count === 1 ? "file" : "files"}. Review the conflict copies.`;
   }
   if (summary.conflicts.length > 0) {
@@ -383,7 +388,14 @@ const CAPACITY_CODES = new Set([
 ]);
 
 export interface CloudSyncAttentionItem {
-  kind: "kept-both" | "kept-local" | "settings" | "bootstrap" | "rejected";
+  kind:
+    | "pending"
+    | "legacy"
+    | "kept-both"
+    | "kept-local"
+    | "settings"
+    | "bootstrap"
+    | "rejected";
   /** The file on this device the item is about. */
   path: string;
   /** What happened and what to do, in plain words. */
@@ -407,6 +419,32 @@ export function cloudSyncAttentionItems(
   summary: CloudSyncRunSummary,
 ): CloudSyncAttentionItem[] {
   const items: CloudSyncAttentionItem[] = [];
+  for (const conflict of summary.pending_conflicts ?? []) {
+    const detail =
+      conflict.kind === "delete"
+        ? "This file was edited here and deleted on another device. Choose whether to keep the note or delete it everywhere."
+        : conflict.kind === "move"
+          ? "This file was changed here and moved on another device. Review its contents and location before sync continues."
+          : conflict.kind === "path"
+            ? "Another file already uses this name. Choose a clear name for each file."
+            : conflict.can_merge
+              ? "The same part of this note changed on two devices. Review the suggested combined note."
+              : "Different versions exist on this device and another device. Choose what to keep.";
+    items.push({
+      kind: "pending",
+      path: conflict.path,
+      detail,
+      conflictCopyPath: null,
+    });
+  }
+  for (const copy of summary.legacy_conflict_copies ?? []) {
+    items.push({
+      kind: "legacy",
+      path: copy.path,
+      detail: `This looks like a copy made by an older sync version. Compare it with ${fileName(copy.original_path)}, then keep it or move it to Trash.`,
+      conflictCopyPath: null,
+    });
+  }
   for (const conflict of summary.bootstrap_conflicts) {
     items.push({
       kind: "bootstrap",
@@ -446,11 +484,11 @@ export function cloudSyncAttentionItems(
     const path = conflict.path ?? conflict.current_path ?? `item ${conflict.item_id}`;
     const detail =
       conflict.code === "REVISION_CONFLICT"
-        ? "Changed in Cloud after this device last synced. The next sync brings the Cloud version and keeps yours beside it if they differ."
+        ? "Changed on another device after this device last synced. Sync again to load both versions into the resolver."
         : conflict.code === "PATH_CONFLICT"
           ? `Another Cloud file already uses this name${conflict.current_path && conflict.current_path !== path ? ` (${conflict.current_path})` : ""}. Rename one of them and sync again.`
           : conflict.code === "ITEM_DELETED"
-            ? "Deleted in Cloud. Your copy stays on this device and is uploaded again as a new file on the next sync."
+            ? "Deleted on another device while this device still had a change. Sync again to choose whether to keep or delete it."
             : `Cloud rejected this change (${conflict.code}).`;
     items.push({ kind: "rejected", path, detail, conflictCopyPath: null });
   }

@@ -29,6 +29,7 @@ import { notifyPublishedNoteChanged } from "../lib/published-note-events";
 import { Button } from "./ui/Button";
 import { useStore } from "../store";
 import { CloudBootstrapConflictResolver } from "./CloudBootstrapConflictResolver";
+import { CloudPendingConflictResolver } from "./CloudPendingConflictResolver";
 
 type CloudAction =
   | "connect"
@@ -1258,8 +1259,9 @@ function CloudVaultDestinationOptions({
 
           {!moving && (
             <p className="text-xs leading-5 text-ink-500">
-              Notes already on this device are merged safely. If the same note
-              changed in both places, ZenNotes keeps a conflict copy for review.
+              Notes already on this device are merged safely. If the same part
+              changed in both places, your local note stays untouched while
+              ZenNotes keeps the Cloud comparison safe until you choose.
             </p>
           )}
         </div>
@@ -1890,6 +1892,9 @@ function CloudSyncSummary({
   const [selectedBootstrapConflict, setSelectedBootstrapConflict] = useState<
     CloudSyncRunSummary["bootstrap_conflicts"][number] | null
   >(null);
+  const [selectedPendingConflictId, setSelectedPendingConflictId] = useState<
+    string | null
+  >(null);
   const attention = cloudSyncAttentionMessage(summary);
   const capacityConflictCount = summary.conflicts.filter((conflict) =>
     [
@@ -1898,7 +1903,7 @@ function CloudSyncSummary({
       "FILE_SIZE_LIMIT_EXCEEDED",
     ].includes(conflict.code),
   ).length;
-  const items = attention ? cloudSyncAttentionItems(summary) : [];
+  const items = cloudSyncAttentionItems(summary);
   // A note opens in the editor behind the modal; anything else (an asset, a
   // settings file) is named so the user knows where to look.
   const canOpen = (path: string): boolean =>
@@ -1943,14 +1948,23 @@ function CloudSyncSummary({
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate font-mono text-xs text-ink-800" title={item.path}>
+                  <div
+                    className="truncate font-mono text-xs text-ink-800"
+                    title={item.path}
+                  >
                     {item.path}
                   </div>
-                  <div className="mt-0.5 text-xs leading-5 text-ink-500">{item.detail}</div>
+                  <div className="mt-0.5 text-xs leading-5 text-ink-500">
+                    {item.detail}
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {canOpen(item.path) && (
-                    <Button variant="ghost" size="sm" onClick={() => openPath(item.path)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openPath(item.path)}
+                    >
                       Open
                     </Button>
                   )}
@@ -1978,6 +1992,44 @@ function CloudSyncSummary({
                       Compare &amp; resolve
                     </Button>
                   )}
+                  {item.kind === "pending" && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() =>
+                        setSelectedPendingConflictId(
+                          summary.pending_conflicts?.find(
+                            (conflict) => conflict.path === item.path,
+                          )?.id ?? null,
+                        )
+                      }
+                    >
+                      Resolve
+                    </Button>
+                  )}
+                  {item.kind === "legacy" && canOpen(item.path) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        void useStore
+                          .getState()
+                          .trashNote(item.path)
+                          .then((moved) => {
+                            if (!moved) return;
+                            onSummaryChange({
+                              ...summary,
+                              legacy_conflict_copies:
+                                summary.legacy_conflict_copies?.filter(
+                                  (copy) => copy.path !== item.path,
+                                ) ?? [],
+                            });
+                          });
+                      }}
+                    >
+                      Move to Trash…
+                    </Button>
+                  )}
                 </div>
               </div>
             </li>
@@ -1997,6 +2049,27 @@ function CloudSyncSummary({
           />
         </div>
       )}
+      {selectedPendingConflictId &&
+        summary.pending_conflicts?.find(
+          (conflict) => conflict.id === selectedPendingConflictId,
+        ) && (
+          <div className="mt-3 rounded-xl border border-paper-300/60 bg-paper-50 p-3">
+            <CloudPendingConflictResolver
+              conflict={
+                summary.pending_conflicts.find(
+                  (conflict) => conflict.id === selectedPendingConflictId,
+                )!
+              }
+              vaultName={vaultName}
+              onClose={() => setSelectedPendingConflictId(null)}
+              onResolved={(nextSummary) => {
+                const next = nextSummary.pending_conflicts?.[0] ?? null;
+                setSelectedPendingConflictId(next?.id ?? null);
+                onSummaryChange(nextSummary);
+              }}
+            />
+          </div>
+        )}
     </div>
   );
 }

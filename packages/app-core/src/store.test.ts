@@ -176,6 +176,66 @@ describe('tasks cache freshness', () => {
     expect(scanTasksForPath).toHaveBeenCalledWith('inbox/Note.md')
     expect(useStore.getState().vaultTasks).toEqual(freshTasks)
   })
+
+  it('isolates tasks from a note until its cloud conflict is resolved', async () => {
+    const conflicted = {
+      ...makeTask('choose this later'),
+      id: 'inbox/Conflict.md#0',
+      sourcePath: 'inbox/Conflict.md'
+    }
+    const unaffected = {
+      ...makeTask('keep showing this'),
+      id: 'inbox/Other.md#0',
+      sourcePath: 'inbox/Other.md'
+    }
+    const scanTasks = vi.fn().mockResolvedValue([conflicted, unaffected])
+    installZen({ scanTasks })
+
+    const { useStore } = await loadStore()
+    const { useCloudSyncStatusStore } = await import('./lib/cloud-auto-sync')
+    useStore.setState({ vaultTasks: [conflicted, unaffected] })
+
+    useCloudSyncStatusStore.setState({
+      phase: 'attention',
+      lastSummary: {
+        cursor: 2,
+        pulled: 1,
+        pushed: 0,
+        conflicts: [],
+        bootstrap_conflicts: [],
+        local_conflicts: [],
+        pending_conflicts: [
+          {
+            id: 'item-1',
+            item_id: 'item-1',
+            path: 'inbox/Conflict.md',
+            cloud_path: 'inbox/Conflict.md',
+            kind: 'content',
+            can_merge: true,
+            has_base: true
+          }
+        ]
+      }
+    })
+
+    expect(useStore.getState().vaultTasks).toEqual([unaffected])
+    await useStore.getState().refreshTasks()
+    expect(useStore.getState().vaultTasks).toEqual([unaffected])
+
+    useCloudSyncStatusStore.setState({
+      lastSummary: {
+        cursor: 3,
+        pulled: 0,
+        pushed: 1,
+        conflicts: [],
+        bootstrap_conflicts: [],
+        local_conflicts: [],
+        pending_conflicts: []
+      }
+    })
+    await useStore.getState().refreshTasks()
+    expect(useStore.getState().vaultTasks).toEqual([conflicted, unaffected])
+  })
 })
 
 describe('closed tab history', () => {
@@ -2193,4 +2253,3 @@ describe('renaming the open note while the watcher reports the move (#713)', () 
     expect(JSON.stringify(useStore.getState().paneLayout)).not.toContain(OLD)
   })
 })
-

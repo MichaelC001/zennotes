@@ -12,6 +12,7 @@ import {
   useCloudSyncStatusStore,
 } from "../lib/cloud-auto-sync";
 import { requestSettingsTarget } from "../lib/settings-navigation";
+import { CloudConflictDialog } from "./CloudConflictDialog";
 
 /**
  * Footer strip showing quick stats for the active note: backlinks,
@@ -49,7 +50,7 @@ export function StatusBar({ note }: { note: NoteContent | null }): JSX.Element {
 
   return (
     <div
-      className="flex h-8 shrink-0 items-center justify-between gap-5 px-6 text-xs text-ink-500"
+      className="flex h-8 shrink-0 items-center justify-between gap-2 px-3 text-xs text-ink-500 sm:gap-5 sm:px-6"
       style={{ borderTop: "1px solid var(--glass-stroke)" }}
     >
       <span
@@ -58,22 +59,24 @@ export function StatusBar({ note }: { note: NoteContent | null }): JSX.Element {
       >
         {hoveredLink}
       </span>
-      <div className="flex shrink-0 items-center gap-5">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-5">
         <CloudSyncStatus separated={note !== null} />
         {note && (
           <>
-            <Stat>
+            <Stat className="hidden lg:inline">
               {backlinks} {backlinks === 1 ? "backlink" : "backlinks"}
             </Stat>
-            <Stat>
+            <Stat className="hidden lg:inline">
               {words.toLocaleString()} {words === 1 ? "word" : "words"}
             </Stat>
-            <Stat>{characters.toLocaleString()} characters</Stat>
-            <Stat>{minutes} min read</Stat>
+            <Stat className="hidden lg:inline">
+              {characters.toLocaleString()} characters
+            </Stat>
+            <Stat className="hidden lg:inline">{minutes} min read</Stat>
             {cursorPosition && (
               <span
                 data-editor-position
-                className="tabular-nums"
+                className="hidden tabular-nums lg:inline"
                 title={`Line ${cursorPosition.line}, column ${cursorPosition.column}`}
               >
                 Ln {cursorPosition.line}, Col {cursorPosition.column}
@@ -95,8 +98,17 @@ function CloudSyncStatus({
   const vaultName = useCloudSyncStatusStore((state) => state.vaultName);
   const lastSyncedAt = useCloudSyncStatusStore((state) => state.lastSyncedAt);
   const error = useCloudSyncStatusStore((state) => state.error);
+  const lastSummary = useCloudSyncStatusStore((state) => state.lastSummary);
   const setSettingsOpen = useStore((state) => state.setSettingsOpen);
   const [now, setNow] = useState(() => Date.now());
+  const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
+  const hasResolvableConflict = Boolean(
+    (lastSummary?.pending_conflicts?.length ?? 0) +
+    (lastSummary?.bootstrap_conflicts.length ?? 0),
+  );
+  const resolvableConflictCount =
+    (lastSummary?.pending_conflicts?.length ?? 0) +
+    (lastSummary?.bootstrap_conflicts.length ?? 0);
 
   useEffect(() => {
     if (phase === "hidden" || lastSyncedAt === null) return undefined;
@@ -118,7 +130,9 @@ function CloudSyncStatus({
           : phase === "syncing"
             ? "Syncing…"
             : phase === "attention"
-              ? "Sync incomplete"
+              ? hasResolvableConflict
+                ? `${resolvableConflictCount} ${resolvableConflictCount === 1 ? "file needs" : "files need"} review`
+                : "Sync incomplete"
               : phase === "error"
                 ? "Sync failed"
                 : lastSyncedAt === null
@@ -156,10 +170,17 @@ function CloudSyncStatus({
       : phase === "unlinked"
         ? "Set up"
         : phase === "attention"
-          ? "Review"
+          ? hasResolvableConflict
+            ? "Review now"
+            : "Review"
           : phase === "error"
             ? "Retry"
             : "Sync now";
+
+  const openCloudSettings = (): void => {
+    requestSettingsTarget("cloud");
+    setSettingsOpen(true);
+  };
 
   const runCloudAction = (): void => {
     if (phase === "disconnected") {
@@ -167,54 +188,68 @@ function CloudSyncStatus({
       return;
     }
     if (phase === "unlinked") {
-      requestSettingsTarget("cloud");
-      setSettingsOpen(true);
+      openCloudSettings();
       return;
     }
     if (phase === "attention") {
-      requestSettingsTarget("cloud");
-      setSettingsOpen(true);
+      if (hasResolvableConflict) {
+        setConflictDialogOpen(true);
+      } else {
+        openCloudSettings();
+      }
       return;
     }
     void syncCloudVaultWithStatus().catch(() => undefined);
   };
 
   return (
-    <div
-      className={[
-        "inline-flex items-center gap-1.5 whitespace-nowrap",
-        separated ? "border-r border-paper-300/70 pr-5" : "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      <span
-        data-cloud-sync-status
-        role="status"
-        title={title}
-        className={`inline-flex items-center gap-1.5 font-medium ${statusTone}`}
+    <>
+      <div
+        className={[
+          "inline-flex items-center gap-1.5 whitespace-nowrap",
+          phase === "attention" && hasResolvableConflict
+            ? "rounded-lg border border-warning/30 bg-warning/10 px-2 py-0.5"
+            : "",
+          separated ? "sm:border-r sm:border-paper-300/70 sm:pr-5" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
       >
-        <CloudStatusIcon phase={phase} />
-        <span className="tabular-nums">{label}</span>
-      </span>
-      {phase !== "syncing" && phase !== "connecting" && (
-        <>
-          <span aria-hidden="true" className="text-ink-300">
-            ·
-          </span>
-          <button
-            type="button"
-            data-cloud-sync-action
-            title={title}
-            aria-label={`${actionLabel}: ${title}`}
-            onClick={runCloudAction}
-            className="-my-1 rounded-md px-2 py-1 font-normal text-ink-500 transition-colors hover:bg-paper-200/60 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-          >
-            {actionLabel}
-          </button>
-        </>
+        <span
+          data-cloud-sync-status
+          role="status"
+          title={title}
+          className={`inline-flex items-center gap-1.5 font-medium ${statusTone}`}
+        >
+          <CloudStatusIcon phase={phase} />
+          <span className="tabular-nums">{label}</span>
+        </span>
+        {phase !== "syncing" && phase !== "connecting" && (
+          <>
+            <span aria-hidden="true" className="text-ink-300">
+              ·
+            </span>
+            <button
+              type="button"
+              data-cloud-sync-action
+              title={title}
+              aria-label={`${actionLabel}: ${title}`}
+              onClick={runCloudAction}
+              className="-my-1 rounded-md px-2 py-1 font-normal text-ink-500 transition-colors hover:bg-paper-200/60 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+            >
+              {actionLabel}
+            </button>
+          </>
+        )}
+      </div>
+      {conflictDialogOpen && lastSummary && hasResolvableConflict && (
+        <CloudConflictDialog
+          summary={lastSummary}
+          vaultName={vaultName ?? "Cloud vault"}
+          onClose={() => setConflictDialogOpen(false)}
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -299,6 +334,12 @@ function CloudStatusIcon({
   );
 }
 
-function Stat({ children }: { children: React.ReactNode }): JSX.Element {
-  return <span className="tabular-nums">{children}</span>;
+function Stat({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}): JSX.Element {
+  return <span className={`tabular-nums ${className}`.trim()}>{children}</span>;
 }

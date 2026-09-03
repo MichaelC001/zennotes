@@ -7,6 +7,8 @@ import {
 import { DEFAULT_VAULT_SETTINGS } from '@shared/ipc'
 import { resolveFolderPath } from '@shared/system-folder-paths'
 import { normalizeTasksExcludedFolder } from '@shared/tasks-excluded-folders'
+import { cloudSyncPathKey } from '@zennotes/shared-domain/cloud-sync'
+import { useCloudSyncStatusStore } from './lib/cloud-auto-sync'
 import type {
   AssetMeta,
   DateNotePatternSettings,
@@ -2648,6 +2650,17 @@ function tasksSurfaceVisible(state: { paneLayout: PaneLayout }): boolean {
     typeof document !== 'undefined' &&
     document.querySelector('[data-calendar-panel]') !== null
   )
+}
+
+let isolatedCloudTaskPaths = new Set(
+  (useCloudSyncStatusStore.getState().lastSummary?.pending_conflicts ?? []).flatMap(
+    (conflict) => [conflict.path, conflict.cloud_path].filter((path): path is string => Boolean(path))
+  ).map(cloudSyncPathKey)
+)
+
+function withoutPendingCloudConflictTasks(tasks: VaultTask[]): VaultTask[] {
+  if (isolatedCloudTaskPaths.size === 0) return tasks
+  return tasks.filter((task) => !isolatedCloudTaskPaths.has(cloudSyncPathKey(task.sourcePath)))
 }
 
 /** True when the active pane's active tab is the vault-wide Tags view. */
@@ -5317,7 +5330,7 @@ export const useStore = create<Store>((set, get) => {
     set({ tasksLoading: true })
     try {
       const tasks = await window.zen.scanTasks()
-      set({ vaultTasks: tasks, tasksLoading: false })
+      set({ vaultTasks: withoutPendingCloudConflictTasks(tasks), tasksLoading: false })
     } catch (err) {
       console.error('scanTasks failed', err)
       set({ tasksLoading: false })
@@ -5326,7 +5339,9 @@ export const useStore = create<Store>((set, get) => {
 
   rescanTasksForPath: async (relPath) => {
     try {
-      const fresh = await window.zen.scanTasksForPath(relPath)
+      const fresh = isolatedCloudTaskPaths.has(cloudSyncPathKey(relPath))
+        ? []
+        : await window.zen.scanTasksForPath(relPath)
       set((s) => ({
         vaultTasks: s.vaultTasks.filter((t) => t.sourcePath !== relPath).concat(fresh)
       }))
@@ -10060,3 +10075,28 @@ export function initOverrides(): void {
     }
   }
 }
+
+useCloudSyncStatusStore.subscribe((state) => {
+  const nextPaths = new Set(
+    (state.lastSummary?.pending_conflicts ?? []).flatMap((conflict) =>
+      [conflict.path, conflict.cloud_path]
+        .filter((path): path is string => Boolean(path))
+        .map(cloudSyncPathKey)
+    )
+  )
+  if (
+    nextPaths.size === isolatedCloudTaskPaths.size &&
+    [...nextPaths].every((path) => isolatedCloudTaskPaths.has(path))
+  ) {
+    return
+  }
+
+  const restoredPath = [...isolatedCloudTaskPaths].some((path) => !nextPaths.has(path))
+  isolatedCloudTaskPaths = nextPaths
+  useStore.setState((current) => ({
+    vaultTasks: withoutPendingCloudConflictTasks(current.vaultTasks)
+  }))
+  if (restoredPath && tasksSurfaceVisible(useStore.getState())) {
+    void useStore.getState().refreshTasks()
+  }
+})
