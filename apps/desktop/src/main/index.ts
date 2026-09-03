@@ -27,6 +27,7 @@ import type {
   CloudPublishNoteInput,
   CloudSyncBootstrapConflict,
   CloudSyncBootstrapConflictResolution,
+  CloudSyncPendingConflictResolution,
   CloudSyncSettingsChoice,
 } from "@zennotes/bridge-contract/cloud-sync";
 import type {
@@ -2910,6 +2911,26 @@ function registerIpc(): void {
     IPC.CLOUD_VAULT_BOOTSTRAP_CONFLICT_RESOLVE,
     (_event, resolution: CloudSyncBootstrapConflictResolution) =>
       getCloudSyncService().resolveBootstrapConflict(
+        requireLocalCloudVaultRoot(),
+        resolution,
+      ),
+  );
+  handle(IPC.CLOUD_VAULT_CONFLICT_GET, (_event, conflictId: string) =>
+    getCloudSyncService().getConflict(requireLocalCloudVaultRoot(), conflictId),
+  );
+  handle(
+    IPC.CLOUD_VAULT_CONFLICT_DRAFT_SAVE,
+    (_event, conflictId: string, draftText: string | null) =>
+      getCloudSyncService().saveConflictDraft(
+        requireLocalCloudVaultRoot(),
+        conflictId,
+        draftText,
+      ),
+  );
+  handle(
+    IPC.CLOUD_VAULT_CONFLICT_RESOLVE,
+    (_event, resolution: CloudSyncPendingConflictResolution) =>
+      getCloudSyncService().resolveConflict(
         requireLocalCloudVaultRoot(),
         resolution,
       ),

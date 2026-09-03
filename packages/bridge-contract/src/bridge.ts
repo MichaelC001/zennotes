@@ -51,6 +51,8 @@ import type {
   CloudSyncBootstrapConflict,
   CloudSyncBootstrapConflictDetails,
   CloudSyncBootstrapConflictResolution,
+  CloudSyncPendingConflictDetails,
+  CloudSyncPendingConflictResolution,
   CloudSyncRunSummary,
   CloudSyncSettingsChoice,
   CloudSyncSettingsConflict,
@@ -153,6 +155,9 @@ export interface ZenBridge {
     conflict: CloudSyncBootstrapConflict
   ): Promise<CloudSyncBootstrapConflictDetails>
   resolveCloudBootstrapConflict(resolution: CloudSyncBootstrapConflictResolution): Promise<void>
+  getCloudConflict(conflictId: string): Promise<CloudSyncPendingConflictDetails>
+  saveCloudConflictDraft(conflictId: string, draftText: string | null): Promise<void>
+  resolveCloudConflict(resolution: CloudSyncPendingConflictResolution): Promise<void>
   getCloudSettingsConflict(): Promise<CloudSyncSettingsConflict | null>
   resolveCloudSettingsConflict(choice: CloudSyncSettingsChoice): Promise<void>
   listCloudBackups(): Promise<CloudBackupSnapshot[]>

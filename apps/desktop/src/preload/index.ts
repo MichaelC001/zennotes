@@ -25,6 +25,8 @@ import type {
   CloudSyncBootstrapConflict,
   CloudSyncBootstrapConflictDetails,
   CloudSyncBootstrapConflictResolution,
+  CloudSyncPendingConflictDetails,
+  CloudSyncPendingConflictResolution,
   CloudSyncRunSummary,
   CloudSyncSettingsChoice,
   CloudSyncSettingsConflict,
@@ -261,6 +263,12 @@ const api: ZenBridge = {
     resolution: CloudSyncBootstrapConflictResolution
   ): Promise<void> =>
     ipcRenderer.invoke(IPC.CLOUD_VAULT_BOOTSTRAP_CONFLICT_RESOLVE, resolution),
+  getCloudConflict: (conflictId: string): Promise<CloudSyncPendingConflictDetails> =>
+    ipcRenderer.invoke(IPC.CLOUD_VAULT_CONFLICT_GET, conflictId),
+  saveCloudConflictDraft: (conflictId: string, draftText: string | null): Promise<void> =>
+    ipcRenderer.invoke(IPC.CLOUD_VAULT_CONFLICT_DRAFT_SAVE, conflictId, draftText),
+  resolveCloudConflict: (resolution: CloudSyncPendingConflictResolution): Promise<void> =>
+    ipcRenderer.invoke(IPC.CLOUD_VAULT_CONFLICT_RESOLVE, resolution),
   getCloudSettingsConflict: (): Promise<CloudSyncSettingsConflict | null> =>
     ipcRenderer.invoke(IPC.CLOUD_VAULT_SETTINGS_CONFLICT_GET),
   resolveCloudSettingsConflict: (choice: CloudSyncSettingsChoice): Promise<void> =>
