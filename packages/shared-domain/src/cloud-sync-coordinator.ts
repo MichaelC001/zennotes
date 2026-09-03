@@ -1,7 +1,10 @@
 import type {
   CloudSyncChange,
   CloudSyncBootstrapConflict,
+  CloudSyncBootstrapConflictDetails,
+  CloudSyncBootstrapConflictResolution,
   CloudSyncConflict,
+  CloudSyncContent,
   CloudSyncLocalConflict,
   CloudSyncManifestItem,
   CloudSyncManifestResponse,
@@ -25,6 +28,7 @@ const MUTATION_BATCH_SIZE = 100
 const MANIFEST_PAGE_SIZE = 250
 const CHANGE_PAGE_SIZE = 250
 const MANIFEST_RETRIES = 3
+const CONFLICT_PREVIEW_LIMIT_BYTES = 256 * 1024
 
 export interface CloudSyncRemote {
   manifest(
@@ -52,6 +56,13 @@ export interface CloudSyncRepository {
     change: CloudSyncChange,
     previous: CloudSyncTrackedItem | undefined
   ): Promise<CloudSyncLocalConflict | void>
+  /** Apply the local filesystem half of an explicit first-sync decision. */
+  resolveBootstrapConflict?(input: {
+    path: string
+    expectedLocalSha256: string
+    cloudContent: CloudSyncContent
+    resolution: CloudSyncBootstrapConflictResolution
+  }): Promise<void>
 }
 
 export interface CloudSyncStateStore {
@@ -91,6 +102,82 @@ export class CloudSyncCoordinator {
     })
 
     return this.running
+  }
+
+  async getBootstrapConflict(
+    conflict: CloudSyncBootstrapConflict
+  ): Promise<CloudSyncBootstrapConflictDetails> {
+    const current = await this.currentBootstrapConflict(conflict)
+    return {
+      conflict,
+      kind: current.item.kind,
+      local: conflictVersion(current.local.content),
+      cloud: conflictVersion(current.item.content)
+    }
+  }
+
+  async resolveBootstrapConflict(resolution: CloudSyncBootstrapConflictResolution): Promise<void> {
+    if (!['local', 'cloud', 'both', 'merged'].includes(resolution.choice)) {
+      throw new Error('That Cloud conflict resolution choice is not valid.')
+    }
+    if (resolution.choice === 'both' && typeof resolution.keep_both_path !== 'string') {
+      throw new Error('Choose a filename for this device’s version.')
+    }
+    if (resolution.choice === 'merged' && typeof resolution.merged_text !== 'string') {
+      throw new Error('Enter the merged text before resolving this conflict.')
+    }
+
+    const current = await this.currentBootstrapConflict(resolution.conflict)
+    if (resolution.choice !== 'local') {
+      if (!this.repository.resolveBootstrapConflict) {
+        throw new Error('This device cannot resolve Cloud file conflicts yet.')
+      }
+      await this.repository.resolveBootstrapConflict({
+        path: current.item.path,
+        expectedLocalSha256: current.local.content.sha256,
+        cloudContent: current.item.content,
+        resolution
+      })
+    }
+
+    if (resolution.choice === 'local' || resolution.choice === 'merged') {
+      const chosen =
+        resolution.choice === 'local'
+          ? current.local
+          : (await this.repository.scan()).find(
+              (candidate) =>
+                cloudSyncPathKey(candidate.path) === cloudSyncPathKey(current.item.path)
+            )
+      if (!chosen) {
+        throw new Error('The resolved file is no longer available on this device.')
+      }
+
+      const operationId = this.ids.operationId()
+      const response = await this.remote.mutate(this.vaultId, {
+        mutations: [
+          {
+            type: 'upsert',
+            operation_id: operationId,
+            item_id: current.item.item_id,
+            base_revision: current.item.revision,
+            path: current.item.path,
+            kind: chosen.kind,
+            content: chosen.content
+          }
+        ]
+      })
+      const conflict = response.conflicts.find((item) => item.operation_id === operationId)
+      if (conflict) {
+        throw new Error(
+          `Cloud changed while resolving this file (${conflict.code}). Sync again to compare the latest versions.`
+        )
+      }
+      if (!response.acknowledged.some((item) => item.operation_id === operationId)) {
+        throw new Error('Cloud did not confirm the conflict resolution. Try again.')
+      }
+    }
+    // Do not initialize state here. The follow-up sync must still pull other
+    // Cloud-only files and report any other first-sync conflicts.
   }
 
   private async run(): Promise<CloudSyncRunResult> {
@@ -296,6 +383,36 @@ export class CloudSyncCoordinator {
     return { state, pulled, conflicts, localConflicts }
   }
 
+  private async currentBootstrapConflict(conflict: CloudSyncBootstrapConflict): Promise<{
+    item: CloudSyncManifestItem & { content: CloudSyncContent }
+    local: CloudSyncLocalItem
+  }> {
+    if (await this.states.load(this.vaultId)) {
+      throw new Error(
+        'This Cloud conflict is no longer pending. Sync again to see the latest state.'
+      )
+    }
+
+    const manifest = await this.stableManifest()
+    const item = manifest.items.find(
+      (candidate) =>
+        candidate.item_id === conflict.item_id &&
+        cloudSyncPathKey(candidate.path) === cloudSyncPathKey(conflict.path)
+    )
+    const local = (await this.repository.scan()).find(
+      (candidate) => cloudSyncPathKey(candidate.path) === cloudSyncPathKey(conflict.path)
+    )
+    if (
+      !item?.content ||
+      !local ||
+      item.sha256 !== conflict.remote_sha256 ||
+      local.content.sha256 !== conflict.local_sha256
+    ) {
+      throw new Error('This Cloud conflict changed. Sync again to compare the latest versions.')
+    }
+    return { item: item as CloudSyncManifestItem & { content: CloudSyncContent }, local }
+  }
+
   private async stableManifest(): Promise<{
     cursor: number
     items: CloudSyncManifestItem[]
@@ -328,6 +445,25 @@ export class CloudSyncCoordinator {
     }
 
     throw new Error('Vault changed repeatedly while the initial sync manifest was loading')
+  }
+}
+
+function conflictVersion(content: CloudSyncContent): {
+  sha256: string
+  byte_length: number
+  media_type: string
+  text: string | null
+} {
+  return {
+    sha256: content.sha256,
+    byte_length: content.byte_length,
+    media_type: content.media_type,
+    text:
+      content.encoding === 'utf8' &&
+      content.byte_length <= CONFLICT_PREVIEW_LIMIT_BYTES &&
+      (content.data.length > 0 || content.byte_length === 0)
+        ? content.data
+        : null
   }
 }
 

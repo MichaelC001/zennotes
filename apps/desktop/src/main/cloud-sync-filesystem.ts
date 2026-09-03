@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants, createReadStream, promises as fs } from 'node:fs'
 import path from 'node:path'
 import type {
+  CloudSyncBootstrapConflictResolution,
   CloudSyncChange,
   CloudSyncContent,
   CloudSyncLocalConflict
@@ -9,6 +10,7 @@ import type {
 import {
   CLOUD_SYNC_SETTINGS_CONFLICT_PATH,
   CLOUD_SYNC_VAULT_SETTINGS_PATH,
+  cloudSyncPathKey,
   cloudSyncConflictCopyPath,
   isCloudSyncVaultSettingsPath,
   normalizeCloudSyncPath,
@@ -149,6 +151,59 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
 
     if (await exists(destination)) return localConflict(change.path, null)
     await fs.rename(source, destination)
+  }
+
+  async resolveBootstrapConflict(input: {
+    path: string
+    expectedLocalSha256: string
+    cloudContent: CloudSyncContent
+    resolution: CloudSyncBootstrapConflictResolution
+  }): Promise<void> {
+    const current = await this.readIfExists(input.path)
+    if (!current || sha256(current) !== input.expectedLocalSha256) {
+      throw new Error(
+        'This file changed on this device. Sync again to compare the latest versions.'
+      )
+    }
+
+    if (input.resolution.choice === 'cloud') {
+      await this.write(input.path, decodeContent(input.cloudContent))
+      return
+    }
+
+    if (input.resolution.choice === 'merged') {
+      if (input.cloudContent.encoding !== 'utf8' || input.resolution.merged_text === undefined) {
+        throw new Error('Only text conflicts can be merged.')
+      }
+      await this.write(input.path, Buffer.from(input.resolution.merged_text, 'utf8'))
+      return
+    }
+
+    if (input.resolution.choice !== 'both') return
+    if (!input.resolution.keep_both_path) {
+      throw new Error('Choose a filename for this device’s version.')
+    }
+
+    const originalPath = normalizeCloudSyncPath(input.path)
+    const localCopyPath = normalizeCloudSyncPath(input.resolution.keep_both_path)
+    if (
+      !shouldSyncVaultPath(localCopyPath) ||
+      cloudSyncPathKey(localCopyPath) === cloudSyncPathKey(originalPath)
+    ) {
+      throw new Error('Choose a different filename inside the synced vault.')
+    }
+
+    const source = this.resolve(originalPath)
+    const destination = this.resolve(localCopyPath)
+    if (await exists(destination)) throw new Error(`${localCopyPath} already exists.`)
+    await fs.mkdir(path.dirname(destination), { recursive: true })
+    await fs.rename(source, destination)
+    try {
+      await this.write(originalPath, decodeContent(input.cloudContent))
+    } catch (error) {
+      await fs.rename(destination, source).catch(() => undefined)
+      throw error
+    }
   }
 
   private async walk(

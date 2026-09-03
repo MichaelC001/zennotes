@@ -12,6 +12,9 @@ import type {
   CloudPublishedNoteResult,
   CloudPublishNoteInput,
   CloudServiceAccount,
+  CloudSyncBootstrapConflict,
+  CloudSyncBootstrapConflictDetails,
+  CloudSyncBootstrapConflictResolution,
   CloudSyncRunSummary,
   CloudSyncSettingsChoice,
   CloudSyncSettingsConflict,
@@ -323,6 +326,46 @@ export class DesktopCloudSyncService {
       bootstrap_conflicts: result.bootstrapConflicts,
       local_conflicts: result.localConflicts
     }
+  }
+
+  async getBootstrapConflict(
+    localRoot: string,
+    conflict: CloudSyncBootstrapConflict
+  ): Promise<CloudSyncBootstrapConflictDetails> {
+    const running = this.runs.get(path.resolve(localRoot))
+    if (running) await running
+    const { account, client, link } = await this.linkedConnection(localRoot)
+    return await createDesktopCloudSyncCoordinator({
+      root: localRoot,
+      stateDirectory: path.join(
+        this.dependencies.storageDirectory,
+        'states',
+        rootFingerprint(localRoot),
+        fingerprint(account.base_url)
+      ),
+      vaultId: link.vault_id,
+      remote: client
+    }).getBootstrapConflict(conflict)
+  }
+
+  async resolveBootstrapConflict(
+    localRoot: string,
+    resolution: CloudSyncBootstrapConflictResolution
+  ): Promise<void> {
+    const running = this.runs.get(path.resolve(localRoot))
+    if (running) await running
+    const { account, client, link } = await this.linkedConnection(localRoot)
+    await createDesktopCloudSyncCoordinator({
+      root: localRoot,
+      stateDirectory: path.join(
+        this.dependencies.storageDirectory,
+        'states',
+        rootFingerprint(localRoot),
+        fingerprint(account.base_url)
+      ),
+      vaultId: link.vault_id,
+      remote: client
+    }).resolveBootstrapConflict(resolution)
   }
 
   /** The pending settings question, if sync parked a cloud version. It lives

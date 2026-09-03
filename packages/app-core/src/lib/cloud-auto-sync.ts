@@ -412,7 +412,7 @@ export function cloudSyncAttentionItems(
       kind: "bootstrap",
       path: conflict.path,
       detail:
-        "Differs on this device and in Cloud, and sync has not agreed on a version yet. Keep one copy (edit or rename the other) and sync again.",
+        "Different versions use this filename on this device and in Cloud. Compare them and choose what to keep before sync continues.",
       conflictCopyPath: null,
     });
   }

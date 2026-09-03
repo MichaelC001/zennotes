@@ -1,8 +1,10 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import type {
   CloudAccountStatus,
+  CloudSyncManifestResponse,
   CloudSyncMutationRequest,
   CloudSyncVault
 } from '@zennotes/bridge-contract/cloud-sync'
@@ -68,7 +70,13 @@ async function setup(
       }
     })),
     deleteVault: vi.fn(async () => {}),
-    manifest: vi.fn(async () => ({ data: [], cursor: 0, next_page: null })),
+    manifest: vi.fn(
+      async (): Promise<CloudSyncManifestResponse> => ({
+        data: [],
+        cursor: 0,
+        next_page: null
+      })
+    ),
     changes: vi.fn(async () => ({ data: [], cursor: 0, has_more: false })),
     mutate: vi.fn(async (_vaultId: string, body: CloudSyncMutationRequest) => ({
       acknowledged: body.mutations.map((mutation, index) => ({
@@ -294,6 +302,57 @@ describe('DesktopCloudSyncService', () => {
     expect(client.createVault).toHaveBeenCalledWith('My Notes')
     expect(client.mutate).toHaveBeenCalledTimes(1)
     expect(result).toMatchObject({ pulled: 0, pushed: 1, conflicts: [] })
+  })
+
+  it('inspects and resolves a same-path bootstrap conflict through the host service', async () => {
+    const remoteVault: CloudSyncVault = {
+      id: 'vault-1',
+      name: 'Notes',
+      cursor: 1,
+      created_at: '2026-08-10T12:00:00.000Z',
+      updated_at: '2026-08-10T12:00:00.000Z'
+    }
+    const { service, client, localRoot } = await setup([remoteVault])
+    await service.link(localRoot, remoteVault.id)
+    await writeFile(path.join(localRoot, 'Note.md'), 'latest local edit')
+    const cloudText = 'older cloud edit'
+    const cloudHash = createHash('sha256').update(cloudText).digest('hex')
+    client.manifest.mockResolvedValue({
+      data: [
+        {
+          item_id: 'item-remote',
+          path: 'Note.md',
+          kind: 'text',
+          revision: 3,
+          sha256: cloudHash,
+          byte_length: Buffer.byteLength(cloudText),
+          media_type: 'text/markdown',
+          content: {
+            encoding: 'utf8',
+            data: cloudText,
+            sha256: cloudHash,
+            byte_length: Buffer.byteLength(cloudText),
+            media_type: 'text/markdown'
+          }
+        }
+      ],
+      cursor: 1,
+      next_page: null
+    })
+
+    const summary = await service.sync(localRoot)
+    const conflict = summary.bootstrap_conflicts[0]!
+    await expect(service.getBootstrapConflict(localRoot, conflict)).resolves.toMatchObject({
+      local: { text: 'latest local edit' },
+      cloud: { text: cloudText }
+    })
+
+    await service.resolveBootstrapConflict(localRoot, { conflict, choice: 'cloud' })
+    expect(await readFile(path.join(localRoot, 'Note.md'), 'utf8')).toBe(cloudText)
+    await expect(service.sync(localRoot)).resolves.toMatchObject({
+      bootstrap_conflicts: [],
+      pushed: 0
+    })
   })
 
   it('deletes the remote vault before removing the local device link', async () => {

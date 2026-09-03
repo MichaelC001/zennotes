@@ -125,6 +125,8 @@ export const IPC = {
   CLOUD_VAULT_LINK_DELETE: 'cloud-vault-link:delete',
   CLOUD_VAULT_DELETE: 'cloud-vault:delete',
   CLOUD_VAULT_SYNC: 'cloud-vault:sync',
+  CLOUD_VAULT_BOOTSTRAP_CONFLICT_GET: 'cloud-vault-bootstrap-conflict:get',
+  CLOUD_VAULT_BOOTSTRAP_CONFLICT_RESOLVE: 'cloud-vault-bootstrap-conflict:resolve',
   CLOUD_VAULT_SETTINGS_CONFLICT_GET: 'cloud-vault-settings-conflict:get',
   CLOUD_VAULT_SETTINGS_CONFLICT_RESOLVE: 'cloud-vault-settings-conflict:resolve',
   CLOUD_BACKUPS_LIST: 'cloud-backups:list',

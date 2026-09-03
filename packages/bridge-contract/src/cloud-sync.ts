@@ -422,6 +422,36 @@ export interface CloudSyncBootstrapConflict {
   remote_sha256: string;
 }
 
+export interface CloudSyncBootstrapConflictVersion {
+  sha256: string;
+  byte_length: number;
+  media_type: string;
+  /** UTF-8 contents for comparison. Binary and oversized files have no preview. */
+  text: string | null;
+}
+
+export interface CloudSyncBootstrapConflictDetails {
+  conflict: CloudSyncBootstrapConflict;
+  kind: CloudSyncItemKind;
+  local: CloudSyncBootstrapConflictVersion;
+  cloud: CloudSyncBootstrapConflictVersion;
+}
+
+export type CloudSyncBootstrapConflictChoice =
+  | "local"
+  | "cloud"
+  | "both"
+  | "merged";
+
+export interface CloudSyncBootstrapConflictResolution {
+  conflict: CloudSyncBootstrapConflict;
+  choice: CloudSyncBootstrapConflictChoice;
+  /** Vault-relative destination for this device's version when keeping both. */
+  keep_both_path?: string;
+  /** Complete UTF-8 result when resolving a text conflict by merging. */
+  merged_text?: string;
+}
+
 /**
  * A remote change that could not be applied because the local file was not
  * what sync last agreed on. The local file is always kept; `conflict_copy_path`

@@ -22,6 +22,9 @@ import type {
   CloudPublishedNoteResult,
   CloudPublishNoteInput,
   CloudServiceAccount,
+  CloudSyncBootstrapConflict,
+  CloudSyncBootstrapConflictDetails,
+  CloudSyncBootstrapConflictResolution,
   CloudSyncRunSummary,
   CloudSyncSettingsChoice,
   CloudSyncSettingsConflict,
@@ -250,6 +253,14 @@ const api: ZenBridge = {
   unlinkCloudVault: (): Promise<void> => ipcRenderer.invoke(IPC.CLOUD_VAULT_LINK_DELETE),
   deleteCloudVault: (): Promise<void> => ipcRenderer.invoke(IPC.CLOUD_VAULT_DELETE),
   syncCloudVault: (): Promise<CloudSyncRunSummary> => ipcRenderer.invoke(IPC.CLOUD_VAULT_SYNC),
+  getCloudBootstrapConflict: (
+    conflict: CloudSyncBootstrapConflict
+  ): Promise<CloudSyncBootstrapConflictDetails> =>
+    ipcRenderer.invoke(IPC.CLOUD_VAULT_BOOTSTRAP_CONFLICT_GET, conflict),
+  resolveCloudBootstrapConflict: (
+    resolution: CloudSyncBootstrapConflictResolution
+  ): Promise<void> =>
+    ipcRenderer.invoke(IPC.CLOUD_VAULT_BOOTSTRAP_CONFLICT_RESOLVE, resolution),
   getCloudSettingsConflict: (): Promise<CloudSyncSettingsConflict | null> =>
     ipcRenderer.invoke(IPC.CLOUD_VAULT_SETTINGS_CONFLICT_GET),
   resolveCloudSettingsConflict: (choice: CloudSyncSettingsChoice): Promise<void> =>

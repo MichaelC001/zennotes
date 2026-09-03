@@ -548,6 +548,7 @@ describe("cloudSyncAttentionItems (Discord: name the file, not the count)", () =
       ["rejected", "inbox/Daily.md"],
       ["rejected", "inbox/Plan.md"],
     ]);
+    expect(items[0].detail).toContain("Compare");
     expect(items[1].conflictCopyPath).toBe("inbox/Plan (cloud conflict).md");
     expect(items[1].detail).toContain("Plan (cloud conflict).md");
     expect(items[3].detail).toContain("Changed in Cloud");

@@ -1,17 +1,30 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import type {
+  CloudSyncContent,
+  CloudSyncManifestResponse,
   CloudSyncMutationRequest,
   CloudSyncVault
 } from '@zennotes/bridge-contract/cloud-sync'
 import type { CloudSyncRepository } from './cloud-sync-coordinator'
-import type { CloudSyncState } from './cloud-sync-engine'
+import type { CloudSyncLocalItem, CloudSyncState } from './cloud-sync-engine'
 import {
   CloudSyncHostService,
   type CloudSyncHostPersistence,
   type CloudSyncHostVault
 } from './cloud-sync-host-service'
 
-function setup(vaults: CloudSyncVault[] = []) {
+function textContent(data: string): CloudSyncContent {
+  return {
+    encoding: 'utf8',
+    data,
+    sha256: createHash('sha256').update(data).digest('hex'),
+    byte_length: Buffer.byteLength(data),
+    media_type: 'text/markdown'
+  }
+}
+
+function setup(vaults: CloudSyncVault[] = [], localItems: CloudSyncLocalItem[] = []) {
   let link: unknown = null
   let state: unknown = null
   const persistence: CloudSyncHostPersistence = {
@@ -33,7 +46,7 @@ function setup(vaults: CloudSyncVault[] = []) {
   }
   const repository: CloudSyncRepository = {
     async scan() {
-      return []
+      return localItems
     },
     async apply() {}
   }
@@ -70,7 +83,13 @@ function setup(vaults: CloudSyncVault[] = []) {
       }
     })),
     deleteVault: vi.fn(async () => undefined),
-    manifest: vi.fn(async () => ({ data: [], cursor: 0, next_page: null })),
+    manifest: vi.fn(
+      async (): Promise<CloudSyncManifestResponse> => ({
+        data: [],
+        cursor: 0,
+        next_page: null
+      })
+    ),
     changes: vi.fn(async () => ({ data: [], cursor: 0, has_more: false })),
     mutate: vi.fn(async (_vaultId: string, body: CloudSyncMutationRequest) => ({
       acknowledged: body.mutations.map((mutation, index) => ({
@@ -205,6 +224,54 @@ describe('CloudSyncHostService', () => {
     expect(client.manifest).toHaveBeenCalledTimes(1)
     expect(first).toEqual(second)
     expect(hostVault.refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes bootstrap versions and lets mobile hosts choose the local one', async () => {
+    const remoteVault: CloudSyncVault = {
+      id: 'vault-1',
+      name: 'Notes',
+      cursor: 1,
+      created_at: '2026-08-10T12:00:00.000Z',
+      updated_at: '2026-08-10T12:00:00.000Z'
+    }
+    const local = textContent('latest local edit')
+    const cloud = textContent('older cloud edit')
+    const { client, hostVault, service } = setup(
+      [remoteVault],
+      [{ path: 'Note.md', kind: 'text', content: local }]
+    )
+    client.manifest.mockResolvedValue({
+      data: [
+        {
+          item_id: 'item-remote',
+          path: 'Note.md',
+          kind: 'text',
+          revision: 3,
+          sha256: cloud.sha256,
+          byte_length: cloud.byte_length,
+          media_type: cloud.media_type,
+          content: cloud
+        }
+      ],
+      cursor: 1,
+      next_page: null
+    })
+    await service.link(hostVault, remoteVault.id)
+
+    const first = await service.sync(hostVault)
+    const conflict = first.bootstrap_conflicts[0]!
+    await expect(service.getBootstrapConflict(hostVault, conflict)).resolves.toMatchObject({
+      local: { text: 'latest local edit' },
+      cloud: { text: 'older cloud edit' }
+    })
+
+    await service.resolveBootstrapConflict(hostVault, { conflict, choice: 'local' })
+    expect(client.mutate).toHaveBeenCalledWith(
+      'vault-1',
+      expect.objectContaining({
+        mutations: [expect.objectContaining({ item_id: 'item-remote', base_revision: 3 })]
+      })
+    )
   })
 
   it('deletes the remote vault before dropping the link', async () => {

@@ -48,6 +48,9 @@ import type {
   CloudPublishedNoteResult,
   CloudPublishNoteInput,
   CloudServiceAccount,
+  CloudSyncBootstrapConflict,
+  CloudSyncBootstrapConflictDetails,
+  CloudSyncBootstrapConflictResolution,
   CloudSyncRunSummary,
   CloudSyncSettingsChoice,
   CloudSyncSettingsConflict,
@@ -146,6 +149,10 @@ export interface ZenBridge {
   unlinkCloudVault(): Promise<void>
   deleteCloudVault(): Promise<void>
   syncCloudVault(): Promise<CloudSyncRunSummary>
+  getCloudBootstrapConflict(
+    conflict: CloudSyncBootstrapConflict
+  ): Promise<CloudSyncBootstrapConflictDetails>
+  resolveCloudBootstrapConflict(resolution: CloudSyncBootstrapConflictResolution): Promise<void>
   getCloudSettingsConflict(): Promise<CloudSyncSettingsConflict | null>
   resolveCloudSettingsConflict(choice: CloudSyncSettingsChoice): Promise<void>
   listCloudBackups(): Promise<CloudBackupSnapshot[]>

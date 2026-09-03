@@ -1,4 +1,5 @@
 import type {
+  CloudSyncBootstrapConflictResolution,
   CloudSyncChange,
   CloudSyncContent,
   CloudSyncLocalConflict
@@ -6,6 +7,7 @@ import type {
 import {
   CLOUD_SYNC_SETTINGS_CONFLICT_PATH,
   CLOUD_SYNC_VAULT_SETTINGS_PATH,
+  cloudSyncPathKey,
   cloudSyncConflictCopyPath,
   isCloudSyncVaultSettingsPath,
   normalizeCloudSyncPath,
@@ -179,6 +181,58 @@ export class PortableCloudSyncRepository implements CloudSyncRepository {
     if (destination) return await this.keepBoth(nextPath, change.content)
     await this.write(nextPath, change.content)
     if (previousPath !== nextPath && source) await this.fs.deleteFile(previousPath)
+  }
+
+  async resolveBootstrapConflict(input: {
+    path: string
+    expectedLocalSha256: string
+    cloudContent: CloudSyncContent
+    resolution: CloudSyncBootstrapConflictResolution
+  }): Promise<void> {
+    const originalPath = this.path(input.path)
+    const current = await this.readItemOrNull(originalPath)
+    if (!current || current.content.sha256 !== input.expectedLocalSha256) {
+      throw new Error(
+        'This file changed on this device. Sync again to compare the latest versions.'
+      )
+    }
+
+    if (input.resolution.choice === 'cloud') {
+      await this.write(originalPath, input.cloudContent)
+      return
+    }
+
+    if (input.resolution.choice === 'merged') {
+      if (input.cloudContent.encoding !== 'utf8' || input.resolution.merged_text === undefined) {
+        throw new Error('Only text conflicts can be merged.')
+      }
+      await this.fs.writeText(originalPath, input.resolution.merged_text)
+      return
+    }
+
+    if (input.resolution.choice !== 'both') return
+    if (!input.resolution.keep_both_path) {
+      throw new Error('Choose a filename for this device’s version.')
+    }
+
+    const localCopyPath = this.path(input.resolution.keep_both_path)
+    if (
+      !shouldSyncVaultPath(localCopyPath) ||
+      cloudSyncPathKey(localCopyPath) === cloudSyncPathKey(originalPath)
+    ) {
+      throw new Error('Choose a different filename inside the synced vault.')
+    }
+    if ((await this.fs.stat(localCopyPath)) !== null) {
+      throw new Error(`${localCopyPath} already exists.`)
+    }
+
+    await this.fs.rename(originalPath, localCopyPath)
+    try {
+      await this.write(originalPath, input.cloudContent)
+    } catch (error) {
+      await this.fs.rename(localCopyPath, originalPath).catch(() => undefined)
+      throw error
+    }
   }
 
   /** Park the incoming version beside the local file rather than over it. */

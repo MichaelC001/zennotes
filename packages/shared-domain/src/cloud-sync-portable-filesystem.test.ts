@@ -208,6 +208,50 @@ describe('PortableCloudSyncRepository', () => {
     expect(fs.text('inbox/Plan (cloud conflict).md')).toBe('remote edit')
   })
 
+  it('applies explicit Cloud, keep-both, and merged bootstrap decisions', async () => {
+    const local = await textContent('local edit')
+    const cloud = await textContent('cloud edit')
+    const conflict = {
+      code: 'BOOTSTRAP_CONTENT_CONFLICT' as const,
+      item_id: 'item-1',
+      path: 'inbox/Plan.md',
+      local_sha256: local.sha256,
+      remote_sha256: cloud.sha256
+    }
+
+    const cloudFs = new MemoryFileSystem({ 'inbox/Plan.md': 'local edit' })
+    await new PortableCloudSyncRepository(cloudFs).resolveBootstrapConflict({
+      path: conflict.path,
+      expectedLocalSha256: local.sha256,
+      cloudContent: cloud,
+      resolution: { conflict, choice: 'cloud' }
+    })
+    expect(cloudFs.text('inbox/Plan.md')).toBe('cloud edit')
+
+    const bothFs = new MemoryFileSystem({ 'inbox/Plan.md': 'local edit' })
+    await new PortableCloudSyncRepository(bothFs).resolveBootstrapConflict({
+      path: conflict.path,
+      expectedLocalSha256: local.sha256,
+      cloudContent: cloud,
+      resolution: {
+        conflict,
+        choice: 'both',
+        keep_both_path: 'inbox/Plan (this device).md'
+      }
+    })
+    expect(bothFs.text('inbox/Plan.md')).toBe('cloud edit')
+    expect(bothFs.text('inbox/Plan (this device).md')).toBe('local edit')
+
+    const mergedFs = new MemoryFileSystem({ 'inbox/Plan.md': 'local edit' })
+    await new PortableCloudSyncRepository(mergedFs).resolveBootstrapConflict({
+      path: conflict.path,
+      expectedLocalSha256: local.sha256,
+      cloudContent: cloud,
+      resolution: { conflict, choice: 'merged', merged_text: 'merged result' }
+    })
+    expect(mergedFs.text('inbox/Plan.md')).toBe('merged result')
+  })
+
   it('reports a parked settings choice until its cloud copy is removed', async () => {
     const fs = new MemoryFileSystem({
       '.zennotes/vault.json': '{"favorites":["local.md"]}'

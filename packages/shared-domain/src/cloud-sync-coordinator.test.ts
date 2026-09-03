@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   CloudSyncChange,
+  CloudSyncBootstrapConflictResolution,
   CloudSyncContent,
   CloudSyncManifestResponse,
   CloudSyncMutationRequest,
@@ -84,6 +85,20 @@ function memoryRepository(initial: CloudSyncLocalItem[]): CloudSyncRepository & 
       } else if (change.content) {
         this.items = this.items.filter((item) => item.path !== change.path)
         this.items.push({ path: change.path, kind: 'text', content: change.content })
+      }
+    },
+    async resolveBootstrapConflict(input) {
+      const local = this.items.find((item) => item.path === input.path)
+      if (!local || local.content.sha256 !== input.expectedLocalSha256) {
+        throw new Error('changed on this device')
+      }
+      if (input.resolution.choice === 'cloud') {
+        local.content = input.cloudContent
+      } else if (input.resolution.choice === 'merged') {
+        local.content = content(input.resolution.merged_text ?? '')
+      } else if (input.resolution.choice === 'both' && input.resolution.keep_both_path) {
+        local.path = input.resolution.keep_both_path
+        this.items.push({ path: input.path, kind: 'text', content: input.cloudContent })
       }
     }
   }
@@ -674,6 +689,202 @@ describe('CloudSyncCoordinator', () => {
       expect.objectContaining({ code: 'BOOTSTRAP_CONTENT_CONFLICT', path: 'plan.md' })
     ])
     expect(server.mutations).toEqual([])
+    expect(states.current).toBeNull()
+  })
+
+  it('shows both bootstrap versions and lets this device replace the cloud version', async () => {
+    const repository = memoryRepository([
+      { path: 'plan.md', kind: 'text', content: content('latest local edit') }
+    ])
+    const states = memoryState()
+    const manifest: CloudSyncManifestResponse = {
+      data: [
+        {
+          item_id: 'item-remote',
+          path: 'plan.md',
+          kind: 'text',
+          revision: 3,
+          sha256: 'hash:older cloud edit',
+          byte_length: 16,
+          media_type: 'text/markdown',
+          content: content('older cloud edit')
+        }
+      ],
+      cursor: 1,
+      next_page: null
+    }
+    const server = remote({ manifest })
+    const coordinator = new CloudSyncCoordinator('vault-1', server, repository, states, ids())
+
+    const first = await coordinator.sync()
+    const conflict = first.bootstrapConflicts[0]!
+
+    await expect(coordinator.getBootstrapConflict(conflict)).resolves.toMatchObject({
+      kind: 'text',
+      local: { text: 'latest local edit' },
+      cloud: { text: 'older cloud edit' }
+    })
+
+    await coordinator.resolveBootstrapConflict({ conflict, choice: 'local' })
+    expect(states.current).toBeNull()
+    expect(server.mutations).toEqual([
+      {
+        mutations: [
+          expect.objectContaining({
+            type: 'upsert',
+            item_id: 'item-remote',
+            base_revision: 3,
+            path: 'plan.md',
+            content: expect.objectContaining({ data: 'latest local edit' })
+          })
+        ]
+      }
+    ])
+
+    manifest.data[0] = {
+      ...manifest.data[0]!,
+      revision: 4,
+      sha256: 'hash:latest local edit',
+      byte_length: 17,
+      content: content('latest local edit')
+    }
+    manifest.cursor = 2
+    const resolved = await coordinator.sync()
+
+    expect(resolved.bootstrapConflicts).toEqual([])
+    expect(states.current?.items['item-remote']?.sha256).toBe('hash:latest local edit')
+  })
+
+  it('keeps both bootstrap versions only after an explicit filename choice', async () => {
+    const repository = memoryRepository([
+      { path: 'Daily.md', kind: 'text', content: content('latest local edit') }
+    ])
+    const states = memoryState()
+    const server = remote({
+      manifest: {
+        data: [
+          {
+            item_id: 'item-remote',
+            path: 'Daily.md',
+            kind: 'text',
+            revision: 3,
+            sha256: 'hash:older cloud edit',
+            byte_length: 16,
+            media_type: 'text/markdown',
+            content: content('older cloud edit')
+          }
+        ],
+        cursor: 1,
+        next_page: null
+      }
+    })
+    const coordinator = new CloudSyncCoordinator('vault-1', server, repository, states, ids())
+    const first = await coordinator.sync()
+
+    await coordinator.resolveBootstrapConflict({
+      conflict: first.bootstrapConflicts[0]!,
+      choice: 'both',
+      keep_both_path: 'Daily (this device).md'
+    })
+    expect(states.current).toBeNull()
+    const resolved = await coordinator.sync()
+
+    expect(resolved.bootstrapConflicts).toEqual([])
+    expect(repository.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'Daily.md', content: content('older cloud edit') }),
+        expect.objectContaining({
+          path: 'Daily (this device).md',
+          content: content('latest local edit')
+        })
+      ])
+    )
+    expect(server.mutations.at(-1)?.mutations).toEqual([
+      expect.objectContaining({ type: 'upsert', path: 'Daily (this device).md' })
+    ])
+  })
+
+  it('leaves other bootstrap conflicts pending after resolving one file', async () => {
+    const repository = memoryRepository([
+      { path: 'one.md', kind: 'text', content: content('local one') },
+      { path: 'two.md', kind: 'text', content: content('local two') }
+    ])
+    const states = memoryState()
+    const server = remote({
+      manifest: {
+        data: [
+          {
+            item_id: 'one',
+            path: 'one.md',
+            kind: 'text',
+            revision: 1,
+            sha256: 'hash:cloud one',
+            byte_length: 9,
+            media_type: 'text/markdown',
+            content: content('cloud one')
+          },
+          {
+            item_id: 'two',
+            path: 'two.md',
+            kind: 'text',
+            revision: 1,
+            sha256: 'hash:cloud two',
+            byte_length: 9,
+            media_type: 'text/markdown',
+            content: content('cloud two')
+          }
+        ],
+        cursor: 2,
+        next_page: null
+      }
+    })
+    const coordinator = new CloudSyncCoordinator('vault-1', server, repository, states, ids())
+    const first = await coordinator.sync()
+
+    await coordinator.resolveBootstrapConflict({
+      conflict: first.bootstrapConflicts[0]!,
+      choice: 'cloud'
+    })
+    const next = await coordinator.sync()
+
+    expect(next.bootstrapConflicts).toEqual([
+      expect.objectContaining({ item_id: 'two', path: 'two.md' })
+    ])
+    expect(states.current).toBeNull()
+  })
+
+  it('does not initialize sync for an invalid resolution choice', async () => {
+    const repository = memoryRepository([
+      { path: 'plan.md', kind: 'text', content: content('local') }
+    ])
+    const states = memoryState()
+    const server = remote({
+      manifest: {
+        data: [
+          {
+            item_id: 'item-remote',
+            path: 'plan.md',
+            kind: 'text',
+            revision: 1,
+            sha256: 'hash:cloud',
+            byte_length: 5,
+            media_type: 'text/markdown',
+            content: content('cloud')
+          }
+        ],
+        cursor: 1,
+        next_page: null
+      }
+    })
+    const coordinator = new CloudSyncCoordinator('vault-1', server, repository, states, ids())
+    const first = await coordinator.sync()
+
+    await expect(
+      coordinator.resolveBootstrapConflict({
+        conflict: first.bootstrapConflicts[0]!,
+        choice: 'unexpected'
+      } as unknown as CloudSyncBootstrapConflictResolution)
+    ).rejects.toThrow('resolution choice')
     expect(states.current).toBeNull()
   })
 

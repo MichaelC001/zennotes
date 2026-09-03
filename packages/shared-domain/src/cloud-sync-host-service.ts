@@ -6,6 +6,9 @@ import type {
   CloudBackupSnapshot,
   CloudBackupSnapshotItem,
   CloudServiceAccount,
+  CloudSyncBootstrapConflict,
+  CloudSyncBootstrapConflictDetails,
+  CloudSyncBootstrapConflictResolution,
   CloudSyncRunSummary,
   CloudSyncVault,
   CloudVaultLink
@@ -248,6 +251,39 @@ export class CloudSyncHostService {
     } finally {
       await vault.refresh()
     }
+  }
+
+  async getBootstrapConflict(
+    vault: CloudSyncHostVault,
+    conflict: CloudSyncBootstrapConflict
+  ): Promise<CloudSyncBootstrapConflictDetails> {
+    const running = this.runs.get(vault.key)
+    if (running) await running
+    const { account, client, link } = await this.linkedConnection(vault)
+    return await new CloudSyncCoordinator(
+      link.vault_id,
+      client,
+      vault.repository,
+      this.stateStore(vault.key, account.base_url, link.vault_id),
+      this.ids
+    ).getBootstrapConflict(conflict)
+  }
+
+  async resolveBootstrapConflict(
+    vault: CloudSyncHostVault,
+    resolution: CloudSyncBootstrapConflictResolution
+  ): Promise<void> {
+    const running = this.runs.get(vault.key)
+    if (running) await running
+    const { account, client, link } = await this.linkedConnection(vault)
+    await new CloudSyncCoordinator(
+      link.vault_id,
+      client,
+      vault.repository,
+      this.stateStore(vault.key, account.base_url, link.vault_id),
+      this.ids
+    ).resolveBootstrapConflict(resolution)
+    await vault.refresh()
   }
 
   private async connection(): Promise<{

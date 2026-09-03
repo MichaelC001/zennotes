@@ -28,6 +28,7 @@ import { useToastStore } from "../lib/toast";
 import { notifyPublishedNoteChanged } from "../lib/published-note-events";
 import { Button } from "./ui/Button";
 import { useStore } from "../store";
+import { CloudBootstrapConflictResolver } from "./CloudBootstrapConflictResolver";
 
 type CloudAction =
   | "connect"
@@ -581,6 +582,7 @@ export function CloudSettings({
                 newVaultName={newVaultName}
                 selectedVaultId={selectedVaultId}
                 summary={summary}
+                onSummaryChange={setSummary}
                 onCreateAndLink={() => void createAndLinkVault()}
                 onLink={() => void linkSelectedVault()}
                 onNewVaultNameChange={setNewVaultName}
@@ -998,6 +1000,7 @@ function CloudVaultPanel({
   onUnlink,
   onDelete,
   onUseAnotherAccount,
+  onSummaryChange,
 }: {
   action: CloudAction;
   cloudVaults: CloudSyncVault[];
@@ -1019,6 +1022,7 @@ function CloudVaultPanel({
   onUnlink: () => void;
   onDelete: () => void;
   onUseAnotherAccount: () => void;
+  onSummaryChange: (summary: CloudSyncRunSummary) => void;
 }): JSX.Element {
   const lastSummary = useCloudSyncStatusStore((s) => s.lastSummary);
   if (!syncIncluded) {
@@ -1141,7 +1145,11 @@ function CloudVaultPanel({
               />
             )}
             {(summary ?? lastSummary) && (
-              <CloudSyncSummary summary={(summary ?? lastSummary)!} />
+              <CloudSyncSummary
+                summary={(summary ?? lastSummary)!}
+                vaultName={link.vault_name}
+                onSummaryChange={onSummaryChange}
+              />
             )}
           </div>
         ) : (
@@ -1872,9 +1880,16 @@ function CloudSettingsConflictCard({
 
 function CloudSyncSummary({
   summary,
+  vaultName,
+  onSummaryChange,
 }: {
   summary: CloudSyncRunSummary;
+  vaultName: string;
+  onSummaryChange: (summary: CloudSyncRunSummary) => void;
 }): JSX.Element {
+  const [selectedBootstrapConflict, setSelectedBootstrapConflict] = useState<
+    CloudSyncRunSummary["bootstrap_conflicts"][number] | null
+  >(null);
   const attention = cloudSyncAttentionMessage(summary);
   const capacityConflictCount = summary.conflicts.filter((conflict) =>
     [
@@ -1948,11 +1963,39 @@ function CloudSyncSummary({
                       Open copy
                     </Button>
                   )}
+                  {item.kind === "bootstrap" && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() =>
+                        setSelectedBootstrapConflict(
+                          summary.bootstrap_conflicts.find(
+                            (conflict) => conflict.path === item.path,
+                          ) ?? null,
+                        )
+                      }
+                    >
+                      Compare &amp; resolve
+                    </Button>
+                  )}
                 </div>
               </div>
             </li>
           ))}
         </ul>
+      )}
+      {selectedBootstrapConflict && (
+        <div className="mt-3">
+          <CloudBootstrapConflictResolver
+            conflict={selectedBootstrapConflict}
+            vaultName={vaultName}
+            onClose={() => setSelectedBootstrapConflict(null)}
+            onResolved={(nextSummary) => {
+              setSelectedBootstrapConflict(null);
+              onSummaryChange(nextSummary);
+            }}
+          />
+        </div>
       )}
     </div>
   );

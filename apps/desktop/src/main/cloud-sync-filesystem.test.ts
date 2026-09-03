@@ -208,6 +208,85 @@ describe('DesktopCloudSyncRepository', () => {
     expect(await readFile(path.join(root, 'note (cloud conflict).md'), 'utf8')).toBe('remote edit')
   })
 
+  it('applies an explicit Cloud choice only while the local version is unchanged', async () => {
+    const root = await temporaryRoot()
+    await writeFile(path.join(root, 'note.md'), 'local edit')
+    const repository = new DesktopCloudSyncRepository(root)
+    const conflict = {
+      code: 'BOOTSTRAP_CONTENT_CONFLICT' as const,
+      item_id: 'item-remote',
+      path: 'note.md',
+      local_sha256: hash('local edit'),
+      remote_sha256: hash('cloud edit')
+    }
+
+    await repository.resolveBootstrapConflict({
+      path: 'note.md',
+      expectedLocalSha256: conflict.local_sha256,
+      cloudContent: upsert('note.md', 'cloud edit').content!,
+      resolution: { conflict, choice: 'cloud' }
+    })
+
+    expect(await readFile(path.join(root, 'note.md'), 'utf8')).toBe('cloud edit')
+    await expect(
+      repository.resolveBootstrapConflict({
+        path: 'note.md',
+        expectedLocalSha256: conflict.local_sha256,
+        cloudContent: upsert('note.md', 'cloud edit').content!,
+        resolution: { conflict, choice: 'cloud' }
+      })
+    ).rejects.toThrow('changed on this device')
+  })
+
+  it('keeps both bootstrap versions under explicit paths', async () => {
+    const root = await temporaryRoot()
+    await writeFile(path.join(root, 'note.md'), 'local edit')
+    const repository = new DesktopCloudSyncRepository(root)
+    const conflict = {
+      code: 'BOOTSTRAP_CONTENT_CONFLICT' as const,
+      item_id: 'item-remote',
+      path: 'note.md',
+      local_sha256: hash('local edit'),
+      remote_sha256: hash('cloud edit')
+    }
+
+    await repository.resolveBootstrapConflict({
+      path: 'note.md',
+      expectedLocalSha256: conflict.local_sha256,
+      cloudContent: upsert('note.md', 'cloud edit').content!,
+      resolution: {
+        conflict,
+        choice: 'both',
+        keep_both_path: 'note (this device).md'
+      }
+    })
+
+    expect(await readFile(path.join(root, 'note.md'), 'utf8')).toBe('cloud edit')
+    expect(await readFile(path.join(root, 'note (this device).md'), 'utf8')).toBe('local edit')
+  })
+
+  it('writes an explicit merged bootstrap result', async () => {
+    const root = await temporaryRoot()
+    await writeFile(path.join(root, 'note.md'), 'local edit')
+    const repository = new DesktopCloudSyncRepository(root)
+    const conflict = {
+      code: 'BOOTSTRAP_CONTENT_CONFLICT' as const,
+      item_id: 'item-remote',
+      path: 'note.md',
+      local_sha256: hash('local edit'),
+      remote_sha256: hash('cloud edit')
+    }
+
+    await repository.resolveBootstrapConflict({
+      path: 'note.md',
+      expectedLocalSha256: conflict.local_sha256,
+      cloudContent: upsert('note.md', 'cloud edit').content!,
+      resolution: { conflict, choice: 'merged', merged_text: 'merged result' }
+    })
+
+    expect(await readFile(path.join(root, 'note.md'), 'utf8')).toBe('merged result')
+  })
+
   // What wedged the reporter: the change feed carried a file this device had
   // never tracked, so sync refused it without ever noticing that the bytes on
   // disk were already exactly what was being delivered.

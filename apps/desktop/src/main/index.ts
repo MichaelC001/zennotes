@@ -25,6 +25,8 @@ import { createRequire } from "node:module";
 import { IPC } from "@shared/ipc";
 import type {
   CloudPublishNoteInput,
+  CloudSyncBootstrapConflict,
+  CloudSyncBootstrapConflictResolution,
   CloudSyncSettingsChoice,
 } from "@zennotes/bridge-contract/cloud-sync";
 import type {
@@ -2895,6 +2897,22 @@ function registerIpc(): void {
   );
   handle(IPC.CLOUD_VAULT_SYNC, () =>
     getCloudSyncService().sync(requireLocalCloudVaultRoot()),
+  );
+  handle(
+    IPC.CLOUD_VAULT_BOOTSTRAP_CONFLICT_GET,
+    (_event, conflict: CloudSyncBootstrapConflict) =>
+      getCloudSyncService().getBootstrapConflict(
+        requireLocalCloudVaultRoot(),
+        conflict,
+      ),
+  );
+  handle(
+    IPC.CLOUD_VAULT_BOOTSTRAP_CONFLICT_RESOLVE,
+    (_event, resolution: CloudSyncBootstrapConflictResolution) =>
+      getCloudSyncService().resolveBootstrapConflict(
+        requireLocalCloudVaultRoot(),
+        resolution,
+      ),
   );
   handle(IPC.CLOUD_VAULT_SETTINGS_CONFLICT_GET, () =>
     getCloudSyncService().settingsConflict(requireLocalCloudVaultRoot()),
