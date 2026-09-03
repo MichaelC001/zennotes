@@ -43,6 +43,11 @@ export function CloudPendingConflictResolver({
   const [keepBothPath, setKeepBothPath] = useState(() =>
     localCopyPath(conflict.path),
   );
+  // Bumped after a failed resolve. A rejected save means the file moved under
+  // us, so the next attempt needs fresh hashes: without a refetch every retry
+  // fails with the same stale-choice error and the queue is a dead end.
+  const [reload, setReload] = useState({ nonce: 0, keepError: false });
+  const [reloading, setReloading] = useState(false);
   const [resolvedPath, setResolvedPath] = useState(conflict.path);
   const loadedDraft = useRef<string | null>(null);
   const finishLaterButton = useRef<HTMLButtonElement>(null);
@@ -54,7 +59,8 @@ export function CloudPendingConflictResolver({
     let cancelled = false;
     setDetails(null);
     setChoices({});
-    setError(null);
+    if (!reload.keepError) setError(null);
+    setReloading(reload.keepError);
     setKeepBothOpen(false);
     setFinishLaterOpen(false);
     setCombineOpen(false);
@@ -63,6 +69,7 @@ export function CloudPendingConflictResolver({
       .getCloudConflict(conflict.id)
       .then((next) => {
         if (cancelled) return;
+        setReloading(false);
         const initialDraft =
           next.draft_text ??
           (next.parts.length > 0
@@ -79,12 +86,14 @@ export function CloudPendingConflictResolver({
         setSaveState(next.draft_text !== null ? "saved" : "idle");
       })
       .catch((cause) => {
-        if (!cancelled) setError(message(cause));
+        if (cancelled) return;
+        setReloading(false);
+        setError(message(cause));
       });
     return () => {
       cancelled = true;
     };
-  }, [bridge, conflict.id]);
+  }, [bridge, conflict.id, reload]);
 
   useEffect(() => {
     if (finishLaterOpen) finishLaterDialog.current?.focus();
@@ -115,16 +124,18 @@ export function CloudPendingConflictResolver({
   const unresolvedChanges =
     details?.changes.filter((change) => choices[change.id] === undefined)
       .length ?? 0;
+  // Editing the text by hand does not answer an overlapping change: an
+  // unanswered one still renders as the last synced wording, so saving with
+  // any left would silently drop both devices' edits to that part.
   const canSaveCombined = Boolean(
     details !== null &&
     details.local.text !== null &&
     details.cloud.text !== null &&
     resolvedPath.trim().length > 0 &&
-    (manualDraft ||
-      (details.changes.length > 0 && unresolvedChanges === 0) ||
-      (conflict.has_base &&
-        details.changes.length === 0 &&
-        details.suggested_text !== null)),
+    unresolvedChanges === 0 &&
+    (details.changes.length > 0 ||
+      manualDraft ||
+      (conflict.has_base && details.suggested_text !== null)),
   );
   const titleId = useMemo(
     () => `cloud-pending-conflict-${safeId(conflict.id)}`,
@@ -173,6 +184,7 @@ export function CloudPendingConflictResolver({
       onResolved(await syncCloudVaultWithStatus(bridge, vaultName));
     } catch (cause) {
       setError(message(cause));
+      setReload((current) => ({ nonce: current.nonce + 1, keepError: true }));
     } finally {
       setBusy(false);
     }
@@ -276,7 +288,7 @@ export function CloudPendingConflictResolver({
         </div>
       )}
 
-      {!details && !error && (
+      {!details && (!error || reloading) && (
         <div role="status" className="py-8 text-center text-sm text-ink-500">
           Loading the versions kept for you…
         </div>
@@ -428,13 +440,13 @@ export function CloudPendingConflictResolver({
                     </div>
                   </div>
                 )}
-                {!manualDraft && unresolvedChanges > 0 && (
+                {unresolvedChanges > 0 && (
                   <p className="mt-2 text-xs leading-5 text-ink-500">
                     Choose an option for{" "}
                     {unresolvedChanges === 1
                       ? "the remaining change"
-                      : `all ${unresolvedChanges} remaining changes`}
-                    , or edit the combined note yourself.
+                      : `all ${unresolvedChanges} remaining changes`}{" "}
+                    before saving. Your own edits to the text above are kept.
                   </p>
                 )}
                 <p className="mt-2 text-xs text-ink-400">
@@ -632,7 +644,7 @@ function FirstSyncChoice({
             disabled={disabled}
             onClick={onChooseLocal}
           >
-            Keep this device&rsquo;s version
+            Use this device&rsquo;s version
           </Button>
         </div>
         <div className="space-y-2">
@@ -685,7 +697,7 @@ function KeepBothForm({
       </label>
       <p className="mt-1 text-xs leading-5 text-ink-500">
         The other device&rsquo;s version keeps its current name. Choose a name
-        you will recognize—not a technical conflict label.
+        you will recognize, not a technical conflict label.
       </p>
       <input
         id={`${titleId}-copy-path`}
@@ -800,7 +812,7 @@ function ChangeVersion({
 }): JSX.Element {
   return (
     <div className="min-w-0 rounded-lg border border-paper-300/50 bg-paper-100/70 p-2">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">
+      <div className="text-2xs font-semibold uppercase tracking-wide text-ink-400">
         {label}
       </div>
       <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-ink-700">
@@ -813,11 +825,9 @@ function ChangeVersion({
 function VersionPreview({
   label,
   version,
-  unavailable = false,
 }: {
   label: string;
   version: CloudSyncPendingConflictDetails["local"];
-  unavailable?: boolean;
 }): JSX.Element {
   return (
     <div className="min-w-0 overflow-hidden rounded-lg border border-paper-300/60 bg-paper-100/55">
@@ -825,18 +835,14 @@ function VersionPreview({
         <div className="text-xs font-semibold text-ink-800">{label}</div>
         {version.path && (
           <div
-            className="mt-0.5 truncate font-mono text-[11px] text-ink-400"
+            className="mt-0.5 truncate font-mono text-2xs text-ink-400"
             title={version.path}
           >
             {version.path}
           </div>
         )}
       </div>
-      {unavailable ? (
-        <div className="px-3 py-4 text-xs leading-5 text-ink-500">
-          There is no shared earlier version because this is the first sync.
-        </div>
-      ) : version.deleted ? (
+      {version.deleted ? (
         <div className="px-3 py-4 text-xs leading-5 text-ink-500">
           This file was deleted.
         </div>

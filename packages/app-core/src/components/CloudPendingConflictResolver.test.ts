@@ -140,7 +140,7 @@ describe("CloudPendingConflictResolver", () => {
     expect(view.host.textContent).toContain(
       "This is the first sync, so ZenNotes cannot tell which one is newer.",
     );
-    expect(view.host.textContent).toContain("Keep this device’s version");
+    expect(view.host.textContent).toContain("Use this device’s version");
     expect(view.host.textContent).toContain("Use other device’s version");
     expect(view.host.textContent).not.toContain("Combined note");
     expect(view.host.textContent).not.toContain("Last synced");
@@ -254,6 +254,95 @@ describe("CloudPendingConflictResolver", () => {
       "My careful combination\n",
     );
     expect(onClose).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+
+  it("keeps the combined note locked until every change is answered", async () => {
+    bridge.getCloudConflict.mockResolvedValue({
+      ...details,
+      changes: [
+        {
+          id: "change-1",
+          base_text: "Pack a coat.\n",
+          local_text: "Pack a warm coat.\n",
+          cloud_text: "Pack a rain coat.\n",
+        },
+        {
+          id: "change-2",
+          base_text: "Leave Monday.\n",
+          local_text: "Leave Tuesday.\n",
+          cloud_text: "Leave Wednesday.\n",
+        },
+      ],
+      parts: [
+        { type: "text", text: "# Trip\n" },
+        { type: "change", change_id: "change-1" },
+        { type: "change", change_id: "change-2" },
+      ],
+    });
+    const view = mount({});
+    await act(async () => Promise.resolve());
+
+    const save = button(view.host, "Save combined note");
+    expect(save.disabled).toBe(true);
+
+    await act(async () => button(view.host, "Use this device").click());
+    expect(save.disabled).toBe(true);
+    expect(view.host.textContent).toContain("the remaining change");
+
+    // Typing is an edit, not an answer: the second change would still be
+    // saved as the last synced wording.
+    await act(async () => {
+      const editor = textarea(view.host);
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(editor, "# Trip\nPack a warm coat.\nLeave Tuesday.\n");
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(save.disabled).toBe(true);
+    expect(view.host.textContent).toContain("the remaining change");
+
+    await act(async () =>
+      [...view.host.querySelectorAll("button")]
+        .filter((candidate) => candidate.textContent?.trim() === "Use other device")[1]
+        .click(),
+    );
+    expect(save.disabled).toBe(false);
+    expect(view.host.textContent).not.toContain("the remaining change");
+    view.unmount();
+  });
+
+  it("reloads both versions after a rejected save so the retry is not stale", async () => {
+    bridge.resolveCloudConflict.mockRejectedValueOnce(
+      new Error("This file changed again while you were reviewing it."),
+    );
+    const view = mount({});
+    await act(async () => Promise.resolve());
+    expect(bridge.getCloudConflict).toHaveBeenCalledTimes(1);
+
+    await act(async () => button(view.host, "Use other device").click());
+    await act(async () => {
+      button(view.host, "Save combined note").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(view.host.textContent).toContain(
+      "This file changed again while you were reviewing it.",
+    );
+    expect(bridge.getCloudConflict).toHaveBeenCalledTimes(2);
+
+    // The refetched details drive the next attempt, and the error stays up
+    // until it succeeds.
+    await act(async () => Promise.resolve());
+    expect(view.host.textContent).toContain(
+      "This file changed again while you were reviewing it.",
+    );
+    expect(button(view.host, "Save combined note")).toBeInstanceOf(
+      HTMLButtonElement,
+    );
     view.unmount();
   });
 

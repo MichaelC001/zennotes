@@ -51,6 +51,10 @@ interface CloudSyncStatusStore {
   /** What the last completed run reported, so the status bar's Review can
    *  show the files that need attention without another sync first. */
   lastSummary: CloudSyncRunSummary | null;
+  /** Whether the conflict queue is on screen. It lives here, not in the
+   *  status bar, so the command palette and the vim leader open the same
+   *  queue the status bar's Review now opens. */
+  conflictReviewOpen: boolean;
 }
 
 const emptyCloudSyncStatus: CloudSyncStatusStore = {
@@ -59,6 +63,7 @@ const emptyCloudSyncStatus: CloudSyncStatusStore = {
   lastSyncedAt: null,
   error: null,
   lastSummary: null,
+  conflictReviewOpen: false,
 };
 
 export const useCloudSyncStatusStore = create<CloudSyncStatusStore>(() => ({
@@ -197,6 +202,10 @@ export async function syncCloudVaultWithStatus(
   try {
     const summary = await bridge.syncCloudVault();
     const attention = cloudSyncAttentionMessage(summary);
+    // An open queue stays open only while it still has something to decide;
+    // otherwise the flag would reopen it on the next unrelated conflict.
+    const conflictReviewOpen =
+      current.conflictReviewOpen && resolvableCloudConflictCount(summary) > 0;
     if (attention !== null) {
       useCloudSyncStatusStore.setState({
         phase: "attention",
@@ -204,6 +213,7 @@ export async function syncCloudVaultWithStatus(
         lastSyncedAt: current.lastSyncedAt,
         error: attention,
         lastSummary: summary,
+        conflictReviewOpen,
       });
       return summary;
     }
@@ -213,6 +223,7 @@ export async function syncCloudVaultWithStatus(
       lastSyncedAt: Date.now(),
       error: null,
       lastSummary: summary,
+      conflictReviewOpen,
     });
     return summary;
   } catch (error) {
@@ -223,6 +234,30 @@ export async function syncCloudVaultWithStatus(
     });
     throw error;
   }
+}
+
+/** Conflicts the queue can actually resolve. Bootstrap conflicts are no longer
+ *  emitted by the coordinator, so only the durable pending queue counts. */
+export function resolvableCloudConflictCount(
+  summary: CloudSyncRunSummary | null,
+): number {
+  return summary?.pending_conflicts?.length ?? 0;
+}
+
+/** True when there is a conflict queue worth opening. */
+export function hasResolvableCloudConflicts(): boolean {
+  return (
+    resolvableCloudConflictCount(useCloudSyncStatusStore.getState().lastSummary) > 0
+  );
+}
+
+export function openCloudConflictReview(): void {
+  if (!hasResolvableCloudConflicts()) return;
+  useCloudSyncStatusStore.setState({ conflictReviewOpen: true });
+}
+
+export function closeCloudConflictReview(): void {
+  useCloudSyncStatusStore.setState({ conflictReviewOpen: false });
 }
 
 export function clearCloudSyncStatus(): void {
@@ -361,7 +396,8 @@ export function cloudSyncAttentionMessage(
   }
 
   const decisionCount =
-    (summary.pending_conflicts?.length ?? 0) + summary.bootstrap_conflicts.length;
+    (summary.pending_conflicts?.length ?? 0) +
+    (summary.bootstrap_conflicts?.length ?? 0);
   if (decisionCount > 0) {
     const count = decisionCount;
     return `Cloud sync needs attention: ${count} ${count === 1 ? "file differs" : "files differ"} on this device and in Cloud.`;
@@ -445,7 +481,9 @@ export function cloudSyncAttentionItems(
       conflictCopyPath: null,
     });
   }
-  for (const conflict of summary.bootstrap_conflicts) {
+  // Still read, still tolerant: the field remains on the wire (and in other
+  // hosts' summaries) even though this coordinator always sends it empty.
+  for (const conflict of summary.bootstrap_conflicts ?? []) {
     items.push({
       kind: "bootstrap",
       path: conflict.path,

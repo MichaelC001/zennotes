@@ -51,6 +51,7 @@ export type KeymapId =
   | "vim.leaderPrefix"
   | "vim.leaderOpenBuffers"
   | "vim.leaderWorkflows"
+  | "vim.leaderCloudConflicts"
   | "vim.leaderAtlas"
   | "vim.leaderSearchNotes"
   | "vim.leaderSearchGroup"
@@ -480,6 +481,19 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     // `w` already belongs to the weekly note, so this takes `a` for automation.
     description: "Open the Workflows canvas.",
     defaultBinding: "a",
+    vimOnly: true,
+    maxTokens: 1,
+  },
+  {
+    id: "vim.leaderCloudConflicts",
+    kind: "sequence",
+    scope: "leader",
+    group: "vim",
+    title: "Leader: review Cloud conflicts",
+    // `c` is the calendar and `s` the search group, so review takes `r`.
+    description:
+      "Open the Cloud sync conflict queue. Available while files are waiting on a decision.",
+    defaultBinding: "r",
     vimOnly: true,
     maxTokens: 1,
   },

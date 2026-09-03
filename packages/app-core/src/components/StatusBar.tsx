@@ -7,12 +7,13 @@ import { useHoveredLinkStore } from "../lib/hovered-link";
 import {
   connectCloudAccountFromStatusBar,
   formatRelativeSyncTime,
+  openCloudConflictReview,
+  resolvableCloudConflictCount,
   syncCloudVaultWithStatus,
   type CloudSyncPhase,
   useCloudSyncStatusStore,
 } from "../lib/cloud-auto-sync";
 import { requestSettingsTarget } from "../lib/settings-navigation";
-import { CloudConflictDialog } from "./CloudConflictDialog";
 
 /**
  * Footer strip showing quick stats for the active note: backlinks,
@@ -101,14 +102,8 @@ function CloudSyncStatus({
   const lastSummary = useCloudSyncStatusStore((state) => state.lastSummary);
   const setSettingsOpen = useStore((state) => state.setSettingsOpen);
   const [now, setNow] = useState(() => Date.now());
-  const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
-  const hasResolvableConflict = Boolean(
-    (lastSummary?.pending_conflicts?.length ?? 0) +
-    (lastSummary?.bootstrap_conflicts.length ?? 0),
-  );
-  const resolvableConflictCount =
-    (lastSummary?.pending_conflicts?.length ?? 0) +
-    (lastSummary?.bootstrap_conflicts.length ?? 0);
+  const resolvableConflictCount = resolvableCloudConflictCount(lastSummary);
+  const hasResolvableConflict = resolvableConflictCount > 0;
 
   useEffect(() => {
     if (phase === "hidden" || lastSyncedAt === null) return undefined;
@@ -162,6 +157,9 @@ function CloudSyncStatus({
           : phase === "disconnected"
             ? "text-ink-500"
             : "text-accent";
+  // Files waiting on a decision outrank every other action: the queue stays
+  // one click away even while the next run is in flight, because those runs
+  // cannot finish the waiting file anyway.
   const actionLabel =
     phase === "disconnected"
       ? error
@@ -169,13 +167,15 @@ function CloudSyncStatus({
         : "Connect"
       : phase === "unlinked"
         ? "Set up"
-        : phase === "attention"
-          ? hasResolvableConflict
-            ? "Review now"
-            : "Review"
-          : phase === "error"
-            ? "Retry"
-            : "Sync now";
+        : hasResolvableConflict
+          ? "Review now"
+          : phase === "attention"
+            ? "Review"
+            : phase === "error"
+              ? "Retry"
+              : "Sync now";
+  const showAction =
+    hasResolvableConflict || (phase !== "syncing" && phase !== "connecting");
 
   const openCloudSettings = (): void => {
     requestSettingsTarget("cloud");
@@ -191,65 +191,56 @@ function CloudSyncStatus({
       openCloudSettings();
       return;
     }
+    if (hasResolvableConflict) {
+      openCloudConflictReview();
+      return;
+    }
     if (phase === "attention") {
-      if (hasResolvableConflict) {
-        setConflictDialogOpen(true);
-      } else {
-        openCloudSettings();
-      }
+      openCloudSettings();
       return;
     }
     void syncCloudVaultWithStatus().catch(() => undefined);
   };
 
   return (
-    <>
-      <div
-        className={[
-          "inline-flex items-center gap-1.5 whitespace-nowrap",
-          phase === "attention" && hasResolvableConflict
-            ? "rounded-lg border border-warning/30 bg-warning/10 px-2 py-0.5"
-            : "",
-          separated ? "sm:border-r sm:border-paper-300/70 sm:pr-5" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
+    <div
+      className={[
+        "inline-flex items-center gap-1.5 whitespace-nowrap",
+        hasResolvableConflict
+          ? "rounded-lg border border-warning/30 bg-warning/10 px-2 py-0.5"
+          : "",
+        separated ? "sm:border-r sm:border-paper-300/70 sm:pr-5" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <span
+        data-cloud-sync-status
+        role="status"
+        title={title}
+        className={`inline-flex items-center gap-1.5 font-medium ${statusTone}`}
       >
-        <span
-          data-cloud-sync-status
-          role="status"
-          title={title}
-          className={`inline-flex items-center gap-1.5 font-medium ${statusTone}`}
-        >
-          <CloudStatusIcon phase={phase} />
-          <span className="tabular-nums">{label}</span>
-        </span>
-        {phase !== "syncing" && phase !== "connecting" && (
-          <>
-            <span aria-hidden="true" className="text-ink-300">
-              ·
-            </span>
-            <button
-              type="button"
-              data-cloud-sync-action
-              title={title}
-              aria-label={`${actionLabel}: ${title}`}
-              onClick={runCloudAction}
-              className="-my-1 rounded-md px-2 py-1 font-normal text-ink-500 transition-colors hover:bg-paper-200/60 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-            >
-              {actionLabel}
-            </button>
-          </>
-        )}
-      </div>
-      {conflictDialogOpen && lastSummary && hasResolvableConflict && (
-        <CloudConflictDialog
-          summary={lastSummary}
-          vaultName={vaultName ?? "Cloud vault"}
-          onClose={() => setConflictDialogOpen(false)}
-        />
+        <CloudStatusIcon phase={phase} />
+        <span className="tabular-nums">{label}</span>
+      </span>
+      {showAction && (
+        <>
+          <span aria-hidden="true" className="text-ink-300">
+            ·
+          </span>
+          <button
+            type="button"
+            data-cloud-sync-action
+            title={title}
+            aria-label={`${actionLabel}: ${title}`}
+            onClick={runCloudAction}
+            className="-my-1 rounded-md px-2 py-1 font-normal text-ink-500 transition-colors hover:bg-paper-200/60 hover:text-ink-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+          >
+            {actionLabel}
+          </button>
+        </>
       )}
-    </>
+    </div>
   );
 }
 

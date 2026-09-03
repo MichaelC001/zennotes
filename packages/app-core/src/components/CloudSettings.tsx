@@ -28,7 +28,6 @@ import { useToastStore } from "../lib/toast";
 import { notifyPublishedNoteChanged } from "../lib/published-note-events";
 import { Button } from "./ui/Button";
 import { useStore } from "../store";
-import { CloudBootstrapConflictResolver } from "./CloudBootstrapConflictResolver";
 import { CloudPendingConflictResolver } from "./CloudPendingConflictResolver";
 
 type CloudAction =
@@ -1889,9 +1888,6 @@ function CloudSyncSummary({
   vaultName: string;
   onSummaryChange: (summary: CloudSyncRunSummary) => void;
 }): JSX.Element {
-  const [selectedBootstrapConflict, setSelectedBootstrapConflict] = useState<
-    CloudSyncRunSummary["bootstrap_conflicts"][number] | null
-  >(null);
   const [selectedPendingConflictId, setSelectedPendingConflictId] = useState<
     string | null
   >(null);
@@ -1977,21 +1973,6 @@ function CloudSyncSummary({
                       Open copy
                     </Button>
                   )}
-                  {item.kind === "bootstrap" && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() =>
-                        setSelectedBootstrapConflict(
-                          summary.bootstrap_conflicts.find(
-                            (conflict) => conflict.path === item.path,
-                          ) ?? null,
-                        )
-                      }
-                    >
-                      Compare &amp; resolve
-                    </Button>
-                  )}
                   {item.kind === "pending" && (
                     <Button
                       variant="primary"
@@ -2036,25 +2017,16 @@ function CloudSyncSummary({
           ))}
         </ul>
       )}
-      {selectedBootstrapConflict && (
-        <div className="mt-3">
-          <CloudBootstrapConflictResolver
-            conflict={selectedBootstrapConflict}
-            vaultName={vaultName}
-            onClose={() => setSelectedBootstrapConflict(null)}
-            onResolved={(nextSummary) => {
-              setSelectedBootstrapConflict(null);
-              onSummaryChange(nextSummary);
-            }}
-          />
-        </div>
-      )}
       {selectedPendingConflictId &&
         summary.pending_conflicts?.find(
           (conflict) => conflict.id === selectedPendingConflictId,
         ) && (
           <div className="mt-3 rounded-xl border border-paper-300/60 bg-paper-50 p-3">
             <CloudPendingConflictResolver
+              // Keyed by conflict: auto-advancing to the next file must not
+              // inherit the previous one's copy name or resolved path, which
+              // are seeded once from the conflict this resolver opened with.
+              key={selectedPendingConflictId}
               conflict={
                 summary.pending_conflicts.find(
                   (conflict) => conflict.id === selectedPendingConflictId,

@@ -2,7 +2,7 @@
 
 ## Launch thread draft
 
-**1/3** — attach `media/cloud-conflict-resolution-683.mp4`
+**1/3**, attach `media/cloud-conflict-resolution-683.mp4`
 
 ZenNotes 2.44.0 turns Cloud conflicts into clear choices.
 

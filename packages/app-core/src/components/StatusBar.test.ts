@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, Fragment } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatRelativeSyncTime } from "../lib/cloud-auto-sync";
 import { useCloudSyncStatusStore } from "../lib/cloud-auto-sync";
 import { StatusBar } from "./StatusBar";
+import { CloudConflictReviewHost } from "./CloudConflictReviewHost";
 import { useStore } from "../store";
 import type { NoteContent } from "@shared/ipc";
 
 const bridgeMocks = vi.hoisted(() => ({
-  getCloudBootstrapConflict: vi.fn(),
   getCloudConflict: vi.fn(),
   saveCloudConflictDraft: vi.fn(),
   resolveCloudConflict: vi.fn(),
@@ -27,6 +27,19 @@ vi.mock("@zennotes/bridge-contract/bridge", () => ({
 
 describe("cloud sync status time", () => {
   const now = new Date("2026-08-11T14:00:00.000Z").getTime();
+
+  // The status store is module state: a leftover summary (or an open queue)
+  // from one case would decide the action label in the next.
+  beforeEach(() => {
+    useCloudSyncStatusStore.setState({
+      phase: "hidden",
+      vaultName: null,
+      lastSyncedAt: null,
+      error: null,
+      lastSummary: null,
+      conflictReviewOpen: false,
+    });
+  });
 
   it("keeps a recent successful sync reassuring and readable", () => {
     expect(formatRelativeSyncTime(now - 20_000, now)).toBe("just now");
@@ -110,78 +123,6 @@ describe("cloud sync status time", () => {
     host.remove();
   });
 
-  it("opens a bootstrap conflict directly from the status bar", async () => {
-    const conflict = {
-      code: "BOOTSTRAP_CONTENT_CONFLICT" as const,
-      item_id: "item-1",
-      path: "Daily Notes/2026-09-01 Tue.md",
-      local_sha256: "local-hash",
-      remote_sha256: "cloud-hash",
-    };
-    bridgeMocks.getCloudBootstrapConflict.mockResolvedValue({
-      conflict,
-      kind: "text",
-      local: {
-        sha256: "local-hash",
-        byte_length: 17,
-        media_type: "text/markdown",
-        text: "latest local edit",
-      },
-      cloud: {
-        sha256: "cloud-hash",
-        byte_length: 16,
-        media_type: "text/markdown",
-        text: "older cloud edit",
-      },
-    });
-    useCloudSyncStatusStore.setState({
-      phase: "attention",
-      vaultName: "Cloud Notes",
-      lastSyncedAt: null,
-      error:
-        "Cloud sync needs attention: 1 file differs on this device and in Cloud.",
-      lastSummary: {
-        cursor: 7,
-        pulled: 0,
-        pushed: 0,
-        conflicts: [],
-        bootstrap_conflicts: [conflict],
-        local_conflicts: [],
-      },
-    });
-    const setSettingsOpen = vi.fn();
-    const previous = useStore.getState().setSettingsOpen;
-    useStore.setState({ setSettingsOpen });
-    const host = document.createElement("div");
-    document.body.append(host);
-    const root = createRoot(host);
-
-    try {
-      act(() => root.render(createElement(StatusBar, { note: null })));
-      const review = host.querySelector<HTMLButtonElement>(
-        "[data-cloud-sync-action]",
-      );
-      expect(review?.textContent).toBe("Review now");
-      await act(async () => {
-        review!.click();
-        await Promise.resolve();
-      });
-
-      const dialog = document.body.querySelector<HTMLElement>(
-        "[data-cloud-conflict-dialog]",
-      );
-      expect(dialog).not.toBeNull();
-      expect(dialog?.textContent).toContain("Review sync changes");
-      expect(dialog?.textContent).toContain("latest local edit");
-      expect(dialog?.textContent).toContain("older cloud edit");
-      expect(setSettingsOpen).not.toHaveBeenCalled();
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-      useStore.setState({ setSettingsOpen: previous });
-    }
-  });
-
   it("opens an ongoing multi-device conflict directly from the status bar", async () => {
     const pending = {
       id: "item-ongoing",
@@ -254,7 +195,18 @@ describe("cloud sync status time", () => {
     const root = createRoot(host);
 
     try {
-      act(() => root.render(createElement(StatusBar, { note: null })));
+      // The dialog is mounted app-wide (zen mode hides the status bar), so the
+      // click and the queue it opens are two components.
+      act(() =>
+        root.render(
+          createElement(
+            Fragment,
+            null,
+            createElement(StatusBar, { note: null }),
+            createElement(CloudConflictReviewHost),
+          ),
+        ),
+      );
       const resolve = host.querySelector<HTMLButtonElement>(
         "[data-cloud-sync-action]",
       );
@@ -270,6 +222,64 @@ describe("cloud sync status time", () => {
       );
       expect(dialog?.textContent).toContain("Today.md");
       expect(dialog?.textContent).toContain("Other device");
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+    }
+  });
+
+  it("keeps the conflict queue reachable while the next run is syncing", async () => {
+    const pending = {
+      id: "item-during-sync",
+      item_id: "item-during-sync",
+      path: "Daily Notes/Today.md",
+      cloud_path: "Daily Notes/Today.md",
+      kind: "content" as const,
+      can_merge: true,
+      has_base: true,
+    };
+    bridgeMocks.getCloudConflict.mockResolvedValue({
+      conflict: pending,
+      base: textVersion(pending.path, "base"),
+      local: textVersion(pending.path, "local"),
+      cloud: textVersion(pending.path, "cloud"),
+      suggested_text: "local",
+      draft_text: null,
+      changes: [],
+      parts: [],
+    });
+    useCloudSyncStatusStore.setState({
+      phase: "syncing",
+      vaultName: "Cloud Notes",
+      lastSyncedAt: null,
+      error: null,
+      lastSummary: {
+        cursor: 7,
+        pulled: 1,
+        pushed: 0,
+        conflicts: [],
+        bootstrap_conflicts: [],
+        local_conflicts: [],
+        pending_conflicts: [pending],
+      },
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+
+    try {
+      act(() => root.render(createElement(StatusBar, { note: null })));
+      const review = host.querySelector<HTMLButtonElement>(
+        "[data-cloud-sync-action]",
+      );
+      expect(review?.textContent).toBe("Review now");
+
+      await act(async () => {
+        review!.click();
+        await Promise.resolve();
+      });
+      expect(useCloudSyncStatusStore.getState().conflictReviewOpen).toBe(true);
+      expect(bridgeMocks.syncCloudVault).not.toHaveBeenCalled();
     } finally {
       act(() => root.unmount());
       host.remove();
@@ -311,3 +321,15 @@ describe("cloud sync status time", () => {
     host.remove();
   });
 });
+
+function textVersion(path: string, text: string) {
+  return {
+    path,
+    revision: 2,
+    sha256: `hash-${text}`,
+    byte_length: text.length,
+    media_type: "text/markdown",
+    text,
+    deleted: false,
+  };
+}

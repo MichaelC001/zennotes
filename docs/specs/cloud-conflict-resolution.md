@@ -42,14 +42,14 @@ No new runtime dependency is required. Line differencing and three-way merge beh
 
 ## Project structure
 
-- `packages/shared-domain/src/` — conflict records, diff/merge logic, coordinator behavior, portable filesystem adapter
-- `packages/bridge-contract/src/` — cross-platform conflict summaries, details, resolutions, and bridge methods
-- `packages/app-core/src/components/` — responsive conflict queue and merge experience
-- `apps/desktop/src/main|preload/` — desktop persistence and IPC
-- `apps/web/src/bridge/` — explicit unsupported implementations where local-vault Cloud sync is unavailable
-- `docs/releases/v2.44.0/` — user-facing release notes and verified demo media
-- ZenNotes Cloud Laravel repository — historical revision endpoint and authorization tests
-- iOS/Android repositories — native persistence/bridge adapters and responsive runtime verification
+- `packages/shared-domain/src/`: conflict records, diff/merge logic, coordinator behavior, portable filesystem adapter
+- `packages/bridge-contract/src/`: cross-platform conflict summaries, details, resolutions, and bridge methods
+- `packages/app-core/src/components/`: responsive conflict queue and merge experience
+- `apps/desktop/src/main|preload/`: desktop persistence and IPC
+- `apps/web/src/bridge/`: explicit unsupported implementations where local-vault Cloud sync is unavailable
+- `docs/releases/v2.44.0/`: user-facing release notes and verified demo media
+- ZenNotes Cloud Laravel repository: historical revision endpoint and authorization tests
+- iOS/Android repositories: native persistence/bridge adapters and responsive runtime verification
 
 ## Code style
 

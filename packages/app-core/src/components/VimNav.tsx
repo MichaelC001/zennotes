@@ -46,6 +46,12 @@ import {
 import { getBufferNavigationTarget } from '../lib/buffer-navigation'
 import { focusEditorNormalMode } from '../lib/editor-focus'
 import { atlasHoldsKeyboard } from '../lib/atlas'
+import {
+  hasResolvableCloudConflicts,
+  openCloudConflictReview,
+  resolvableCloudConflictCount,
+  useCloudSyncStatusStore
+} from '../lib/cloud-auto-sync'
 import { EXCALIDRAW_SURFACE, SELF_KEYED_SURFACES } from '../lib/self-keyed-surfaces'
 import { isWorkspaceVirtualTabPath } from '../lib/workspace-tabs'
 import {
@@ -200,6 +206,9 @@ export function VimNav(): JSX.Element | null {
   const calendarToggleAvailable = useStore((s) =>
     isCalendarToggleAvailable(s.vaultSettings, s.activeNote)
   )
+  const cloudConflictsWaiting = useCloudSyncStatusStore(
+    (s) => resolvableCloudConflictCount(s.lastSummary) > 0
+  )
   const whichKeyHintsPref = useStore((s) => s.whichKeyHints)
   const whichKeyHintMode = useStore((s) => s.whichKeyHintMode)
   const whichKeyHintTimeoutMs = useStore((s) => s.whichKeyHintTimeoutMs)
@@ -267,6 +276,15 @@ export function VimNav(): JSX.Element | null {
               keyLabel: getKeymapDisplay(keymapOverrides, 'vim.leaderAtlas'),
               label: 'Open atlas',
               detail: 'See the vault as a map of notes and links.'
+            }
+          ]
+        : []),
+      ...(cloudConflictsWaiting
+        ? [
+            {
+              keyLabel: getKeymapDisplay(keymapOverrides, 'vim.leaderCloudConflicts'),
+              label: 'Review Cloud conflicts',
+              detail: 'Open the queue of files waiting on a sync decision.'
             }
           ]
         : []),
@@ -394,6 +412,9 @@ export function VimNav(): JSX.Element | null {
         document.querySelector('[data-ctx-menu]') ||
         document.querySelector('[data-prompt-modal]') ||
         document.querySelector('[data-confirm-modal]') ||
+        // The Cloud conflict queue is a review surface with its own buttons and
+        // textarea: leader chords must not fire at the notes underneath it.
+        document.querySelector('[data-cloud-conflict-dialog]') ||
         // The workflow import review focuses a BUTTON, not a text field, so
         // the INPUT/TEXTAREA escape below does not cover it: without this
         // marker, Space armed the leader instead of pressing the focused
@@ -910,6 +931,18 @@ export function VimNav(): JSX.Element | null {
           e.stopImmediatePropagation()
           resetLeader()
           void state.openWorkflowsView()
+          return
+        }
+        // Skipped with an empty queue so the key falls through as an unbound
+        // leader press rather than opening an empty dialog.
+        if (
+          hasResolvableCloudConflicts() &&
+          matchesSequenceToken(e, overrides, 'vim.leaderCloudConflicts')
+        ) {
+          e.preventDefault()
+          e.stopImmediatePropagation()
+          resetLeader()
+          openCloudConflictReview()
           return
         }
         if (matchesSequenceToken(e, overrides, 'vim.hintMode')) {

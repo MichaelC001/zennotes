@@ -5752,12 +5752,14 @@ export const useStore = create<Store>((set, get) => {
       folder: target.folder
     })
     set((s) => ({
+      // Both rebuilt notes go back through the Cloud filter: a note waiting on
+      // a conflict decision must stay out of the task surfaces even when an
+      // edit to another note reindexes it.
       vaultTasks: [
         ...s.vaultTasks.filter(
           (t) => t.sourcePath !== task.sourcePath && t.sourcePath !== target.path
         ),
-        ...srcTasks,
-        ...tgtTasks
+        ...withoutPendingCloudConflictTasks([...srcTasks, ...tgtTasks])
       ]
     }))
   },
@@ -5830,12 +5832,13 @@ export const useStore = create<Store>((set, get) => {
       folder: targetMeta.folder
     })
     set((s) => ({
+      // Same filter as the move above: forwarding must not slip a withheld
+      // note's tasks back into the shared cache.
       vaultTasks: [
         ...s.vaultTasks.filter(
           (t) => t.sourcePath !== task.sourcePath && t.sourcePath !== targetPath
         ),
-        ...srcTasks,
-        ...tgtTasks
+        ...withoutPendingCloudConflictTasks([...srcTasks, ...tgtTasks])
       ]
     }))
   },

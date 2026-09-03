@@ -137,6 +137,43 @@ describe('Workflows feature switch', () => {
     useStore.setState({ workflowsEnabled: false })
     expect(buildCommands().some((c) => c.id === 'view.workflows')).toBe(false)
   })
+
+  it('offers the Cloud conflict queue only while files are waiting', async () => {
+    const { buildCommands } = await loadCommands()
+    const { useCloudSyncStatusStore } = await import('./cloud-auto-sync')
+    const summary = {
+      cursor: 3,
+      pulled: 0,
+      pushed: 0,
+      conflicts: [],
+      bootstrap_conflicts: [],
+      local_conflicts: [],
+      pending_conflicts: [
+        {
+          id: 'item-1',
+          item_id: 'item-1',
+          path: 'Plans/Trip.md',
+          cloud_path: 'Plans/Trip.md',
+          kind: 'content' as const,
+          can_merge: true,
+          has_base: true
+        }
+      ]
+    }
+
+    useCloudSyncStatusStore.setState({ lastSummary: summary })
+    const command = buildCommands().find((c) => c.id === 'app.cloud.reviewConflicts')
+    expect(command?.title).toBe('Review Cloud Sync Conflicts')
+
+    command?.run()
+    expect(useCloudSyncStatusStore.getState().conflictReviewOpen).toBe(true)
+
+    useCloudSyncStatusStore.setState({
+      lastSummary: { ...summary, pending_conflicts: [] },
+      conflictReviewOpen: false
+    })
+    expect(buildCommands().some((c) => c.id === 'app.cloud.reviewConflicts')).toBe(false)
+  })
 })
 
 describe('Workflow run entries', () => {

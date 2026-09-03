@@ -27,8 +27,6 @@ const mocks = vi.hoisted(() => ({
   unlinkCloudVault: vi.fn(),
   deleteCloudVault: vi.fn(),
   syncCloudVault: vi.fn(),
-  getCloudBootstrapConflict: vi.fn(),
-  resolveCloudBootstrapConflict: vi.fn(),
   getCloudSettingsConflict: vi.fn(),
   resolveCloudSettingsConflict: vi.fn(),
   listCloudBackups: vi.fn(),
@@ -514,92 +512,6 @@ describe("CloudSettings", () => {
     } finally {
       useStore.setState(previous);
     }
-  });
-
-  it("compares and explicitly resolves an initial same-path conflict", async () => {
-    mocks.getCloudAccountStatus.mockResolvedValue(connected);
-    mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
-    mocks.listCloudVaults.mockResolvedValue([]);
-    mocks.getCloudVaultLink.mockResolvedValue({
-      base_url: "https://zennotes.org",
-      vault_id: "vault-1",
-      vault_name: "Cloud Notes",
-      linked_at: "2026-08-10T12:00:00.000Z",
-    });
-    const conflict = {
-      code: "BOOTSTRAP_CONTENT_CONFLICT" as const,
-      item_id: "item-1",
-      path: "Daily Notes/2026-09-01 Tue.md",
-      local_sha256: "local-hash",
-      remote_sha256: "cloud-hash",
-    };
-    mocks.syncCloudVault
-      .mockResolvedValueOnce({
-        cursor: 7,
-        pulled: 0,
-        pushed: 0,
-        conflicts: [],
-        bootstrap_conflicts: [conflict],
-        local_conflicts: [],
-      })
-      .mockResolvedValueOnce({
-        cursor: 8,
-        pulled: 0,
-        pushed: 1,
-        conflicts: [],
-        bootstrap_conflicts: [],
-        local_conflicts: [],
-      });
-    mocks.getCloudBootstrapConflict.mockResolvedValue({
-      conflict,
-      kind: "text",
-      local: {
-        sha256: "local-hash",
-        byte_length: 17,
-        media_type: "text/markdown",
-        text: "latest local edit",
-      },
-      cloud: {
-        sha256: "cloud-hash",
-        byte_length: 16,
-        media_type: "text/markdown",
-        text: "older cloud edit",
-      },
-    });
-
-    await act(async () =>
-      root.render(
-        createElement(CloudSettings, {
-          localVaultAvailable: true,
-          localVaultName: "Notes",
-        }),
-      ),
-    );
-    const sync = [...host.querySelectorAll("button")].find(
-      (button) => button.textContent?.trim() === "Sync now",
-    );
-    await act(async () => sync!.click());
-    const compare = [...host.querySelectorAll("button")].find(
-      (button) => button.textContent?.trim() === "Compare & resolve",
-    );
-    await act(async () => compare!.click());
-
-    expect(host.textContent).toContain("latest local edit");
-    expect(host.textContent).toContain("older cloud edit");
-    expect(host.textContent).toContain("This device");
-    expect(host.textContent).toContain("Cloud");
-
-    const keepLocal = [...host.querySelectorAll("button")].find(
-      (button) => button.textContent?.trim() === "Keep this device’s version",
-    );
-    await act(async () => keepLocal!.click());
-
-    expect(mocks.resolveCloudBootstrapConflict).toHaveBeenCalledWith({
-      conflict,
-      choice: "local",
-    });
-    expect(host.textContent).toContain("Uploaded 1");
-    expect(host.textContent).not.toContain("latest local edit");
   });
 
   it("clears a stale successful summary when a later manual sync times out", async () => {

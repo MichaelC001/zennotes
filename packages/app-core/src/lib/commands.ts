@@ -27,6 +27,10 @@ import { resolveSystemFolderLabels } from './system-folder-labels'
 import { isCalendarToggleAvailable, noteFolderSubpath } from './vault-layout'
 import { runWorkflowById } from './workflow-trigger'
 import { requestPublishNote } from './publish-note-requests'
+import {
+  hasResolvableCloudConflicts,
+  openCloudConflictReview
+} from './cloud-auto-sync'
 import { DEMO_TOUR_START_PATH } from '@shared/demo-tour'
 
 const APP_WEBSITE_URL = 'https://zennotes.org'
@@ -1676,6 +1680,17 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
         getState().workspaceMode !== 'remote' &&
         !!getState().vault,
       run: () => getState().closeVault()
+    },
+    {
+      id: 'app.cloud.reviewConflicts',
+      title: 'Review Cloud Sync Conflicts',
+      category: 'Vault',
+      keywords: 'cloud sync conflict merge review resolve queue two devices differ',
+      shortcut: leaderShortcut('vim.leaderCloudConflicts'),
+      // Hidden with an empty queue: the same dialog the status bar's Review
+      // now opens, and there is nothing to review without it.
+      when: () => hasResolvableCloudConflicts(),
+      run: () => openCloudConflictReview()
     },
     {
       id: 'app.vault.switch',
