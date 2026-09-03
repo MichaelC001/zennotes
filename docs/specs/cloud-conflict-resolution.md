@@ -97,7 +97,7 @@ Keep filesystem and network effects behind existing repository/remote interfaces
 - [x] Detect legacy conflict-copy names and expose non-destructive review/cleanup guidance.
 - [x] Add the authorized historical revision API used when an upgraded client lacks a local base snapshot.
 - [x] Wire iOS and Android adapters.
-- [ ] Run complete tests/builds, update release documentation, and replace the captioned demo.
+- [x] Run complete tests/builds, update release documentation, and replace the captioned demo.
 
 ## Success criteria
 

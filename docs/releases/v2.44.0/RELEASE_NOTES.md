@@ -16,7 +16,7 @@ ZenNotes 2.44.0: Cloud conflicts become clear choices
 - The shared coordinator now owns durable conflict-only snapshots, automatic line-based three-way merging, per-path sync pauses, stale-choice protection, and auto-next summaries. Desktop, iOS, and Android expose the same inspect, draft, and resolve bridge operations.
 - ZenNotes Cloud adds an authorized historical-revision read so upgraded clients can recover the last agreed text when it is still retained. Older servers and expired revisions fall back safely to a two-version choice.
 - Captioned real-app demo: `media/cloud-conflict-resolution-683.mp4` plus `media/cloud-conflict-resolution-683.vtt` (18 seconds, H.264, 1280×800). The clip uses the built Electron app against an isolated local Cloud fixture and was assembled with FFmpeg.
-- Verification: shared-domain, app-core, and desktop tests; workspace typecheck; desktop production build; Cloud API tests; and iOS/Android checks.
+- Verification: the complete shared-app test and typecheck suites, desktop/web/server production builds, 621 Cloud tests, 30 iOS shell tests plus an Xcode simulator build, and 35 Android shell tests plus a Gradle debug APK build. Dependency audits report no known vulnerabilities on all four release branches.
 
 ---
 
