@@ -1,16 +1,13 @@
 WEBVTT
 
-00:00.000 --> 00:03.750
-ZenNotes now identifies the exact local note that conflicts with Cloud.
+00:00.000 --> 00:04.500
+When a note changes on two devices, Review now appears where you already work.
 
-00:03.750 --> 00:07.200
-Open Compare & resolve to inspect both complete versions before choosing.
+00:04.500 --> 00:09.000
+ZenNotes combines safe edits and asks only about the words that overlap.
 
-00:07.200 --> 00:11.250
-The latest local edit is visible beside the older Cloud copy.
+00:09.000 --> 00:13.500
+Choose either device, keep both changes, or edit the combined note yourself.
 
-00:11.250 --> 00:14.250
-Keep the device version directly—no manual rename or duplicate file.
-
-00:14.250 --> 00:17.850
-ZenNotes updates Cloud and returns the vault to a clean, verified sync.
+00:13.500 --> 00:18.000
+Save once. Sync continues with one clean note and no surprise conflict copy.
