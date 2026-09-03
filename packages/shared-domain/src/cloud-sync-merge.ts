@@ -22,6 +22,10 @@ export interface CloudSyncTextMerge {
   /** A complete safe preview. Unresolved changes initially use this device. */
   text: string
   conflicts: CloudSyncMergeConflict[]
+  /**
+   * Every text part that is followed by another part ends with a line break,
+   * so parts can be concatenated as they are once each conflict has a choice.
+   */
   parts: Array<TextPart | ConflictPart>
 }
 
@@ -36,17 +40,57 @@ interface DiffOperation {
   value: string
 }
 
+/** A side's body without its final line break, and what that break was. */
+interface Body {
+  text: string
+  /** `null` when the side is empty and has no opinion about a final break. */
+  terminator: string | null
+}
+
 const MAX_DETAILED_DIFF_LINES = 8_000
 const MAX_DETAILED_DIFF_DISTANCE = 512
 
 /**
  * A conservative line-based diff3. Independent changes are combined, equal
  * changes collapse, and overlapping changes remain explicit user choices.
+ *
+ * Lines are compared without their terminators so CRLF and LF sides agree,
+ * which means an unterminated final line is "equal" to a terminated one. The
+ * final line break is therefore decided separately: each body is merged
+ * without it, and the side that changed it wins. Inside the merge, any text
+ * that follows an unterminated line is joined with a line break, never glued
+ * onto it.
  */
 export function mergeCloudSyncText(
   baseText: string,
   localText: string,
   cloudText: string
+): CloudSyncTextMerge {
+  const lineBreak = inferredLineBreak(baseText, localText, cloudText)
+  const base = body(baseText)
+  const local = body(localText)
+  const cloud = body(cloudText)
+  const merged = mergeBodies(base.text, local.text, cloud.text, lineBreak)
+  return withTrailingBreak(merged, trailingBreak(base, local, cloud))
+}
+
+export function resolveCloudSyncMerge(
+  merge: CloudSyncTextMerge,
+  choices: Readonly<Record<string, CloudSyncMergeChoice>>
+): string {
+  for (const conflict of merge.conflicts) {
+    if (!choices[conflict.id]) {
+      throw new Error('Choose which version to use for every highlighted change.')
+    }
+  }
+  return render(merge.parts, choices)
+}
+
+function mergeBodies(
+  baseText: string,
+  localText: string,
+  cloudText: string,
+  lineBreak: string
 ): CloudSyncTextMerge {
   if (sameText(localText, cloudText)) return clean(localText)
   if (sameText(baseText, localText)) return clean(cloudText)
@@ -64,7 +108,7 @@ export function mergeCloudSyncText(
   const appendText = (text: string): void => {
     if (!text) return
     const previous = parts.at(-1)
-    if (previous?.type === 'text') previous.text += text
+    if (previous?.type === 'text') previous.text = joinLines(previous.text, text, lineBreak)
     else parts.push({ type: 'text', text })
   }
 
@@ -104,13 +148,14 @@ export function mergeCloudSyncText(
         ...cloudGroup.map((edit) => edit.end)
       )
       appendText(base.slice(baseIndex, start).join(''))
-      const localResult = applyEdits(base, start, end, localGroup)
-      const cloudResult = applyEdits(base, start, end, cloudGroup)
+      const localResult = applyEdits(base, start, end, localGroup, lineBreak)
+      const cloudResult = applyEdits(base, start, end, cloudGroup, lineBreak)
 
       if (sameText(localResult, cloudResult)) {
         appendText(localResult)
       } else {
         conflictNumber++
+        terminateLastText(parts, lineBreak)
         parts.push({
           type: 'conflict',
           conflict: {
@@ -136,25 +181,12 @@ export function mergeCloudSyncText(
 
   appendText(base.slice(baseIndex).join(''))
   const conflicts = parts.flatMap((part) => (part.type === 'conflict' ? [part.conflict] : []))
-  const result: CloudSyncTextMerge = {
+  return {
     status: conflicts.length === 0 ? 'clean' : 'conflict',
     text: render(parts, Object.fromEntries(conflicts.map((conflict) => [conflict.id, 'local']))),
     conflicts,
     parts
   }
-  return result
-}
-
-export function resolveCloudSyncMerge(
-  merge: CloudSyncTextMerge,
-  choices: Readonly<Record<string, CloudSyncMergeChoice>>
-): string {
-  for (const conflict of merge.conflicts) {
-    if (!choices[conflict.id]) {
-      throw new Error('Choose which version to use for every highlighted change.')
-    }
-  }
-  return render(merge.parts, choices)
 }
 
 function clean(text: string): CloudSyncTextMerge {
@@ -170,23 +202,76 @@ function render(
   parts: CloudSyncTextMerge['parts'],
   choices: Readonly<Record<string, CloudSyncMergeChoice>>
 ): string {
-  return parts
-    .map((part) => {
-      if (part.type === 'text') return part.text
+  let output = ''
+  for (const part of parts) {
+    let chunk: string
+    if (part.type === 'text') {
+      chunk = part.text
+    } else {
       const choice = choices[part.conflict.id]
-      if (choice === 'cloud') return part.conflict.cloud_text
-      if (choice === 'both') {
-        return joinBoth(part.conflict.local_text, part.conflict.cloud_text)
-      }
-      return part.conflict.local_text
-    })
-    .join('')
+      if (choice === 'cloud') chunk = part.conflict.cloud_text
+      else if (choice === 'both') {
+        chunk = joinBoth(part.conflict.local_text, part.conflict.cloud_text)
+      } else chunk = part.conflict.local_text
+    }
+    output = joinLines(output, chunk, inferredLineBreak(output, chunk))
+  }
+  return output
 }
 
 function joinBoth(local: string, cloud: string): string {
   if (!local) return cloud
   if (!cloud || sameText(local, cloud)) return local
-  return `${local}${endsWithLineBreak(local) ? '' : inferredLineBreak(local, cloud)}${cloud}`
+  return joinLines(local, cloud, inferredLineBreak(local, cloud))
+}
+
+/** Concatenate two runs of whole lines. A run whose last line is
+ * unterminated gets a line break before anything follows it. */
+function joinLines(left: string, right: string, lineBreak: string): string {
+  if (!left || !right) return left + right
+  return endsWithLineBreak(left) ? left + right : left + lineBreak + right
+}
+
+function terminateLastText(parts: CloudSyncTextMerge['parts'], lineBreak: string): void {
+  const previous = parts.at(-1)
+  if (previous?.type === 'text' && previous.text && !endsWithLineBreak(previous.text)) {
+    previous.text += lineBreak
+  }
+}
+
+function body(text: string): Body {
+  if (!text) return { text: '', terminator: null }
+  const match = /(?:\r\n|\n|\r)$/.exec(text)
+  if (!match) return { text, terminator: '' }
+  return { text: text.slice(0, text.length - match[0].length), terminator: match[0] }
+}
+
+function trailingBreak(base: Body, local: Body, cloud: Body): string {
+  if (local.terminator === null) return cloud.terminator ?? ''
+  if (cloud.terminator === null) return local.terminator
+  if ((local.terminator === '') === (cloud.terminator === '')) return local.terminator
+  const localKeptBase = (base.terminator === '') === (local.terminator === '')
+  return localKeptBase ? cloud.terminator : local.terminator
+}
+
+function withTrailingBreak(merge: CloudSyncTextMerge, terminator: string): CloudSyncTextMerge {
+  const last = merge.parts.at(-1)
+  if (!terminator || !last) return merge
+  if (last.type === 'text') {
+    last.text += terminator
+  } else {
+    const conflict = last.conflict
+    if (conflict.base_text) conflict.base_text += terminator
+    if (conflict.local_text) conflict.local_text += terminator
+    if (conflict.cloud_text) conflict.cloud_text += terminator
+  }
+  return {
+    ...merge,
+    text: render(
+      merge.parts,
+      Object.fromEntries(merge.conflicts.map((conflict) => [conflict.id, 'local']))
+    )
+  }
 }
 
 function inferredLineBreak(...values: string[]): string {
@@ -225,15 +310,21 @@ function editsOverlap(left: Edit, right: Edit): boolean {
   return Math.max(left.start, right.start) < Math.min(left.end, right.end)
 }
 
-function applyEdits(base: string[], start: number, end: number, values: Edit[]): string {
+function applyEdits(
+  base: string[],
+  start: number,
+  end: number,
+  values: Edit[],
+  lineBreak: string
+): string {
   let index = start
   let output = ''
   for (const edit of values.sort((left, right) => left.start - right.start)) {
-    output += base.slice(index, edit.start).join('')
-    output += edit.replacement.join('')
+    output = joinLines(output, base.slice(index, edit.start).join(''), lineBreak)
+    output = joinLines(output, edit.replacement.join(''), lineBreak)
     index = edit.end
   }
-  return output + base.slice(index, end).join('')
+  return joinLines(output, base.slice(index, end).join(''), lineBreak)
 }
 
 function edits(base: string[], target: string[]): Edit[] {

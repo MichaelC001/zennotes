@@ -142,7 +142,7 @@ export function cloudSyncLegacyConflictOriginalPath(value: string): string | nul
   const slash = normalized.lastIndexOf('/')
   const directory = slash === -1 ? '' : normalized.slice(0, slash + 1)
   const name = normalized.slice(slash + 1)
-  const match = /^(.*) \(cloud conflict(?: (?:[2-9]|[1-9]\d+))?\)(\.[^.]*)?$/.exec(name)
+  const match = /^(.*) \(cloud conflict(?: (?:[2-9]|[1-9]\d+))?\)((?:\.[^.]*)*)$/.exec(name)
   if (!match?.[1]) return null
   return `${directory}${match[1]}${match[2] ?? ''}`
 }

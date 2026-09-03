@@ -21,9 +21,6 @@ export interface CloudSyncTrackedItem {
   sha256: string
   byte_length: number
   media_type: string
-  /** Legacy inline body. New clients fetch the retained revision only when a
-   * real conflict occurs, avoiding a private full-vault duplicate in state. */
-  base_content?: CloudSyncContent
 }
 
 export interface CloudSyncConflictSnapshot {

@@ -1155,7 +1155,7 @@ describe('CloudSyncCoordinator', () => {
       version: 1,
       vault_id: 'vault-1',
       cursor: 2,
-      items: { item: { ...cloudItem, base_content: content('agreed') } },
+      items: { item: cloudItem },
       pending_conflicts: {
         item: {
           id: 'item',
@@ -1310,6 +1310,21 @@ function realContent(data: string): CloudSyncContent {
     byte_length: Buffer.byteLength(data),
     media_type: 'text/markdown'
   }
+}
+
+/** Give a fake server the retained body of one revision. */
+function retaining(
+  server: CloudSyncRemote,
+  itemId: string,
+  revision: number,
+  path: string,
+  content: CloudSyncContent
+): void {
+  Object.assign(server, {
+    async revision() {
+      return { data: { item_id: itemId, revision, path, kind: 'text' as const, deleted: false, content } }
+    }
+  })
 }
 
 function tracked(
@@ -1506,7 +1521,7 @@ describe('CloudSyncCoordinator: catching up on a file this device never touched'
       vault_id: 'vault-1',
       cursor: 1,
       items: {
-        plan: { ...tracked('plan', path, 1, base.data), base_content: base },
+        plan: tracked('plan', path, 1, base.data),
         other: tracked('other', 'inbox/Other.md', 1, 'old')
       },
       pending_conflicts: {}
@@ -1553,6 +1568,7 @@ describe('CloudSyncCoordinator: catching up on a file this device never touched'
         cursor: 4
       })
     })
+    retaining(server, 'plan', 1, path, base)
     const coordinator = new CloudSyncCoordinator(
       'vault-1',
       server,
@@ -1638,11 +1654,12 @@ describe('CloudSyncCoordinator: catching up on a file this device never touched'
       vault_id: 'vault-1',
       cursor: 1,
       items: {
-        plan: { ...tracked('plan', path, 1, baseText), base_content: base }
+        plan: tracked('plan', path, 1, baseText)
       },
       pending_conflicts: {}
     })
     const server = remote({ changes: [upsert(2, 'plan', path, cloudText)] })
+    retaining(server, 'plan', 1, path, base)
 
     const result = await new CloudSyncCoordinator(
       'vault-1',
@@ -1828,6 +1845,340 @@ describe('CloudSyncCoordinator: rejected mutations name their file', () => {
     expect(result.conflicts.map((c) => [c.item_id, c.code, c.path])).toEqual([
       ['gone', 'ITEM_DELETED', 'inbox/Gone.md'],
       ['kept', 'REVISION_CONFLICT', 'inbox/Kept.md']
+    ])
+  })
+})
+
+describe('CloudSyncCoordinator: decisions on queued conflicts', () => {
+  const path = 'inbox/Plan.md'
+  const movedPath = 'archive/Plan.md'
+
+  function manifestItem(itemId: string, itemPath: string, revision: number, data: string) {
+    const content = realContent(data)
+    return {
+      item_id: itemId,
+      path: itemPath,
+      kind: 'text' as const,
+      revision,
+      sha256: content.sha256,
+      byte_length: content.byte_length,
+      media_type: content.media_type,
+      content
+    }
+  }
+
+  function movedOnCloud(): { changes: CloudSyncChange[]; manifest: CloudSyncManifestResponse } {
+    return {
+      changes: [
+        {
+          sequence: 2,
+          item_id: 'plan',
+          type: 'move',
+          path: movedPath,
+          previous_path: path,
+          revision: 2
+        }
+      ],
+      manifest: { data: [manifestItem('plan', movedPath, 2, 'agreed')], cursor: 2, next_page: null }
+    }
+  }
+
+  it('lets a file edited here and moved on the other device take the Cloud side', async () => {
+    const fs = memoryFileSystem({ [path]: 'edited here' })
+    const states = memoryState({
+      version: 1,
+      vault_id: 'vault-1',
+      cursor: 1,
+      items: { plan: tracked('plan', path, 1, 'agreed') }
+    })
+    const coordinator = new CloudSyncCoordinator(
+      'vault-1',
+      remote(movedOnCloud()),
+      new PortableCloudSyncRepository(fs),
+      states,
+      ids()
+    )
+
+    const result = await coordinator.sync()
+    expect(result.pendingConflicts).toEqual([
+      expect.objectContaining({ id: 'plan', kind: 'move', path, cloud_path: movedPath })
+    ])
+    // Without a revision endpoint the Cloud side is metadata only, which is
+    // still enough to verify freshness and to fetch the body at decision time.
+    expect(states.current?.pending_conflicts?.plan.cloud.content).toMatchObject({
+      sha256: realContent('agreed').sha256,
+      byte_length: realContent('agreed').byte_length,
+      data: ''
+    })
+
+    const details = await coordinator.getConflict('plan')
+    await coordinator.resolveConflict({
+      conflict_id: 'plan',
+      choice: 'cloud',
+      expected_local_sha256: details.local.sha256,
+      expected_cloud_revision: 2
+    })
+
+    expect([...fs.files.keys()]).toEqual([movedPath])
+    expect(fs.files.get(movedPath)).toBe('agreed')
+    expect(states.current?.pending_conflicts?.plan).toBeUndefined()
+  })
+
+  it('lets that file keep this device version without rewriting it', async () => {
+    const fs = memoryFileSystem({ [path]: 'edited here' })
+    const states = memoryState({
+      version: 1,
+      vault_id: 'vault-1',
+      cursor: 1,
+      items: { plan: tracked('plan', path, 1, 'agreed') }
+    })
+    const server = remote(movedOnCloud())
+    retaining(server, 'plan', 2, movedPath, realContent('agreed'))
+    const repository = new PortableCloudSyncRepository(fs)
+    const writes = vi.spyOn(repository, 'applyConflictResolutionFiles')
+    const coordinator = new CloudSyncCoordinator('vault-1', server, repository, states, ids())
+
+    await coordinator.sync()
+    const details = await coordinator.getConflict('plan')
+    // The retained revision gives the resolver the Cloud text to compare.
+    expect(details.cloud.text).toBe('agreed')
+    await coordinator.resolveConflict({
+      conflict_id: 'plan',
+      choice: 'local',
+      expected_local_sha256: details.local.sha256,
+      expected_cloud_revision: 2
+    })
+
+    expect(writes).not.toHaveBeenCalled()
+    expect(fs.files.get(path)).toBe('edited here')
+    expect(server.mutations.flatMap((request) => request.mutations)).toEqual([
+      expect.objectContaining({
+        type: 'upsert',
+        item_id: 'plan',
+        path,
+        base_revision: 2,
+        content: expect.objectContaining({ data: 'edited here' })
+      })
+    ])
+    expect(states.current?.pending_conflicts?.plan).toBeUndefined()
+  })
+
+  it('keeps a same-path conflict labelled as content when the other device saves again', async () => {
+    const local: CloudSyncLocalItem = { path: 'Plan.md', kind: 'text', content: content('mine') }
+    const repository: CloudSyncRepository = {
+      async scan() {
+        return [local]
+      },
+      async apply(change) {
+        return {
+          code: 'LOCAL_EDIT_CONFLICT',
+          path: change.path,
+          conflict_copy_path: 'Plan (cloud conflict).md',
+          local
+        }
+      }
+    }
+    const changes: CloudSyncChange[] = [upsert(2, 'plan', 'Plan.md', 'theirs')]
+    const states = memoryState({ version: 1, vault_id: 'vault-1', cursor: 1, items: {} })
+    const server = remote({
+      changes,
+      mutate: () => ({ acknowledged: [], conflicts: [], cursor: 2 })
+    })
+    const coordinator = new CloudSyncCoordinator('vault-1', server, repository, states, ids())
+
+    await coordinator.sync()
+    changes.push(upsert(3, 'plan', 'Plan.md', 'theirs again'))
+    const result = await coordinator.sync()
+
+    expect(result.pendingConflicts).toEqual([
+      expect.objectContaining({ id: 'plan', kind: 'content', path: 'Plan.md', cloud_path: 'Plan.md' })
+    ])
+    expect(states.current?.pending_conflicts?.plan.cloud.content?.data).toBe('theirs again')
+  })
+
+  it('queues the conflict when the file changes under an automatic merge', async () => {
+    const baseText = '# Trip\nPack a coat.\n'
+    const local: CloudSyncLocalItem = {
+      path,
+      kind: 'text',
+      content: realContent('# Autumn trip\nPack a coat.\n')
+    }
+    const repository: CloudSyncRepository = {
+      async scan() {
+        return [local]
+      },
+      async apply(change) {
+        return { code: 'LOCAL_EDIT_CONFLICT', path: change.path, conflict_copy_path: '', local }
+      },
+      async replaceConflictFile() {
+        throw new Error('This file changed on this device.')
+      }
+    }
+    const states = memoryState({
+      version: 1,
+      vault_id: 'vault-1',
+      cursor: 1,
+      items: { plan: tracked('plan', path, 1, baseText) }
+    })
+    const server = remote({
+      changes: [upsert(2, 'plan', path, '# Trip\nPack a warm coat.\n')],
+      mutate: () => ({ acknowledged: [], conflicts: [], cursor: 2 })
+    })
+    retaining(server, 'plan', 1, path, realContent(baseText))
+
+    const result = await new CloudSyncCoordinator(
+      'vault-1',
+      server,
+      repository,
+      states,
+      ids()
+    ).sync()
+
+    expect(result.pendingConflicts).toEqual([expect.objectContaining({ id: 'plan', path })])
+    expect(states.current?.cursor).toBe(2)
+  })
+
+  it('keeps large snapshots out of state and fetches the Cloud bytes for a decision', async () => {
+    const big = (fill: string) => `${fill}\n`.repeat(80_000)
+    const local: CloudSyncLocalItem = { path, kind: 'text', content: realContent(big('mine')) }
+    const cloudText = big('theirs')
+    const written: Array<{ path: string; content: CloudSyncContent }> = []
+    const repository: CloudSyncRepository = {
+      async scan() {
+        return [local]
+      },
+      async apply(change) {
+        return { code: 'LOCAL_EDIT_CONFLICT', path: change.path, conflict_copy_path: '', local }
+      },
+      async applyConflictResolutionFiles(input) {
+        written.push(...input.files)
+      }
+    }
+    const states = memoryState({
+      version: 1,
+      vault_id: 'vault-1',
+      cursor: 1,
+      items: { plan: tracked('plan', path, 1, 'agreed') }
+    })
+    const server = remote({
+      changes: [upsert(2, 'plan', path, cloudText)],
+      manifest: { data: [manifestItem('plan', path, 2, cloudText)], cursor: 2, next_page: null },
+      mutate: () => ({ acknowledged: [], conflicts: [], cursor: 2 })
+    })
+    const coordinator = new CloudSyncCoordinator('vault-1', server, repository, states, ids())
+
+    await coordinator.sync()
+    const stored = states.current?.pending_conflicts?.plan
+    expect(stored?.local.content).toMatchObject({ data: '', byte_length: local.content.byte_length })
+    expect(stored?.cloud.content).toMatchObject({ data: '', byte_length: Buffer.byteLength(cloudText) })
+
+    const details = await coordinator.getConflict('plan')
+    expect(details.local.text).toBeNull()
+    expect(details.cloud.text).toBeNull()
+    await coordinator.resolveConflict({
+      conflict_id: 'plan',
+      choice: 'cloud',
+      expected_local_sha256: details.local.sha256,
+      expected_cloud_revision: 2
+    })
+
+    expect(written).toEqual([{ path, content: expect.objectContaining({ data: cloudText }) }])
+  })
+
+  it('uploads a large local file from disk without rewriting it as empty', async () => {
+    const marker: CloudSyncContent = {
+      encoding: 'base64',
+      data: '',
+      sha256: 'hash:six-megabytes',
+      byte_length: 6 * 1024 * 1024,
+      media_type: 'application/pdf'
+    }
+    const local: CloudSyncLocalItem = { path: 'Deck.pdf', kind: 'binary', content: marker }
+    const writes = vi.fn()
+    const repository: CloudSyncRepository = {
+      async scan() {
+        return [local]
+      },
+      async apply(change) {
+        return { code: 'LOCAL_EDIT_CONFLICT', path: change.path, conflict_copy_path: '', local }
+      },
+      applyConflictResolutionFiles: writes
+    }
+    const cloud = binaryContent('theirs')
+    const states = memoryState({
+      version: 1,
+      vault_id: 'vault-1',
+      cursor: 1,
+      items: {
+        deck: {
+          item_id: 'deck',
+          path: 'Deck.pdf',
+          kind: 'binary',
+          revision: 1,
+          sha256: 'hash:agreed',
+          byte_length: 6,
+          media_type: 'application/pdf'
+        }
+      }
+    })
+    const server = remote({
+      changes: [
+        {
+          sequence: 2,
+          item_id: 'deck',
+          type: 'upsert',
+          path: 'Deck.pdf',
+          previous_path: null,
+          revision: 2,
+          content: cloud
+        }
+      ],
+      manifest: {
+        data: [
+          {
+            item_id: 'deck',
+            path: 'Deck.pdf',
+            kind: 'binary',
+            revision: 2,
+            sha256: cloud.sha256,
+            byte_length: cloud.byte_length,
+            media_type: cloud.media_type,
+            content: cloud
+          }
+        ],
+        cursor: 2,
+        next_page: null
+      },
+      mutate: (body) => ({
+        acknowledged: body.mutations.map((mutation) => ({
+          operation_id: mutation.operation_id,
+          item_id: mutation.item_id,
+          revision: 3,
+          sequence: 3
+        })),
+        conflicts: [],
+        cursor: 3
+      })
+    })
+    const coordinator = new CloudSyncCoordinator('vault-1', server, repository, states, ids())
+
+    await coordinator.sync()
+    const details = await coordinator.getConflict('deck')
+    await coordinator.resolveConflict({
+      conflict_id: 'deck',
+      choice: 'local',
+      expected_local_sha256: details.local.sha256,
+      expected_cloud_revision: 2
+    })
+
+    expect(writes).not.toHaveBeenCalled()
+    expect(server.mutations.flatMap((request) => request.mutations)).toEqual([
+      expect.objectContaining({
+        type: 'upsert',
+        item_id: 'deck',
+        path: 'Deck.pdf',
+        content: expect.objectContaining({ data: '', byte_length: 6 * 1024 * 1024 })
+      })
     ])
   })
 })

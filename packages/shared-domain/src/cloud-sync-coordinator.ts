@@ -41,6 +41,10 @@ const MANIFEST_PAGE_SIZE = 250
 const CHANGE_PAGE_SIZE = 250
 const MANIFEST_RETRIES = 3
 const CONFLICT_PREVIEW_LIMIT_BYTES = 256 * 1024
+/** Conflict snapshots above this size keep only their metadata in state. The
+ * local bytes stay on disk untouched while the decision waits, and the Cloud
+ * bytes are fetched again, hash-checked, when a decision needs them. */
+const CONFLICT_SNAPSHOT_INLINE_LIMIT_BYTES = CONFLICT_PREVIEW_LIMIT_BYTES
 
 export interface CloudSyncRemote {
   manifest(
@@ -195,16 +199,21 @@ export class CloudSyncCoordinator {
     if (stored.cloud.revision !== resolution.expected_cloud_revision) {
       throw new Error('The Cloud version changed. Sync again before choosing a version.')
     }
-    await this.assertCloudSnapshotIsCurrent(stored)
+    const manifest = await this.stableManifest()
+    assertCloudSnapshotIsCurrent(stored, manifest)
 
     if (resolution.choice === 'cloud') {
-      await this.applyCloudChoice(stored, local)
+      await this.applyCloudChoice(await this.withCloudBytes(stored, manifest), local)
       await this.saveWithoutConflict(state, stored.id)
       return
     }
 
     if (resolution.choice === 'both') {
-      await this.applyKeepBothChoice(stored, local, resolution.keep_both_path)
+      await this.applyKeepBothChoice(
+        await this.withCloudBytes(stored, manifest),
+        local,
+        resolution.keep_both_path
+      )
       await this.saveWithoutConflict(state, stored.id)
       return
     }
@@ -268,13 +277,21 @@ export class CloudSyncCoordinator {
 
     // Save to Cloud first. If the request fails, the file the user is looking
     // at remains untouched and the decision stays queued for a clean retry.
-    if (this.repository.applyConflictResolutionFiles) {
+    // Keeping this device's version at its current path changes nothing on
+    // disk, and a scan snapshot of a large file carries no bytes to rewrite
+    // it with, so that decision never touches the file.
+    const fileAlreadyChosen =
+      resolution.choice === 'local' &&
+      local.path !== null &&
+      typeof resolvedPath === 'string' &&
+      cloudSyncPathKey(resolvedPath) === cloudSyncPathKey(local.path)
+    if (!fileAlreadyChosen && this.repository.applyConflictResolutionFiles) {
       await this.repository.applyConflictResolutionFiles({
         expected_path: local.path,
         expected_sha256: local.content?.sha256 ?? null,
         files: chosen && resolvedPath ? [{ path: resolvedPath, content: chosen }] : []
       })
-    } else if (local.path && this.repository.replaceConflictFile) {
+    } else if (!fileAlreadyChosen && local.path && this.repository.replaceConflictFile) {
       await this.repository.replaceConflictFile({
         path: local.path,
         expectedSha256: local.content?.sha256 ?? null,
@@ -599,14 +616,26 @@ export class CloudSyncCoordinator {
       return false
     }
 
-    const merge = mergeCloudSyncText(base.data, local.data, cloud.data)
+    const baseText = inlineText(base)
+    const localText = inlineText(local)
+    const cloudText = inlineText(cloud)
+    if (baseText === null || localText === null || cloudText === null) return false
+
+    const merge = mergeCloudSyncText(baseText, localText, cloudText)
     if (merge.status !== 'clean') return false
     const merged = await textContent(merge.text, local.media_type)
-    await this.repository.replaceConflictFile!({
-      path: conflict.local.path,
-      expectedSha256: local.sha256,
-      content: merged
-    })
+    try {
+      await this.repository.replaceConflictFile!({
+        path: conflict.local.path,
+        expectedSha256: local.sha256,
+        content: merged
+      })
+    } catch {
+      // A save landed between the pull and this write. The conflict is queued
+      // so the run still finishes, and the resolver re-reads the file before
+      // it offers any choice.
+      return false
+    }
     return true
   }
 
@@ -616,27 +645,84 @@ export class CloudSyncCoordinator {
     local: CloudSyncLocalItem | null
   ): Promise<CloudSyncStoredConflict> {
     const conflict = storedConflict(change, previous, local)
+    if (previous && !conflict.base.content) {
+      conflict.base.content = await this.retainedText(previous.item_id, previous.revision, {
+        sha256: previous.sha256,
+        byte_length: previous.byte_length,
+        text: previous.kind === 'text'
+      })
+    }
+    // A move carries no body, so its Cloud side starts as metadata. Small
+    // text is fetched now so the resolver can offer a merge; anything else is
+    // fetched when a decision needs the bytes.
+    const cloud = conflict.cloud.content
+    if (change.type === 'move' && cloud && !hasInlineData(cloud)) {
+      conflict.cloud.content =
+        (await this.retainedText(change.item_id, change.revision, {
+          sha256: cloud.sha256,
+          byte_length: cloud.byte_length,
+          text: cloud.encoding === 'utf8'
+        })) ?? cloud
+    }
+    return conflict
+  }
+
+  /** The retained body of one revision, when it is text small enough to
+   * preview, the server still has it, and its hash matches. */
+  private async retainedText(
+    itemId: string,
+    revision: number,
+    expected: { sha256: string; byte_length: number; text: boolean }
+  ): Promise<CloudSyncContent | null> {
     if (
-      conflict.base.content ||
-      !previous ||
-      previous.kind !== 'text' ||
-      previous.byte_length > CONFLICT_PREVIEW_LIMIT_BYTES ||
+      !expected.text ||
+      expected.byte_length > CONFLICT_PREVIEW_LIMIT_BYTES ||
       !this.remote.revision
     ) {
-      return conflict
+      return null
     }
-
     try {
-      const response = await this.remote.revision(this.vaultId, previous.item_id, previous.revision)
+      const response = await this.remote.revision(this.vaultId, itemId, revision)
       const content = response.data.content
-      if (content?.encoding === 'utf8' && content.sha256 === previous.sha256) {
-        conflict.base.content = content
-      }
+      if (content?.encoding === 'utf8' && content.sha256 === expected.sha256) return content
     } catch {
       // Retention is finite and older servers do not expose revision reads.
       // The conflict remains safely two-way instead of blocking all sync.
     }
-    return conflict
+    return null
+  }
+
+  /** A snapshot above the inline limit holds only metadata; the bytes come
+   * from the manifest already fetched for the freshness check, or from the
+   * retained revision, and must match the snapshot hash. */
+  private async withCloudBytes(
+    conflict: CloudSyncStoredConflict,
+    manifest: { items: CloudSyncManifestItem[] }
+  ): Promise<CloudSyncStoredConflict> {
+    const snapshot = conflict.cloud.content
+    if (!snapshot || hasInlineData(snapshot)) return conflict
+    const matches = (content: CloudSyncContent | null | undefined): content is CloudSyncContent =>
+      !!content && content.sha256 === snapshot.sha256 && hasInlineData(content)
+    const item = manifest.items.find((candidate) => candidate.item_id === conflict.item_id)
+    let content: CloudSyncContent | null = matches(item?.content) ? item.content : null
+    if (!content && this.remote.revision && conflict.cloud.revision !== null) {
+      try {
+        const response = await this.remote.revision(
+          this.vaultId,
+          conflict.item_id,
+          conflict.cloud.revision
+        )
+        if (matches(response.data.content)) content = response.data.content
+      } catch {
+        // Fall through to the error below.
+      }
+    }
+    if (!content) {
+      throw new Error(
+        'The Cloud version of this file is not available right now. Sync again and retry.'
+      )
+    }
+    return { ...conflict, cloud: { ...conflict.cloud, content } }
   }
 
   private async requireState(): Promise<CloudSyncState> {
@@ -666,30 +752,20 @@ export class CloudSyncCoordinator {
     }
   }
 
-  private async assertCloudSnapshotIsCurrent(conflict: CloudSyncStoredConflict): Promise<void> {
-    const manifest = await this.stableManifest()
-    const current = manifest.items.find((item) => item.item_id === conflict.item_id)
-    if (conflict.cloud.path === null) {
-      if (current)
-        throw new Error('The Cloud version changed. Sync again before choosing a version.')
-      return
-    }
-    if (
-      !current ||
-      current.revision !== conflict.cloud.revision ||
-      cloudSyncPathKey(current.path) !== cloudSyncPathKey(conflict.cloud.path) ||
-      current.sha256 !== conflict.cloud.content?.sha256
-    ) {
-      throw new Error('The Cloud version changed. Sync again before choosing a version.')
-    }
-  }
-
   private async applyCloudChoice(
     conflict: CloudSyncStoredConflict,
     local: CloudSyncStoredConflict['local']
   ): Promise<void> {
     if (!this.repository.applyConflictResolutionFiles && !this.repository.replaceConflictFile) {
       throw new Error('This device cannot resolve Cloud file conflicts yet.')
+    }
+    // An empty file list below means "remove the local file", which is only
+    // right when Cloud deleted it. A Cloud file whose bytes are missing must
+    // never be applied as a delete.
+    if (conflict.cloud.path !== null && !conflict.cloud.content) {
+      throw new Error(
+        'The Cloud version of this file is not available right now. Sync again and retry.'
+      )
     }
     if (this.repository.applyConflictResolutionFiles) {
       await this.repository.applyConflictResolutionFiles({
@@ -825,13 +901,13 @@ export class CloudSyncCoordinator {
           path: local.path,
           revision: null,
           kind: local.kind,
-          content: local.content
+          content: snapshotContent(local.content)
         },
         cloud: {
           path: item.path,
           revision: item.revision,
           kind: item.kind,
-          content: item.content
+          content: snapshotContent(item.content)
         }
       }
     }
@@ -946,13 +1022,13 @@ function storedConflict(
       path: previous?.path ?? null,
       revision: previous?.revision ?? null,
       kind: previous?.kind ?? local?.kind ?? 'text',
-      content: previous?.base_content ?? null
+      content: null
     },
     local: {
       path: local?.path ?? previous?.path ?? change.previous_path ?? change.path,
       revision: null,
       kind: local?.kind ?? previous?.kind ?? 'text',
-      content: local?.content ?? null
+      content: local ? snapshotContent(local.content) : null
     },
     cloud: cloudSnapshot(change, previous)
   }
@@ -967,7 +1043,9 @@ function advancePendingConflict(
     kind:
       change.type === 'delete'
         ? 'delete'
-        : change.type === 'move' || conflict.base.path !== change.path
+        : change.type === 'move' ||
+            (conflict.local.path !== null &&
+              cloudSyncPathKey(change.path) !== cloudSyncPathKey(conflict.local.path))
           ? 'move'
           : 'content',
     sequence: change.sequence,
@@ -996,9 +1074,58 @@ function cloudSnapshot(
       previous?.kind ?? prior?.kind ?? (change.content?.encoding === 'base64' ? 'binary' : 'text'),
     content:
       change.type === 'upsert'
-        ? (change.content ?? null)
-        : (prior?.content ?? previous?.base_content ?? null)
+        ? change.content
+          ? snapshotContent(change.content)
+          : null
+        : (prior?.content ?? (previous ? metadataContent(previous) : null))
   }
+}
+
+function assertCloudSnapshotIsCurrent(
+  conflict: CloudSyncStoredConflict,
+  manifest: { items: CloudSyncManifestItem[] }
+): void {
+  const current = manifest.items.find((item) => item.item_id === conflict.item_id)
+  if (conflict.cloud.path === null) {
+    if (current) throw new Error('The Cloud version changed. Sync again before choosing a version.')
+    return
+  }
+  if (
+    !current ||
+    current.revision !== conflict.cloud.revision ||
+    cloudSyncPathKey(current.path) !== cloudSyncPathKey(conflict.cloud.path) ||
+    current.sha256 !== conflict.cloud.content?.sha256
+  ) {
+    throw new Error('The Cloud version changed. Sync again before choosing a version.')
+  }
+}
+
+/** A tracked item's bytes without the bytes: enough to verify freshness and
+ * to fetch the body later. */
+function metadataContent(item: CloudSyncTrackedItem): CloudSyncContent {
+  return {
+    encoding: item.kind === 'text' ? 'utf8' : 'base64',
+    data: '',
+    sha256: item.sha256,
+    byte_length: item.byte_length,
+    media_type: item.media_type
+  }
+}
+
+function snapshotContent(content: CloudSyncContent): CloudSyncContent {
+  return content.byte_length > CONFLICT_SNAPSHOT_INLINE_LIMIT_BYTES && content.data
+    ? { ...content, data: '' }
+    : content
+}
+
+/** False for a metadata-only snapshot and for a host's direct-upload marker,
+ * both of which describe bytes they do not carry. */
+function hasInlineData(content: CloudSyncContent): boolean {
+  return content.data.length > 0 || content.byte_length === 0
+}
+
+function inlineText(content: CloudSyncContent | null | undefined): string | null {
+  return content?.encoding === 'utf8' && hasInlineData(content) ? content.data : null
 }
 
 function pendingConflictSummaries(state: CloudSyncState): CloudSyncPendingConflict[] {
@@ -1020,13 +1147,11 @@ function pendingConflictSummary(conflict: CloudSyncStoredConflict): CloudSyncPen
 }
 
 function conflictTextMerge(conflict: CloudSyncStoredConflict) {
-  const base = conflict.base.content
-  const local = conflict.local.content
-  const cloud = conflict.cloud.content
-  if (base?.encoding !== 'utf8' || local?.encoding !== 'utf8' || cloud?.encoding !== 'utf8') {
-    return null
-  }
-  return mergeCloudSyncText(base.data, local.data, cloud.data)
+  const base = inlineText(conflict.base.content)
+  const local = inlineText(conflict.local.content)
+  const cloud = inlineText(conflict.cloud.content)
+  if (base === null || local === null || cloud === null) return null
+  return mergeCloudSyncText(base, local, cloud)
 }
 
 function publicConflictVersion(

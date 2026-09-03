@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants, createReadStream, promises as fs } from 'node:fs'
 import path from 'node:path'
+import { atomicWriteTarget, renameWithRetry } from './atomic-write'
 import type {
   CloudSyncBootstrapConflictResolution,
   CloudSyncChange,
@@ -29,6 +30,7 @@ import type {
 } from '@zennotes/shared-domain/cloud-sync-engine'
 import {
   CLOUD_SYNC_INLINE_UPLOAD_LIMIT_BYTES,
+  cloudSyncUploadSource,
   rememberCloudSyncUploadSource
 } from './cloud-sync-upload-source'
 
@@ -123,12 +125,12 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
       )
       if (unvouched) {
         if (isCloudSyncVaultSettingsPath(change.path)) {
-          return await this.keepBoth(change.path, decodeContent(change.content))
+          return await this.keepBoth(change.path, await decodeContent(change.content))
         }
         return localConflict(unvouched, await this.localItemOrNull(unvouched))
       }
 
-      await this.write(change.path, decodeContent(change.content))
+      await this.write(change.path, await decodeContent(change.content))
       return
     }
 
@@ -173,7 +175,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
     }
 
     if (input.resolution.choice === 'cloud') {
-      await this.write(input.path, decodeContent(input.cloudContent))
+      await this.write(input.path, await decodeContent(input.cloudContent))
       return
     }
 
@@ -205,7 +207,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
     await fs.mkdir(path.dirname(destination), { recursive: true })
     await fs.rename(source, destination)
     try {
-      await this.write(originalPath, decodeContent(input.cloudContent))
+      await this.write(originalPath, await decodeContent(input.cloudContent))
     } catch (error) {
       await fs.rename(destination, source).catch(() => undefined)
       throw error
@@ -227,7 +229,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
       if (current) await fs.rm(this.resolve(input.path), { force: true })
       return
     }
-    await this.write(input.path, decodeContent(input.content))
+    await this.write(input.path, await decodeContent(input.content))
   }
 
   async applyConflictResolutionFiles(input: {
@@ -265,7 +267,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
     try {
       for (const file of ordered) {
         if (cloudSyncPathKey(file.path) !== expectedKey) newPaths.push(file.path)
-        await this.write(file.path, decodeContent(file.content))
+        await this.write(file.path, await decodeContent(file.content))
       }
       if (expectedPath && !files.some((file) => cloudSyncPathKey(file.path) === expectedKey)) {
         await fs.rm(this.resolve(expectedPath), { force: true })
@@ -325,9 +327,11 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
   }
 
   private async localItemOrNull(relPath: string): Promise<CloudSyncLocalItem | null> {
-    const bytes = await this.readIfExists(relPath)
-    if (!bytes) return null
-    const content = encodeContent(relPath, bytes)
+    const absolutePath = this.resolve(relPath)
+    if (!(await exists(absolutePath))) return null
+    // Streams anything above the inline limit, the same as a scan, so a
+    // conflicted attachment never has to fit in memory twice over.
+    const content = await encodeFileContent(relPath, absolutePath)
     return {
       path: normalizeCloudSyncPath(relPath),
       kind: content.encoding === 'utf8' ? 'text' : 'binary',
@@ -369,9 +373,15 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
   }
 
   private async write(relPath: string, bytes: Buffer): Promise<void> {
-    const destination = this.resolve(relPath)
+    // The same two rules as the vault's own writer: a symlinked note keeps
+    // pointing at its target, and the file keeps its mode.
+    const destination = await atomicWriteTarget(this.resolve(relPath))
     const temporaryPath = `${destination}.${process.pid}.${randomUUID()}.tmp`
     await fs.mkdir(path.dirname(destination), { recursive: true })
+    const existingMode = await fs
+      .stat(destination)
+      .then((stats) => stats.mode & 0o777)
+      .catch(() => null)
     const handle = await fs.open(
       temporaryPath,
       fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY
@@ -389,7 +399,8 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
     }
 
     try {
-      await fs.rename(temporaryPath, destination)
+      if (existingMode !== null) await fs.chmod(temporaryPath, existingMode)
+      await renameWithRetry(temporaryPath, destination)
     } catch (error) {
       await fs.rm(temporaryPath, { force: true })
       throw error
@@ -543,10 +554,27 @@ function directUploadContent(relPath: string, absolutePath: string, bytes: Buffe
   )
 }
 
-function decodeContent(content: CloudSyncContent): Buffer {
-  if (content.encoding === 'utf8') return Buffer.from(content.data, 'utf8')
-  if (content.encoding === 'base64') return Buffer.from(content.data, 'base64')
-  throw new Error('Encrypted cloud sync content must be decrypted before filesystem apply')
+async function decodeContent(content: CloudSyncContent): Promise<Buffer> {
+  if (content.encoding !== 'utf8' && content.encoding !== 'base64') {
+    throw new Error('Encrypted cloud sync content must be decrypted before filesystem apply')
+  }
+  if (content.data === '' && content.byte_length > 0) {
+    // A scan snapshot of a file above the inline limit carries no bytes; the
+    // file it was taken from is the source. Decoding it as empty once wrote a
+    // 0-byte file over a 6 MB attachment.
+    const source = cloudSyncUploadSource(content)
+    if (!source) {
+      throw new Error('This file is too large to copy from its sync snapshot. Sync again and retry.')
+    }
+    const bytes = await fs.readFile(source)
+    if (bytes.byteLength !== content.byte_length || sha256(bytes) !== content.sha256) {
+      throw new Error(
+        'This file changed on this device. Review the latest changes before continuing.'
+      )
+    }
+    return bytes
+  }
+  return Buffer.from(content.data, content.encoding)
 }
 
 function isText(relPath: string, bytes: Buffer): boolean {

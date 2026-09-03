@@ -46,6 +46,9 @@ describe('cloudSyncLegacyConflictOriginalPath', () => {
       'inbox/Note.md'
     )
     expect(cloudSyncLegacyConflictOriginalPath('Note (cloud conflict 3).md')).toBe('Note.md')
+    expect(cloudSyncLegacyConflictOriginalPath('Plan (cloud conflict).tar.gz')).toBe(
+      'Plan.tar.gz'
+    )
     expect(cloudSyncLegacyConflictOriginalPath('.gitignore (cloud conflict)')).toBe('.gitignore')
   })
 

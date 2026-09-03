@@ -76,6 +76,33 @@ describe('mergeCloudSyncText', () => {
     })
   })
 
+  it('adds a line break before text that follows an unterminated last line', () => {
+    expect(mergeCloudSyncText('a\nb', 'A\nb', 'a\nb\nc')).toMatchObject({
+      status: 'clean',
+      text: 'A\nb\nc'
+    })
+    expect(mergeCloudSyncText('a\nb', 'a\nb\n', 'a\nb\nc')).toMatchObject({
+      status: 'clean',
+      text: 'a\nb\nc\n'
+    })
+
+    const both = mergeCloudSyncText('a\nb', 'a\nb\nc', 'a\nb\nd')
+    expect(both.status).toBe('conflict')
+    expect(both.text).toBe('a\nb\nc')
+    expect(resolveCloudSyncMerge(both, { 'change-1': 'both' })).toBe('a\nb\nc\nd')
+  })
+
+  it('keeps a trailing newline change made on only one device', () => {
+    expect(mergeCloudSyncText('A\nB', 'A\nB\n', 'A2\nB')).toMatchObject({
+      status: 'clean',
+      text: 'A2\nB\n'
+    })
+    expect(mergeCloudSyncText('A\nB\n', 'A\nB', 'A2\nB\n')).toMatchObject({
+      status: 'clean',
+      text: 'A2\nB'
+    })
+  })
+
   it('requires every overlapping change to have a choice', () => {
     const result = mergeCloudSyncText('A\n', 'Mine\n', 'Theirs\n')
 

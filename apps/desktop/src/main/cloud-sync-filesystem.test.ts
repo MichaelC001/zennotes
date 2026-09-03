@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readdir, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
+import {
+  chmod,
+  lstat,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+  mkdir
+} from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
@@ -485,5 +496,75 @@ describe('DesktopCloudSyncStateStore', () => {
 
     expect(await store.load('vault-1')).toEqual(state)
     expect(await store.load('another-vault')).toBeNull()
+  })
+})
+
+describe('DesktopCloudSyncRepository: decisions and writes', () => {
+  it('copies a file above the inline limit from disk when keeping both versions', async () => {
+    const root = await temporaryRoot()
+    const bytes = Buffer.alloc(CLOUD_SYNC_INLINE_UPLOAD_LIMIT_BYTES + 1, 7)
+    await writeFile(path.join(root, 'Deck.pdf'), bytes)
+    const repository = new DesktopCloudSyncRepository(root)
+    const [local] = await repository.scan()
+    expect(local.content.data).toBe('')
+
+    await repository.applyConflictResolutionFiles({
+      expected_path: 'Deck.pdf',
+      expected_sha256: local.content.sha256,
+      files: [
+        { path: 'Deck.pdf', content: upsert('Deck.pdf', 'cloud bytes').content! },
+        { path: 'Deck (this device).pdf', content: local.content }
+      ]
+    })
+
+    expect((await readFile(path.join(root, 'Deck (this device).pdf'))).equals(bytes)).toBe(true)
+    expect(await readFile(path.join(root, 'Deck.pdf'), 'utf8')).toBe('cloud bytes')
+  }, 20_000)
+
+  it('refuses to write a snapshot that carries no bytes and no source', async () => {
+    const root = await temporaryRoot()
+    await writeFile(path.join(root, 'Deck.pdf'), 'agreed')
+    const repository = new DesktopCloudSyncRepository(root)
+
+    await expect(
+      repository.replaceConflictFile({
+        path: 'Deck.pdf',
+        expectedSha256: hash('agreed'),
+        content: {
+          encoding: 'base64',
+          data: '',
+          sha256: 'missing',
+          byte_length: 10,
+          media_type: 'application/pdf'
+        }
+      })
+    ).rejects.toThrow('too large to copy')
+    expect(await readFile(path.join(root, 'Deck.pdf'), 'utf8')).toBe('agreed')
+  })
+
+  it('writes through a symlinked note and keeps the file mode', async () => {
+    const root = await temporaryRoot()
+    const elsewhere = await temporaryRoot()
+    const target = path.join(elsewhere, 'linked.md')
+    await writeFile(target, 'agreed')
+    await symlink(target, path.join(root, 'linked.md'))
+    await writeFile(path.join(root, 'private.md'), 'agreed')
+    await chmod(path.join(root, 'private.md'), 0o600)
+    const repository = new DesktopCloudSyncRepository(root)
+
+    await repository.replaceConflictFile({
+      path: 'linked.md',
+      expectedSha256: hash('agreed'),
+      content: upsert('linked.md', 'from cloud').content!
+    })
+    await repository.replaceConflictFile({
+      path: 'private.md',
+      expectedSha256: hash('agreed'),
+      content: upsert('private.md', 'from cloud').content!
+    })
+
+    expect((await lstat(path.join(root, 'linked.md'))).isSymbolicLink()).toBe(true)
+    expect(await readFile(target, 'utf8')).toBe('from cloud')
+    expect((await stat(path.join(root, 'private.md'))).mode & 0o777).toBe(0o600)
   })
 })
