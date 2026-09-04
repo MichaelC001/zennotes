@@ -282,6 +282,8 @@ const EXCALIDRAW_ASSET_SCHEME = "zen-excalidraw";
 // through this scheme instead (added to connect-src in the renderer's
 // index.html). Web keeps fetching the same-origin http assets.
 const TYPST_ASSET_SCHEME = "zen-typst";
+// Harper's grammar checker fetches its wasm from a worker; same delivery as Typst.
+const HARPER_ASSET_SCHEME = "zen-harper";
 
 const PRIVILEGED_ASSET_PRIVILEGES = {
   standard: true,
@@ -296,6 +298,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: THEME_ASSET_SCHEME, privileges: PRIVILEGED_ASSET_PRIVILEGES },
   { scheme: EXCALIDRAW_ASSET_SCHEME, privileges: PRIVILEGED_ASSET_PRIVILEGES },
   { scheme: TYPST_ASSET_SCHEME, privileges: PRIVILEGED_ASSET_PRIVILEGES },
+  { scheme: HARPER_ASSET_SCHEME, privileges: PRIVILEGED_ASSET_PRIVILEGES },
 ]);
 
 // The archive this process booted from, watched for a package manager
@@ -5262,11 +5265,12 @@ app.whenReady().then(async () => {
     });
   });
 
-  protocol.handle(TYPST_ASSET_SCHEME, async (request) => {
-    // zen-typst://asset/<file> -> out/renderer/assets/<file> (the renderer's own
-    // bundled assets, next to its JS chunks). The renderer only ever requests
-    // the hashed Typst wasm and .otf fonts it imported, so this is a fixed,
-    // read-only view of the build output, scoped to those two asset kinds.
+  // <scheme>://asset/<file> -> out/renderer/assets/<file> (the renderer's own
+  // bundled assets, next to its JS chunks). The renderer only ever requests
+  // the hashed wasm engines and .otf fonts it imported, so this is a fixed,
+  // read-only view of the build output, scoped to those two asset kinds. One
+  // handler serves every scheme so there is exactly one traversal check.
+  const serveRendererAsset = async (request: Request): Promise<Response> => {
     const rel = decodeURIComponent(new URL(request.url).pathname).replace(
       /^\/+/,
       "",
@@ -5274,7 +5278,7 @@ app.whenReady().then(async () => {
     const root = path.resolve(__dirname, "../renderer/assets");
     const abs = path.resolve(root, rel);
     if (abs !== root && !abs.startsWith(root + path.sep)) {
-      throw new Error(`Invalid Typst asset URL: ${request.url}`);
+      throw new Error(`Invalid renderer asset URL: ${request.url}`);
     }
     const contentType = /\.wasm$/i.test(abs)
       ? "application/wasm"
@@ -5282,7 +5286,7 @@ app.whenReady().then(async () => {
         ? "font/otf"
         : null;
     if (!contentType)
-      throw new Error(`Invalid Typst asset URL: ${request.url}`);
+      throw new Error(`Invalid renderer asset URL: ${request.url}`);
     const data = await fsp.readFile(abs);
     return new Response(data, {
       headers: {
@@ -5290,7 +5294,9 @@ app.whenReady().then(async () => {
         "cache-control": "public, max-age=31536000, immutable",
       },
     });
-  });
+  };
+  protocol.handle(TYPST_ASSET_SCHEME, serveRendererAsset);
+  protocol.handle(HARPER_ASSET_SCHEME, serveRendererAsset);
 
   // Permissions this app grants to its own renderer (deny everything else —
   // it's our app talking to our own vault, no third-party surface):

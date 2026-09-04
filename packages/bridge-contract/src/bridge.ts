@@ -105,6 +105,10 @@ export interface ZenCapabilities {
   /** Local desktop support, or a web client paired with a server that owns
    *  workflow files and journalled apply/undo. */
   supportsWorkflows?: boolean
+  /** Grammar and spelling with Harper: the host can serve the wasm to
+   *  Harper's worker and ships it. Absent on hosts that have not verified
+   *  that yet (the mobile shells), which hides the setting there. */
+  supportsHarper?: boolean
 }
 
 export interface ZenAppInfo {

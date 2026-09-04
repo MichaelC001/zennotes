@@ -19,6 +19,8 @@ import {
   DEFAULT_MONTHLY_NOTES_DIRECTORY,
 } from "@shared/ipc";
 import type { VimWrappedLineMotionMode } from "@shared/app-config";
+import { HARPER_DIALECTS } from "@shared/harper-settings";
+import { harperSupported } from "../lib/harper-runtime";
 import type {
   AppUpdateState,
   CliInstallStatus,
@@ -483,6 +485,10 @@ export function SettingsModal(): JSX.Element {
   const setMathFontScale = useStore((s) => s.setMathFontScale);
   const typstTagPreambles = useStore((s) => s.typstTagPreambles);
   const setTypstTagPreambles = useStore((s) => s.setTypstTagPreambles);
+  const harperEnabled = useStore((s) => s.harperEnabled);
+  const setHarperEnabled = useStore((s) => s.setHarperEnabled);
+  const harperDialect = useStore((s) => s.harperDialect);
+  const setHarperDialect = useStore((s) => s.setHarperDialect);
   const setMathRenderer = useStore((s) => s.setMathRenderer);
   const looseMathDelimiters = useStore((s) => s.looseMathDelimiters);
   const setLooseMathDelimiters = useStore((s) => s.setLooseMathDelimiters);
@@ -1906,6 +1912,32 @@ export function SettingsModal(): JSX.Element {
             "typesetter",
           ],
         },
+        ...(harperSupported()
+          ? [
+              {
+                id: "harper-enabled",
+                title: "Grammar and spelling with Harper",
+                description:
+                  "Underline grammar and spelling problems as you write, checked on this device by Harper. Off by default.",
+                keywords: [
+                  "harper",
+                  "grammar",
+                  "spelling",
+                  "spell",
+                  "check",
+                  "lint",
+                  "proofread",
+                ],
+              },
+              {
+                id: "harper-dialect",
+                title: "Harper dialect",
+                description:
+                  "The English Harper checks against: American, British, Australian, Canadian, or Indian.",
+                keywords: ["harper", "dialect", "english", "british", "american"],
+              },
+            ]
+          : []),
         {
           id: "typst-tag-preambles",
           title: "Typst definitions from tags",
@@ -2355,6 +2387,8 @@ export function SettingsModal(): JSX.Element {
           searchIds: [
             "live-preview",
             "render-tables",
+            "harper-enabled",
+            "harper-dialect",
             "sync-title-heading-on-rename",
             "markdown-overrides",
             "heading-level-labels",
@@ -2438,6 +2472,28 @@ export function SettingsModal(): JSX.Element {
                 )}
                 {mathRenderer === "typst" && typstTagPreambles && (
                   <TypstPreambleFolderRow settingId="typst-preamble-folder" />
+                )}
+                {harperSupported() && (
+                <ToggleRow
+                  label="Grammar and spelling with Harper"
+                  description="Underline grammar and spelling problems as you write. Harper (writewithharper.com) runs on this device; no text leaves the app. Hover a mark or press z= in Vim mode for the fixes, ]s and [s jump between them, zg adds a word to this vault's dictionary. Off by default."
+                  value={harperEnabled}
+                  settingId="harper-enabled"
+                  onChange={setHarperEnabled}
+                />
+                )}
+                {harperSupported() && harperEnabled && (
+                  <SegmentedRow
+                    label="Harper dialect"
+                    description="The English Harper checks against."
+                    value={harperDialect}
+                    settingId="harper-dialect"
+                    options={HARPER_DIALECTS.map((dialect) => ({
+                      value: dialect.value,
+                      label: dialect.label,
+                    }))}
+                    onChange={setHarperDialect}
+                  />
                 )}
                 <ToggleRow
                   label="Relaxed $$ math delimiters"

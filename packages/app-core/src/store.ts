@@ -5,6 +5,14 @@ import {
   type EditorCursorPosition
 } from './lib/editor-cursor-position'
 import { DEFAULT_VAULT_SETTINGS } from '@shared/ipc'
+import {
+  DEFAULT_HARPER_DIALECT,
+  isHarperDialect,
+  normalizeHarperLintConfig,
+  type HarperDialect,
+  type HarperLintConfig,
+  type HarperVaultState
+} from '@shared/harper-settings'
 import { resolveFolderPath } from '@shared/system-folder-paths'
 import { normalizeTasksExcludedFolder } from '@shared/tasks-excluded-folders'
 import { cloudSyncPathKey } from '@zennotes/shared-domain/cloud-sync'
@@ -534,6 +542,12 @@ interface Prefs {
   mathRenderer: MathRenderer
   /** Prepend Typst definitions to a note's formulas based on its tags (#486). */
   typstTagPreambles: boolean
+  /** Grammar and spelling with Harper, checked on this device. Off by default. */
+  harperEnabled: boolean
+  harperDialect: HarperDialect
+  /** Per-rule Harper overrides; empty means Harper's defaults. Kept on the
+   *  device (not in config.toml) until the rules have a settings surface. */
+  harperLintConfig: HarperLintConfig
   /** Relax `$$…$$` display math so prose before the open fence (`Note: $$…$$`)
    *  or after the close fence (`$$…$$ done`) still renders in the reading view.
    *  Off by default; the editor keeps showing source for those shapes. */
@@ -988,6 +1002,9 @@ export const DEFAULT_PREFS: Prefs = {
   completedTaskStyle: 'none',
   mathRenderer: 'katex',
   typstTagPreambles: false,
+  harperEnabled: false,
+  harperDialect: DEFAULT_HARPER_DIALECT,
+  harperLintConfig: {},
   looseMathDelimiters: false,
   keepViewModeAcrossNotes: false,
   defaultPaneMode: 'edit',
@@ -1159,6 +1176,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.typstTagPreambles === 'boolean'
         ? p.typstTagPreambles
         : DEFAULT_PREFS.typstTagPreambles,
+    harperEnabled:
+      typeof p.harperEnabled === 'boolean' ? p.harperEnabled : DEFAULT_PREFS.harperEnabled,
+    harperDialect: isHarperDialect(p.harperDialect) ? p.harperDialect : DEFAULT_PREFS.harperDialect,
+    harperLintConfig: normalizeHarperLintConfig(p.harperLintConfig),
     looseMathDelimiters:
       typeof p.looseMathDelimiters === 'boolean'
         ? p.looseMathDelimiters
@@ -2192,6 +2213,9 @@ function collectPrefs(s: {
   completedTaskStyle: CompletedTaskStyle
   mathRenderer: MathRenderer
   typstTagPreambles: boolean
+  harperEnabled: boolean
+  harperDialect: HarperDialect
+  harperLintConfig: HarperLintConfig
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
   defaultPaneMode: PaneMode
@@ -2287,6 +2311,9 @@ function collectPrefs(s: {
     completedTaskStyle: s.completedTaskStyle,
     mathRenderer: s.mathRenderer,
     typstTagPreambles: s.typstTagPreambles,
+    harperEnabled: s.harperEnabled,
+    harperDialect: s.harperDialect,
+    harperLintConfig: s.harperLintConfig,
     looseMathDelimiters: s.looseMathDelimiters,
     keepViewModeAcrossNotes: s.keepViewModeAcrossNotes,
     defaultPaneMode: s.defaultPaneMode,
@@ -2805,6 +2832,9 @@ interface Store {
   completedTaskStyle: CompletedTaskStyle
   mathRenderer: MathRenderer
   typstTagPreambles: boolean
+  harperEnabled: boolean
+  harperDialect: HarperDialect
+  harperLintConfig: HarperLintConfig
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
   /** The mode a note opens in before it has a remembered one. Persisted. (#543) */
@@ -3309,6 +3339,12 @@ interface Store {
   setCompletedTaskStyle: (style: CompletedTaskStyle) => void
   setMathRenderer: (renderer: MathRenderer) => void
   setTypstTagPreambles: (on: boolean) => void
+  setHarperEnabled: (on: boolean) => void
+  setHarperDialect: (dialect: HarperDialect) => void
+  setHarperLintConfig: (config: HarperLintConfig) => void
+  /** Write the vault's Harper dictionary and ignored suggestions to vault.json
+   *  without the note rescan a full settings save does. */
+  saveHarperVaultState: (next: HarperVaultState) => Promise<void>
   setLooseMathDelimiters: (on: boolean) => void
   setKeepViewModeAcrossNotes: (on: boolean) => void
   setDefaultPaneMode: (mode: PaneMode) => void
@@ -4637,6 +4673,9 @@ export const useStore = create<Store>((set, get) => {
   completedTaskStyle: loadPrefs().completedTaskStyle,
   mathRenderer: loadPrefs().mathRenderer,
   typstTagPreambles: loadPrefs().typstTagPreambles,
+  harperEnabled: loadPrefs().harperEnabled,
+  harperDialect: loadPrefs().harperDialect,
+  harperLintConfig: loadPrefs().harperLintConfig,
   looseMathDelimiters: loadPrefs().looseMathDelimiters,
   keepViewModeAcrossNotes: loadPrefs().keepViewModeAcrossNotes,
   defaultPaneMode: loadPrefs().defaultPaneMode,
@@ -7275,6 +7314,30 @@ export const useStore = create<Store>((set, get) => {
   setMathRenderer: (renderer) => {
     set({ mathRenderer: renderer })
     savePrefs(collectPrefs(get()))
+  },
+  setHarperEnabled: (on) => {
+    set({ harperEnabled: on })
+    savePrefs(collectPrefs(get()))
+  },
+  setHarperDialect: (dialect) => {
+    set({ harperDialect: dialect })
+    savePrefs(collectPrefs(get()))
+  },
+  setHarperLintConfig: (config) => {
+    set({ harperLintConfig: normalizeHarperLintConfig(config) })
+    savePrefs(collectPrefs(get()))
+  },
+  saveHarperVaultState: async (next) => {
+    const settings = get().vaultSettings
+    const harper = next.words.length === 0 && next.ignoredLints.length === 0 ? undefined : next
+    try {
+      const saved = normalizeVaultSettings(
+        await window.zen.setVaultSettings({ ...settings, harper })
+      )
+      set({ vaultSettings: saved })
+    } catch (error) {
+      console.error('saveHarperVaultState failed', error)
+    }
   },
   setTypstTagPreambles: (on) => {
     set({ typstTagPreambles: on })

@@ -13,6 +13,14 @@ import { Vim, getCM } from "@replit/codemirror-vim";
 import { registerDisplayLineMotion } from "../lib/cm-vim-display-line";
 import { registerHeadingMotion } from "../lib/cm-vim-heading-motion";
 import { registerReflowOperator } from "../lib/cm-vim-reflow";
+import {
+  harperAddWordAtCursor,
+  harperIgnoreAtCursor,
+  harperNextSuggestion,
+  harperOpenSuggestions,
+  harperPreviousSuggestion,
+} from "../lib/cm-harper";
+import { harperEditorConfig } from "../lib/harper-runtime";
 import { moveLineDown, moveLineUp } from "@codemirror/commands";
 import { foldAll, unfoldAll, foldCode, unfoldCode } from "@codemirror/language";
 import { isTagsViewActive, isTasksViewActive, useStore } from "../store";
@@ -165,6 +173,41 @@ function syncVimKeymaps(overrides: KeymapOverrides): void {
     // mapped in visual context here as well.
     contexts?: Array<"normal" | "visual">;
   }> = [
+      {
+        id: "vim.harperNext",
+        action: "zenHarperNext",
+        bindings: [
+          toVimSequence(getKeymapBinding(overrides, "vim.harperNext")),
+        ].filter((binding): binding is string => !!binding),
+      },
+      {
+        id: "vim.harperPrevious",
+        action: "zenHarperPrevious",
+        bindings: [
+          toVimSequence(getKeymapBinding(overrides, "vim.harperPrevious")),
+        ].filter((binding): binding is string => !!binding),
+      },
+      {
+        id: "vim.harperSuggest",
+        action: "zenHarperSuggest",
+        bindings: [
+          toVimSequence(getKeymapBinding(overrides, "vim.harperSuggest")),
+        ].filter((binding): binding is string => !!binding),
+      },
+      {
+        id: "vim.harperAddWord",
+        action: "zenHarperAddWord",
+        bindings: [
+          toVimSequence(getKeymapBinding(overrides, "vim.harperAddWord")),
+        ].filter((binding): binding is string => !!binding),
+      },
+      {
+        id: "vim.harperIgnore",
+        action: "zenHarperIgnore",
+        bindings: [
+          toVimSequence(getKeymapBinding(overrides, "vim.harperIgnore")),
+        ].filter((binding): binding is string => !!binding),
+      },
       {
         id: "vim.goToDefinition",
         action: "goToDefinition",
@@ -369,6 +412,32 @@ function registerVimCommands(): void {
     if (view) copyLinkAtCursor(view);
   });
   Vim.mapCommand("gy", "action", "zenCopyLink", {}, { context: "normal" });
+  // Harper, Vim's spelling keys: `]s` / `[s` walk the problems, `z=` lists the
+  // fixes, `zg` teaches the dictionary a word and `zG`, its temporary sibling
+  // in Vim, ignores this one suggestion without teaching anything. All five
+  // are silent while Harper is off (the extension is not installed).
+  const harperView = (cm: ReturnType<typeof getCM>): EditorView | null =>
+    (cm as unknown as { cm6?: EditorView }).cm6 ?? null;
+  Vim.defineAction("zenHarperNext", (cm: ReturnType<typeof getCM>) => {
+    const view = harperView(cm);
+    if (view) harperNextSuggestion(view);
+  });
+  Vim.defineAction("zenHarperPrevious", (cm: ReturnType<typeof getCM>) => {
+    const view = harperView(cm);
+    if (view) harperPreviousSuggestion(view);
+  });
+  Vim.defineAction("zenHarperSuggest", (cm: ReturnType<typeof getCM>) => {
+    const view = harperView(cm);
+    if (view) harperOpenSuggestions(view);
+  });
+  Vim.defineAction("zenHarperAddWord", (cm: ReturnType<typeof getCM>) => {
+    const view = harperView(cm);
+    if (view) harperAddWordAtCursor(view, harperEditorConfig());
+  });
+  Vim.defineAction("zenHarperIgnore", (cm: ReturnType<typeof getCM>) => {
+    const view = harperView(cm);
+    if (view) harperIgnoreAtCursor(view, harperEditorConfig());
+  });
   Vim.mapCommand(
     "K",
     "action",
@@ -475,6 +544,19 @@ function registerVimCommands(): void {
         return;
       }
       setImageWidthFromInput(view, arg);
+    },
+  );
+  // `:harper on|off` (or bare `:harper` to toggle) is the ex twin of the
+  // Settings toggle "Grammar and spelling with Harper".
+  Vim.defineEx(
+    "harper",
+    "harper",
+    (_cm: unknown, params: { argString?: string } | undefined) => {
+      const state = useStore.getState();
+      const arg = (params?.argString ?? "").trim().toLowerCase();
+      if (arg === "on") state.setHarperEnabled(true);
+      else if (arg === "off") state.setHarperEnabled(false);
+      else state.setHarperEnabled(!state.harperEnabled);
     },
   );
   Vim.defineEx("quit", "q", () => {

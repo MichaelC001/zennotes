@@ -27,6 +27,7 @@
 // Bundled offline: Vite emits these as asset URLs. On web / the desktop dev
 // server they are fetched over http; the packaged desktop app (file://) routes
 // them through the `zen-typst://` protocol (see `bundledAssetUrl`).
+import { bundledAssetUrl } from './bundled-asset-url'
 import compilerWasmUrl from '@myriaddreamin/typst-ts-web-compiler/wasm?url'
 import rendererWasmUrl from '@myriaddreamin/typst-ts-renderer/wasm?url'
 // The New Computer Modern family (matching KaTeX's Computer Modern look). Bundled
@@ -69,22 +70,6 @@ interface TypstModule {
 
 let typstPromise: Promise<TypstSnippetLike> | null = null
 
-/**
- * The URL to `fetch()` for a bundled asset (wasm or font). On the packaged
- * desktop app the renderer loads over `file://`, whose opaque origin makes the
- * strict CSP reject a `file://` fetch, so we route through the app's privileged
- * `zen-typst://` scheme (see the protocol handler in the main process). On web
- * and the desktop dev server the asset is a same-origin http URL that
- * `connect-src 'self'` already allows, so it is used verbatim.
- */
-function bundledAssetUrl(url: string): string {
-  if (url.startsWith('file:')) {
-    const filename = url.split('/').pop()?.split('?')[0] ?? ''
-    return `zen-typst://asset/${filename}`
-  }
-  return url
-}
-
 async function loadTypst(): Promise<TypstSnippetLike> {
   if (!typstPromise) {
     typstPromise = (async () => {
@@ -100,13 +85,13 @@ async function loadTypst(): Promise<TypstSnippetLike> {
       // supplies our bundled New Computer Modern family instead, so math renders
       // with no network access.
       $typst.setCompilerInitOptions({
-        getModule: () => bundledAssetUrl(compilerWasmUrl),
+        getModule: () => bundledAssetUrl(compilerWasmUrl, 'zen-typst'),
         beforeBuild: [
           mod.initOptions.disableDefaultFontAssets(),
-          mod.initOptions.loadFonts(FONT_URLS.map(bundledAssetUrl))
+          mod.initOptions.loadFonts(FONT_URLS.map((url) => bundledAssetUrl(url, 'zen-typst')))
         ]
       })
-      $typst.setRendererInitOptions({ getModule: () => bundledAssetUrl(rendererWasmUrl) })
+      $typst.setRendererInitOptions({ getModule: () => bundledAssetUrl(rendererWasmUrl, 'zen-typst') })
       return $typst
     })()
   }

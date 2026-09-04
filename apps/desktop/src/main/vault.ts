@@ -87,6 +87,7 @@ import {
   normalizeTypstPreambleSettings,
   resolveTypstPreambleFolder
 } from '@shared/typst-preamble-folder'
+import { normalizeHarperVaultState } from '@shared/harper-settings'
 
 const CONFIG_FILE = 'zennotes.config.json'
 const FOLDERS: NoteFolder[] = ['inbox', 'quick', 'archive', 'trash']
@@ -834,6 +835,31 @@ function cloneVaultSettings(settings: VaultSettings): VaultSettings {
       : {}),
     ...(settings.databasesLocation
       ? { databasesLocation: { ...settings.databasesLocation } }
+      : {}),
+    // The value handed back is what the renderer keeps until its next full
+    // reload, so every optional field that was written has to come back too.
+    ...(settings.tasksLocation ? { tasksLocation: { ...settings.tasksLocation } } : {}),
+    ...(settings.systemFolderPaths
+      ? { systemFolderPaths: { ...settings.systemFolderPaths } }
+      : {}),
+    ...(settings.tasks
+      ? {
+          tasks: {
+            ...settings.tasks,
+            ...(settings.tasks.excludedFolders
+              ? { excludedFolders: [...settings.tasks.excludedFolders] }
+              : {})
+          }
+        }
+      : {}),
+    ...(settings.typstPreambles ? { typstPreambles: { ...settings.typstPreambles } } : {}),
+    ...(settings.harper
+      ? {
+          harper: {
+            words: [...settings.harper.words],
+            ignoredLints: [...settings.harper.ignoredLints]
+          }
+        }
       : {})
   }
 }
@@ -1077,6 +1103,7 @@ function normalizeVaultSettings(
     systemFolderPaths?: unknown
     tasks?: unknown
     typstPreambles?: unknown
+    harper?: unknown
   }
   const folderIcons: Record<string, FolderIconId> = {}
   if (candidate.folderIcons && typeof candidate.folderIcons === 'object') {
@@ -1133,7 +1160,8 @@ function normalizeVaultSettings(
     view: normalizeVaultViewSettings(candidate.view),
     systemFolderPaths: normalizeSystemFolderPaths(candidate.systemFolderPaths),
     tasks: normalizeTasksSettings(candidate.tasks),
-    typstPreambles: normalizeTypstPreambleSettings(candidate.typstPreambles)
+    typstPreambles: normalizeTypstPreambleSettings(candidate.typstPreambles),
+    harper: normalizeHarperVaultState(candidate.harper)
   }
 }
 

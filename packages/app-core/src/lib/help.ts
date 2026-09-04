@@ -545,6 +545,10 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'zc / zo', action: 'Fold / unfold heading', detail: 'Collapse or expand the section below the heading at the cursor.' },
       { keys: 'Ctrl+Alt+F / U', action: 'Fold / unfold heading', detail: 'Collapse or expand the heading section at the cursor with Vim mode on or off. On macOS, use Cmd+Option+F / U.' },
       { keys: 'zM / zR', action: 'Fold / unfold all', detail: 'Collapse or expand every heading section in the note.' },
+      { keys: ']s / [s', action: 'Next / previous Harper suggestion', detail: 'With Grammar and spelling with Harper on, jump the cursor to the next or previous underlined problem, the way Vim walks misspellings.' },
+      { keys: 'z=', action: 'Harper suggestions', detail: 'Open the fixes for the problem under the cursor (or the first one on its line). A digit or Enter applies one, j/k move, Esc closes.' },
+      { keys: 'zg', action: 'Add word to Harper dictionary', detail: 'Teach this vault\'s dictionary the word under the cursor. Stored in vault.json, so it travels and syncs with the vault.' },
+      { keys: 'zG', action: 'Ignore Harper suggestion', detail: 'Hide this one suggestion here from now on without teaching the dictionary a word, the temporary sibling of zg as in Vim.' },
       { keys: 'Ctrl-o', action: 'Go back', detail: 'Jump to the previous note location in history.' },
       { keys: 'Ctrl-i', action: 'Go forward', detail: 'Jump forward in note history.' },
       { keys: 'Space h', action: 'Hint mode', detail: 'Show jump labels over clickable targets — links, buttons, sidebar rows, tabs — so you can activate any of them from the keyboard. Works outside insert mode, including in the Tasks and Tags views. Home-row-mod keyboards work too: a bare modifier tap or an uppercase label no longer cancels the hints.' }
@@ -719,6 +723,11 @@ export const HELP_VIM_COMMANDS: HelpExCommand[] = [
     command: ':w',
     summary: 'Save the active note',
     detail: 'Flush the current buffer to disk immediately.'
+  },
+  {
+    command: ':harper [on|off]',
+    summary: 'Grammar and spelling with Harper',
+    detail: 'Turn Harper on or off for the editor, or toggle it with no argument. The same switch as Settings, Editor, Grammar and spelling with Harper.'
   },
   {
     command: ':q',
@@ -1029,6 +1038,7 @@ export const HELP_SETTINGS: HelpSettingsSection[] = [
       { label: 'Math size', detail: 'Scales inline `$…$` and block `$$…$$` math relative to the surrounding text, 50 to 200 percent, in the editor and the reading view, for both KaTeX and Typst; `math_font_scale` under `[editor]` in `config.toml`.' },
       { label: 'Render tables in live preview', detail: 'Show Markdown tables as interactive WYSIWYG widgets (edit cells, drag, right-click/`m` menu). Turn it off to keep tables as plain markdown text so you can edit them with the keyboard and Vim motions like any other line. When widgets are on, Arrow keys (and h/j/k/l) navigate cells; Shift+V then Shift+J/Shift+K move whole lines in the raw source. In Vim mode the cell cursor speaks the editor\'s language: motions (w/b/e, f/t, 0/$), operators (d/c/y with motions and text objects), visual selections, and yank/paste (y/p/P) through the same registers as the rest of the note, so you can yank in a cell and paste in the body, or the other way around.' },
       { label: 'Sync title heading on rename', detail: 'On by default. A new note is created as `# <title>`, and with this on a rename carries that heading along — rename `Untitled` to `Groceries` and line one becomes `# Groceries`, from the breadcrumb, the sidebar, or the note list alike. Only an existing top-level `#` heading is rewritten and one is never invented, so a note that opens with prose, a list, or a `##` heading is untouched; deleting the `#` line opts that note out permanently. The heading is found after any frontmatter, and the rest of the note is left byte for byte as it was.' },
+      { label: 'Grammar and spelling with Harper', detail: 'Off by default. Turn it on to underline grammar and spelling problems as you write, checked on this device by Harper (writewithharper.com); no text leaves the app. Hover a mark for the fixes, or in Vim mode press z= at the problem, ]s and [s to move between problems, zg to add a word to this vault\'s dictionary and zG to ignore one suggestion. Choose the English dialect below the toggle. Code, links and frontmatter are never checked, and notes past 120,000 characters are skipped.' },
       { label: 'Heading level labels', detail: 'Show H1 through H6 badges before headings. Heading fold arrows stay available whether labels are on or off.' },
       { label: 'Tab size', detail: 'Choose how many spaces a tab occupies when rendered and when indenting in every Markdown editor surface. Nested list levels also render this many columns deep, whatever the note’s source spacing, so levels stay tellable apart on any monitor.' },
       { label: 'Indent guides', detail: 'Draw a vertical guide line at each nested list level in the editor, at the Tab size columns. On by default; the raw markup is never changed either way.' },

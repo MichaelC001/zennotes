@@ -119,6 +119,8 @@ import {
 } from '../lib/use-diagram-theme-mode'
 import { embedRenderExtension } from '../lib/cm-embed-render'
 import { urlPasteMenuExtension } from '../lib/cm-url-paste-menu'
+import { harperExtensions, harperRefresh } from '../lib/cm-harper'
+import { harperEditorConfig, harperSeenVaultState, harperSupported } from '../lib/harper-runtime'
 import { mathBlockArrowKeymap } from '../lib/cm-math-nav'
 import { slashCommandSource, slashCommandRender } from '../lib/cm-slash-commands'
 import { calloutTypeSource } from '../lib/cm-callouts'
@@ -855,6 +857,10 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const vimMode = useStore((s) => s.vimMode)
   const vimYankToClipboard = useStore((s) => s.vimYankToClipboard)
   const livePreview = useStore((s) => s.livePreview)
+  const harperEnabled = useStore((s) => s.harperEnabled)
+  const harperDialect = useStore((s) => s.harperDialect)
+  const harperLintConfig = useStore((s) => s.harperLintConfig)
+  const harperVaultState = useStore((s) => s.vaultSettings.harper)
   const showHeadingLevelLabels = useStore((s) => s.showHeadingLevelLabels)
   const renderTablesInLivePreview = useStore((s) => s.renderTablesInLivePreview)
   // Diagrams carry their palette inside the SVG, so a theme switch has to
@@ -974,6 +980,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const markdownCompartmentRef = useRef<Compartment | null>(null)
   const markdownSyntaxCompartmentRef = useRef<Compartment | null>(null)
   const livePreviewCompartmentRef = useRef<Compartment | null>(null)
+  const harperCompartmentRef = useRef<Compartment | null>(null)
   const lineNumbersCompartmentRef = useRef<Compartment | null>(null)
   const wordWrapCompartmentRef = useRef<Compartment | null>(null)
   const scrolloffCompartmentRef = useRef<Compartment | null>(null)
@@ -1711,6 +1718,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       const markdownCompartment = new Compartment()
       const markdownSyntaxCompartment = new Compartment()
       const livePreviewCompartment = new Compartment()
+      const harperCompartment = new Compartment()
       const lineNumbersCompartment = new Compartment()
       const wordWrapCompartment = new Compartment()
       const scrolloffCompartment = new Compartment()
@@ -1718,6 +1726,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       const tabSizeCompartment = new Compartment()
       const historyCompartment = new Compartment()
       vimCompartmentRef.current = vimCompartment
+      harperCompartmentRef.current = harperCompartment
       editorKeymapCompartmentRef.current = editorKeymapCompartment
       markdownCompartmentRef.current = markdownCompartment
       markdownSyntaxCompartmentRef.current = markdownSyntaxCompartment
@@ -1782,6 +1791,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               : []
           ),
           lineNumbersCompartment.of(lineNumberExtension(s0.lineNumberMode)),
+          harperCompartment.of(
+            s0.harperEnabled && harperSupported() ? harperExtensions(harperEditorConfig()) : []
+          ),
           tooltips({ parent: document.body }),
           autocompletion({
             // Don't install @codemirror/autocomplete's stock keymap — it binds
@@ -2199,6 +2211,29 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     if (keymapComp) effects.push(keymapComp.reconfigure(buildEditorKeymap(vimMode, tabNavOverrides)))
     view.dispatch({ effects })
   }, [vimMode, tabNavOverrides])
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = harperCompartmentRef.current
+    if (!view || !comp) return
+    // Off is an empty compartment, so a disabled Harper costs the editor
+    // nothing. A dialect or rule change rebuilds the extension, which runs the
+    // linter again against the reconfigured session.
+    view.dispatch({
+      effects: comp.reconfigure(
+        harperEnabled && harperSupported() ? harperExtensions(harperEditorConfig()) : []
+      )
+    })
+  }, [harperEnabled, harperDialect, harperLintConfig])
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || !harperEnabled) return
+    // A dictionary or ignore change that arrived from outside this device
+    // (Cloud sync, a vault switch) must show up without waiting for an edit.
+    // The echo of this device's own `zg` is already in the session.
+    const json = JSON.stringify(harperVaultState ?? { words: [], ignoredLints: [] })
+    if (json === harperSeenVaultState()) return
+    view.dispatch({ effects: harperRefresh.of() })
+  }, [harperEnabled, harperVaultState])
   useEffect(() => {
     const view = viewRef.current
     const comp = livePreviewCompartmentRef.current

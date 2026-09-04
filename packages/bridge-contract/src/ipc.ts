@@ -499,6 +499,13 @@ export interface VaultSettings {
    * string so later preamble settings land beside it without another migration.
    */
   typstPreambles?: { folder?: string }
+  /**
+   * Harper grammar checker data that belongs to the vault: the words added to
+   * its dictionary and the context hashes of ignored suggestions (digit
+   * strings; see shared-domain harper-settings). Absent means nothing yet.
+   * Every runtime preserves it on a settings round-trip.
+   */
+  harper?: { words: string[]; ignoredLints: string[] }
 }
 
 export const DEFAULT_DAILY_NOTES_DIRECTORY = 'Daily Notes'

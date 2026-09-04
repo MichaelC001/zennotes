@@ -58,6 +58,7 @@ import {
   useAppUpdateState
 } from './lib/app-update-state'
 import { ensureCloudAutoSyncStarted, stopCloudAutoSync } from './lib/cloud-auto-sync'
+import { installHarperRuntime } from './lib/harper-runtime'
 
 let editorModulePromise: Promise<typeof import('./components/Editor')> | null = null
 const EDITOR_MODULE_WARMUP_GRACE_MS = 40
@@ -397,6 +398,7 @@ function App(): JSX.Element {
     ensureCloudAutoSyncStarted()
     return stopCloudAutoSync
   }, [vault?.root])
+  useEffect(() => installHarperRuntime(), [])
 
   useEffect(() => {
     if (!vault) return undefined

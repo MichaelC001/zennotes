@@ -86,6 +86,7 @@ import type {
 } from '@shared/custom-code-languages'
 
 const WEB_CAPABILITIES: ZenCapabilities = {
+  supportsHarper: true,
   supportsUpdater: false,
   supportsNativeMenus: false,
   supportsFloatingWindows: false,

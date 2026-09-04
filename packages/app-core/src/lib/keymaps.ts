@@ -89,6 +89,11 @@ export type KeymapId =
   | "vim.unfoldCurrent"
   | "vim.foldAll"
   | "vim.unfoldAll"
+  | "vim.harperNext"
+  | "vim.harperPrevious"
+  | "vim.harperSuggest"
+  | "vim.harperAddWord"
+  | "vim.harperIgnore"
   | "nav.moveDown"
   | "nav.moveUp"
   | "nav.moveLeft"
@@ -891,6 +896,61 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     title: "Unfold all headings",
     description: "Expand every heading section in the note.",
     defaultBinding: "z R",
+    vimOnly: true,
+    maxTokens: 2,
+  },
+  {
+    id: "vim.harperNext",
+    kind: "sequence",
+    scope: "vim-editor",
+    group: "vim",
+    title: "Next Harper suggestion",
+    description: "Jump to the next grammar or spelling problem Harper found. Needs Grammar and spelling with Harper on.",
+    defaultBinding: "] s",
+    vimOnly: true,
+    maxTokens: 2,
+  },
+  {
+    id: "vim.harperPrevious",
+    kind: "sequence",
+    scope: "vim-editor",
+    group: "vim",
+    title: "Previous Harper suggestion",
+    description: "Jump to the previous grammar or spelling problem Harper found.",
+    defaultBinding: "[ s",
+    vimOnly: true,
+    maxTokens: 2,
+  },
+  {
+    id: "vim.harperSuggest",
+    kind: "sequence",
+    scope: "vim-editor",
+    group: "vim",
+    title: "Harper suggestions at cursor",
+    description: "Open the list of fixes for the problem under the cursor; a digit or Enter applies one.",
+    defaultBinding: "z =",
+    vimOnly: true,
+    maxTokens: 2,
+  },
+  {
+    id: "vim.harperAddWord",
+    kind: "sequence",
+    scope: "vim-editor",
+    group: "vim",
+    title: "Add word to Harper dictionary",
+    description: "Teach the vault's dictionary the word under the cursor so Harper stops flagging it.",
+    defaultBinding: "z g",
+    vimOnly: true,
+    maxTokens: 2,
+  },
+  {
+    id: "vim.harperIgnore",
+    kind: "sequence",
+    scope: "vim-editor",
+    group: "vim",
+    title: "Ignore Harper suggestion",
+    description: "Hide this one suggestion here from now on without teaching the dictionary a word.",
+    defaultBinding: "z G",
     vimOnly: true,
     maxTokens: 2,
   },

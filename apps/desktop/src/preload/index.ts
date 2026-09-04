@@ -98,6 +98,7 @@ import type {
 } from '@shared/mcp-clients'
 
 const DESKTOP_CAPABILITIES: ZenCapabilities = {
+  supportsHarper: true,
   supportsUpdater: true,
   supportsNativeMenus: true,
   supportsFloatingWindows: true,

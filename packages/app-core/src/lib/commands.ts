@@ -18,6 +18,15 @@ import { resolveQuickNoteTitle } from './quick-note-title'
 import { forwardTaskWithPicker, taskAtEditorCursor } from './forward-task'
 import { canManageWorkflows } from './workflow-workspace'
 import { toggleCheckbox } from './cm-toggle-checkbox'
+import {
+  harperAddWordAtCursor,
+  harperApplyFirstSuggestion,
+  harperIgnoreAtCursor,
+  harperNextSuggestion,
+  harperOpenSuggestions,
+  harperPreviousSuggestion
+} from './cm-harper'
+import { harperEditorConfig, harperSupported } from './harper-runtime'
 import { reflowParagraph } from './cm-reflow'
 import { promptImageWidth } from './image-resize'
 import { copyLinkAtCursor } from './link-copy'
@@ -1379,6 +1388,82 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       category: 'Editor',
       keywords: 'decoration inline',
       run: () => getState().setLivePreview(!getState().livePreview)
+    },
+    {
+      id: 'editor.harper.toggle',
+      title: getState().harperEnabled
+        ? 'Disable Grammar and Spelling with Harper'
+        : 'Enable Grammar and Spelling with Harper',
+      category: 'Editor',
+      keywords: 'harper grammar spelling spell check lint',
+      when: () => harperSupported(),
+      run: () => getState().setHarperEnabled(!getState().harperEnabled)
+    },
+    {
+      id: 'editor.harper.next',
+      title: 'Harper: Next Suggestion',
+      category: 'Editor',
+      keywords: 'harper grammar spelling',
+      when: () => harperSupported() && getState().harperEnabled && !!getState().editorViewRef,
+      run: () => {
+        const view = getState().editorViewRef
+        if (view) harperNextSuggestion(view)
+      }
+    },
+    {
+      id: 'editor.harper.previous',
+      title: 'Harper: Previous Suggestion',
+      category: 'Editor',
+      keywords: 'harper grammar spelling',
+      when: () => harperSupported() && getState().harperEnabled && !!getState().editorViewRef,
+      run: () => {
+        const view = getState().editorViewRef
+        if (view) harperPreviousSuggestion(view)
+      }
+    },
+    {
+      id: 'editor.harper.suggest',
+      title: 'Harper: Show Suggestions at Cursor',
+      category: 'Editor',
+      keywords: 'harper grammar spelling fix',
+      when: () => harperSupported() && getState().harperEnabled && !!getState().editorViewRef,
+      run: () => {
+        const view = getState().editorViewRef
+        if (view) harperOpenSuggestions(view)
+      }
+    },
+    {
+      id: 'editor.harper.apply',
+      title: 'Harper: Apply First Suggestion',
+      category: 'Editor',
+      keywords: 'harper grammar spelling fix',
+      when: () => harperSupported() && getState().harperEnabled && !!getState().editorViewRef,
+      run: () => {
+        const view = getState().editorViewRef
+        if (view) harperApplyFirstSuggestion(view)
+      }
+    },
+    {
+      id: 'editor.harper.addWord',
+      title: 'Harper: Add Word to Dictionary',
+      category: 'Editor',
+      keywords: 'harper spelling dictionary',
+      when: () => harperSupported() && getState().harperEnabled && !!getState().editorViewRef,
+      run: () => {
+        const view = getState().editorViewRef
+        if (view) harperAddWordAtCursor(view, harperEditorConfig())
+      }
+    },
+    {
+      id: 'editor.harper.ignore',
+      title: 'Harper: Ignore Suggestion',
+      category: 'Editor',
+      keywords: 'harper grammar spelling',
+      when: () => harperSupported() && getState().harperEnabled && !!getState().editorViewRef,
+      run: () => {
+        const view = getState().editorViewRef
+        if (view) harperIgnoreAtCursor(view, harperEditorConfig())
+      }
     },
     {
       id: 'editor.tabs.toggle',

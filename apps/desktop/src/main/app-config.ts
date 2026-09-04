@@ -205,6 +205,16 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'typst_tag_preambles',
     comment: 'true | false — prepend Typst definitions from notes in a `typst` folder, chosen by a note\'s tags'
   },
+  harperEnabled: {
+    section: 'editor',
+    tomlKey: 'harper_enabled',
+    comment: 'true | false: grammar and spelling with Harper, checked on this device'
+  },
+  harperDialect: {
+    section: 'editor',
+    tomlKey: 'harper_dialect',
+    comment: 'american | british | australian | canadian | indian'
+  },
   looseMathDelimiters: {
     section: 'editor',
     tomlKey: 'loose_math_delimiters',
