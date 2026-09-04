@@ -1835,6 +1835,16 @@ function stopRemoteWatch(): void {
   }
 }
 
+/** Tell every remote window to re-pull the vault: its list is behind the server. */
+function sendRemoteResync(): void {
+  windowVaults.sendRemoteVaultChange({
+    kind: "change",
+    path: "",
+    folder: "inbox",
+    scope: "resync",
+  });
+}
+
 function startRemoteWatch(
   client: RemoteServerClient,
   capabilities: ServerCapabilities,
@@ -1854,14 +1864,7 @@ function startRemoteWatch(
       windowVaults.sendRemoteVaultChange(ev);
     },
     {
-      onReconnect: () => {
-        windowVaults.sendRemoteVaultChange({
-          kind: "change",
-          path: "",
-          folder: "inbox",
-          scope: "resync",
-        });
-      },
+      onReconnect: () => sendRemoteResync(),
     },
   );
 }
@@ -2017,7 +2020,11 @@ async function setRemoteWorkspace(
     vaultPath?: string | null;
   } = {},
 ): Promise<{ vault: VaultInfo | null; capabilities: ServerCapabilities }> {
-  const client = new RemoteServerClient({ baseUrl, authToken });
+  const client = new RemoteServerClient({
+    baseUrl,
+    authToken,
+    onStalePath: () => sendRemoteResync(),
+  });
   let capabilities = await client.getCapabilities();
   remoteWorkspaceBootError = null;
   let vault = await client.getCurrentVault();

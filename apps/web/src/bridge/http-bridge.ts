@@ -34,6 +34,7 @@ import type {
   WriteWorkflowInput
 } from '@zennotes/bridge-contract/workflows'
 import { prepareWorkflowRun } from '@shared/workflows/prepare-run'
+import { REMOTE_CHANGE_POLL_MS, stalePathMessage } from '@shared/remote-workspace-messages'
 import type {
   AppUpdateState,
   AssetMeta,
@@ -195,6 +196,15 @@ async function jsonRequest<T>(
       )
     }
     const text = await res.text().catch(() => '')
+    // A 404 for a path this app asked to change means the list is behind the
+    // server: another device moved, renamed, or trashed the note and the
+    // change feed did not carry it here (#734). Name the path and re-pull.
+    // Reads keep the plain answer; a 404 on `?path=` is a legitimate "absent".
+    const stalePath = res.status === 404 ? requestedPath(init?.body) : null
+    if (stalePath !== null) {
+      dispatchVaultChange(RESYNC_EVENT)
+      throw new HttpRequestError(res.status, path, stalePathMessage(stalePath), text)
+    }
     throw new HttpRequestError(
       res.status,
       path,
@@ -212,6 +222,13 @@ async function jsonRequest<T>(
 
 function notImplemented(name: string): never {
   throw new Error(`zen.${name} is not available in the web build`)
+}
+
+/** The vault-relative path a JSON request body names, when it names one. */
+function requestedPath(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null
+  const path = (body as { path?: unknown }).path
+  return typeof path === 'string' && path.length > 0 ? path : null
 }
 
 // --------------------------------------------------------------------
@@ -1032,6 +1049,38 @@ let watchReconnectTimer: number | null = null
 // connection opens, tell listeners to re-pull everything rather than
 // resuming the stream as if nothing happened.
 let watchHadGap = false
+// Some hosts never let the socket through at all: a reverse proxy that does
+// not forward the Upgrade handshake fails every attempt. Left alone, the page
+// shows a vault frozen at load time and a note another device renamed or
+// trashed keeps its old path until an operation on it comes back 404 (#734).
+// While the socket is down, re-pull the vault on a timer instead.
+let watchPollTimer: number | null = null
+let warnedAboutPolling = false
+
+const RESYNC_EVENT: VaultChangeEvent = { kind: 'change', path: '', folder: 'inbox', scope: 'resync' }
+
+function dispatchVaultChange(ev: VaultChangeEvent): void {
+  for (const cb of vaultChangeListeners) cb(ev)
+}
+
+function startWatchPolling(): void {
+  if (watchPollTimer !== null) return
+  if (!warnedAboutPolling) {
+    warnedAboutPolling = true
+    console.warn(
+      `[zen] the change feed at ${API_BASE}/watch is not staying connected (a proxy without WebSocket support?); refreshing every ${Math.round(REMOTE_CHANGE_POLL_MS / 1000)}s instead`
+    )
+  }
+  watchPollTimer = window.setInterval(() => {
+    if (vaultChangeListeners.size > 0) dispatchVaultChange(RESYNC_EVENT)
+  }, REMOTE_CHANGE_POLL_MS)
+}
+
+function stopWatchPolling(): void {
+  if (watchPollTimer === null) return
+  window.clearInterval(watchPollTimer)
+  watchPollTimer = null
+}
 
 function ensureWatchSocket(): void {
   if (watchSocket && watchSocket.readyState <= 1) return
@@ -1040,15 +1089,14 @@ function ensureWatchSocket(): void {
   const ws = new WebSocket(url)
   watchSocket = ws
   ws.addEventListener('open', () => {
+    stopWatchPolling()
     if (!watchHadGap) return
     watchHadGap = false
-    const resync: VaultChangeEvent = { kind: 'change', path: '', folder: 'inbox', scope: 'resync' }
-    for (const cb of vaultChangeListeners) cb(resync)
+    dispatchVaultChange(RESYNC_EVENT)
   })
   ws.addEventListener('message', e => {
     try {
-      const ev = JSON.parse(String(e.data)) as VaultChangeEvent
-      for (const cb of vaultChangeListeners) cb(ev)
+      dispatchVaultChange(JSON.parse(String(e.data)) as VaultChangeEvent)
     } catch {
       // ignore malformed frames
     }
@@ -1057,6 +1105,7 @@ function ensureWatchSocket(): void {
     watchSocket = null
     if (vaultChangeListeners.size > 0) {
       watchHadGap = true
+      startWatchPolling()
       if (watchReconnectTimer === null) {
         watchReconnectTimer = window.setTimeout(() => {
           watchReconnectTimer = null
@@ -1075,9 +1124,12 @@ function onVaultChange(cb: VaultChangeListener): () => void {
   ensureWatchSocket()
   return () => {
     vaultChangeListeners.delete(cb)
-    if (vaultChangeListeners.size === 0 && watchSocket) {
-      watchSocket.close()
-      watchSocket = null
+    if (vaultChangeListeners.size === 0) {
+      stopWatchPolling()
+      if (watchSocket) {
+        watchSocket.close()
+        watchSocket = null
+      }
     }
   }
 }

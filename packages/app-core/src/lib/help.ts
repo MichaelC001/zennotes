@@ -174,7 +174,7 @@ export const HELP_HOW_TO_GUIDES: HelpCard[] = [
   {
     title: 'Connect the desktop app to a self-hosted server',
     body:
-      'Settings → Vault → Remote workspace takes the server URL and its token. **On macOS**, a server on your own network also needs the system Local Network permission: macOS asks the first time ZenNotes reaches a local address, and if you dismiss that prompt the connection fails with no packets sent and no further warning — it looks exactly like a server that is down. Turn it back on under System Settings → Privacy & Security → Local Network. A server reached over the public internet is unaffected.'
+      'Settings → Vault → Remote workspace takes the server URL and its token. **On macOS**, a server on your own network also needs the system Local Network permission: macOS asks the first time ZenNotes reaches a local address, and if you dismiss that prompt the connection fails with no packets sent and no further warning — it looks exactly like a server that is down. Turn it back on under System Settings → Privacy & Security → Local Network. A server reached over the public internet is unaffected. Live updates travel over a WebSocket at /api/watch. If a reverse proxy in front of the server does not pass WebSocket upgrades, the app refreshes on its own every 30 seconds instead, so a note renamed or trashed on another device can show its old name for up to half a minute; passing the upgrade through gives instant updates.'
   },
   {
     title: 'Customize the look: themes vs. overrides',
