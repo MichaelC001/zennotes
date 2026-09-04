@@ -542,14 +542,17 @@ describe('DesktopCloudSyncRepository: decisions and writes', () => {
     expect(await readFile(path.join(root, 'Deck.pdf'), 'utf8')).toBe('agreed')
   })
 
-  it('writes through a symlinked note and keeps the file mode', async () => {
+  it('writes through a symlinked note instead of replacing the link', async () => {
     const root = await temporaryRoot()
     const elsewhere = await temporaryRoot()
     const target = path.join(elsewhere, 'linked.md')
     await writeFile(target, 'agreed')
-    await symlink(target, path.join(root, 'linked.md'))
-    await writeFile(path.join(root, 'private.md'), 'agreed')
-    await chmod(path.join(root, 'private.md'), 0o600)
+    try {
+      await symlink(target, path.join(root, 'linked.md'))
+    } catch {
+      // Creating symlinks can require privileges (e.g. Windows); skip there.
+      return
+    }
     const repository = new DesktopCloudSyncRepository(root)
 
     await repository.replaceConflictFile({
@@ -557,14 +560,25 @@ describe('DesktopCloudSyncRepository: decisions and writes', () => {
       expectedSha256: hash('agreed'),
       content: upsert('linked.md', 'from cloud').content!
     })
+
+    expect((await lstat(path.join(root, 'linked.md'))).isSymbolicLink()).toBe(true)
+    expect(await readFile(target, 'utf8')).toBe('from cloud')
+  })
+
+  it('leaves an existing note its own permissions', async () => {
+    // Windows has no POSIX mode bits to keep.
+    if (process.platform === 'win32') return
+    const root = await temporaryRoot()
+    await writeFile(path.join(root, 'private.md'), 'agreed')
+    await chmod(path.join(root, 'private.md'), 0o600)
+    const repository = new DesktopCloudSyncRepository(root)
+
     await repository.replaceConflictFile({
       path: 'private.md',
       expectedSha256: hash('agreed'),
       content: upsert('private.md', 'from cloud').content!
     })
 
-    expect((await lstat(path.join(root, 'linked.md'))).isSymbolicLink()).toBe(true)
-    expect(await readFile(target, 'utf8')).toBe('from cloud')
     expect((await stat(path.join(root, 'private.md'))).mode & 0o777).toBe(0o600)
   })
 })
