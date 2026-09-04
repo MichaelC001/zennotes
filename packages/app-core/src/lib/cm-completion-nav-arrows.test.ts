@@ -47,14 +47,27 @@ function press(view: EditorView, key: string): void {
   )
 }
 
-/** Past `interactionDelay` (75ms), before which the popup ignores navigation. */
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 250))
+/**
+ * Wait for the popup to open, then past `interactionDelay` (75ms, counted
+ * from the moment it opened), before which the popup ignores navigation. A
+ * fixed sleep from `startCompletion` is not enough on a slow runner: the
+ * popup can open late in that window and the first press lands inside the
+ * delay, which reads as "the arrow did nothing".
+ */
+async function settle(view: EditorView): Promise<void> {
+  const deadline = Date.now() + 5_000
+  while (currentCompletions(view.state).length === 0) {
+    if (Date.now() > deadline) throw new Error('completion never opened')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  await new Promise((resolve) => setTimeout(resolve, 200))
+}
 
 describe('completion arrow navigation', () => {
   it('moves the highlighted option instead of the caret', async () => {
     const view = mount()
     startCompletion(view)
-    await settle()
+    await settle(view)
     expect(currentCompletions(view.state).length).toBe(3)
     expect(selectedCompletionIndex(view.state)).toBe(0)
     const caret = view.state.selection.main.head
