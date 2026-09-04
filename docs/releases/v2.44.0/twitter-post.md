@@ -27,6 +27,20 @@ Also new: grammar and spelling with Harper, entirely on your device. Turn it on 
 Free, open source, local-first Markdown notes.
 https://zennotes.org
 
+## Bullet-list post (single tweet)
+
+ZenNotes 2.44.0 is out 🚀
+
+🔀 Cloud conflicts become clear choices: safe edits merge on their own, real overlaps open from Review now
+🧩 Pick this device, the other device, both, or edit the combined note yourself
+📝 Harper grammar and spelling, entirely on your device, off by default
+⌨️ z= for fixes, ]s and [s to walk problems, zg to teach the dictionary
+🗂️ No more surprise duplicate notes
+
+Thanks @uNyanda for #683.
+Free, open source, local-first Markdown notes.
+https://zennotes.org
+
 ## Single-post alternative
 
 ZenNotes 2.44.0 turns Cloud conflicts into clear choices. Safe edits merge automatically; real overlaps open from **Review now** with per-change choices, an editable combined note, saved drafts, and no surprise duplicate files. Plus Harper: offline grammar and spelling in the editor, off by default. Thanks @uNyanda for #683. https://zennotes.org
