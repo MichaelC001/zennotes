@@ -62,7 +62,7 @@ import { forwardOnCheckboxArrow } from '../lib/cm-forward-task'
 import { markerHopCommands } from '../lib/cm-marker-hop'
 import { isInMarkdownCode } from '../lib/cm-auto-pairs'
 import { toggleCheckbox } from '../lib/cm-toggle-checkbox'
-import { completionKeymapForEditor, completionNavKeymap } from '../lib/cm-completion-nav'
+import { completionKeymapExtension, completionNavKeymap } from '../lib/cm-completion-nav'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
 import { isVimAwaitingArgument } from '../lib/vim-nav'
 import { toCodeMirrorKey, vimHalfPageKeymap } from '../lib/vim-half-page-keymap'
@@ -406,8 +406,7 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
     indentWithTab,
     ...vimAwareDefaultKeymap(vimMode),
     ...historyKeymap,
-    ...vimAwareSearchKeymap(vimMode),
-    ...completionKeymapForEditor
+    ...vimAwareSearchKeymap(vimMode)
   ])
 }
 
@@ -1799,7 +1798,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             // Don't install @codemirror/autocomplete's stock keymap — it binds
             // mac-only `Alt-`` / `Alt-i` to completion and swallows the char
             // those combos type on AltGr-style layouts (#429). Our filtered
-            // `completionKeymapForEditor` (in buildEditorKeymap) covers the rest.
+            // `completionKeymapExtension` (mounted below) covers the rest.
             defaultKeymap: false,
             override: [
               slashCommandSource,
@@ -1824,6 +1823,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             }
           }),
           completionNavKeymap,
+          completionKeymapExtension,
           editorKeymapCompartment.of(buildEditorKeymap(s0.vimMode, s0.keymapOverrides)),
           EditorView.domEventHandlers({
             mousedown: (event, view) => {
