@@ -375,6 +375,11 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
       'Typing `@` in normal text opens suggestions: the date shortcuts (Today, Yesterday, Tomorrow), the current time (Now — type `@time` or `@now`), plus any notes matching what you type. Choosing a date inserts an ISO date like `2026-04-15`; choosing Now inserts the current time in your configured 12-hour or 24-hour format (Settings → Editor → Time format); choosing a note inserts a `[[wikilink]]`, so `@` is a quick alternative to `[[`. A bare `@` leads with the dates and Now — start typing letters and matching notes appear.'
   },
   {
+    title: '[[ opens the wikilink picker',
+    body:
+      'Type `[[` and the wikilink picker lists matching notes, images, PDFs, SVGs, and CSV databases; keep typing to narrow it. ↑/↓ or Ctrl+J/K (Ctrl+N/P) move through the suggestions, Enter inserts the link, Tab inserts it and keeps the caret inside the brackets so you can add a `#heading`, and Esc closes the picker. Type `|` after the target to set the display text, or `/path/to/note` for an exact link; picking a database drops a `[[Database]]` link that opens its grid.'
+  },
+  {
     title: 'Templates scaffold new notes',
     body:
       'Templates turn a repeated note shape into one keystroke. ZenNotes ships built-in templates for engineering (ADR, RFC, Bug Report, Postmortem, Meeting Notes, 1:1) and personal use (Daily Note, Weekly Review, Reading Notes, Journal, Project Kickoff, To-do), and you can author your own under Settings → Templates. A template is plain markdown with optional frontmatter and variables — `{{title}}`, `{{date}}`, `{{date:FORMAT}}`, `{{time}}`, `{{week}}`, and `{{cursor}}` — substituted at creation time. Custom templates are stored as `.md` files in `.zennotes/templates/`, so they stay portable like everything else. Daily and weekly notes can each be assigned a template so dated notes start pre-filled.'
@@ -558,7 +563,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
     id: 'palettes-and-pickers',
     title: 'Palettes and pickers',
     description:
-      'These apply once a palette, search overlay, or picker already has focus — the command palette, note search, vault text search, outline, buffer switcher, the [[ reference picker, the / slash menu, and the date and template pickers.',
+      'These apply once a palette, search overlay, or picker already has focus — the command palette, note search, vault text search, outline, buffer switcher, the [[ wikilink picker, the / slash menu, and the date and template pickers.',
     items: [
       { keys: 'ArrowDown / Ctrl+N / Ctrl+J', action: 'Next result', detail: 'Move the selection down. Ctrl+J / Ctrl+K behave the same in every picker, so they no longer collide with the global Search-notes shortcut on Windows and Linux.' },
       { keys: 'ArrowUp / Ctrl+P / Ctrl+K', action: 'Previous result', detail: 'Move the selection up.' },

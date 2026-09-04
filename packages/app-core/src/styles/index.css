@@ -4573,7 +4573,7 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
 }
 
 .cm-tooltip-autocomplete:has(.wikilink-cmd-option)::after {
-  content: "Type | to change display text  ·  Use /path/to/note for exact links";
+  content: "↑/↓ or Ctrl+J/K to move  ·  Enter inserts  ·  Type | to change display text  ·  /path/to/note for exact links";
   display: block;
   padding: 10px 12px 8px;
   border-top: 1px solid rgb(var(--z-bg-3) / 0.7);
