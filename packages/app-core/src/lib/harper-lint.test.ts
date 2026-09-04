@@ -1,6 +1,12 @@
 /**
  * Runs Harper's real engine under Node (LocalLinter reads the wasm from disk),
  * so these pin the contract the editor relies on rather than a mock of it.
+ *
+ * Skipped on Windows: harper.js 2.7 reads a `file://` binary through
+ * `new URL(url).pathname`, which on Windows yields `/D:/...` and makes Node
+ * look for `D:\D:\...`. The app never loads Harper through Node (the
+ * renderer fetches the wasm over the zen-harper scheme), so the contract
+ * these tests pin is exercised on the other runners.
  */
 import { describe, expect, it } from 'vitest'
 import { HARPER_LINT_CHAR_LIMIT, harperSessionFromLinter, harperSuggestionChange } from './harper-lint'
@@ -13,7 +19,7 @@ async function session() {
   return harperSessionFromLinter(harper, linter)
 }
 
-describe('Harper session', () => {
+describe.skipIf(process.platform === 'win32')('Harper session', () => {
   it('reports spans in UTF-16 units, so an emoji before the word does not shift it', async () => {
     const text = 'I 😀 beleive this is teh answer.'
     const lints = await (await session()).lint(text)
