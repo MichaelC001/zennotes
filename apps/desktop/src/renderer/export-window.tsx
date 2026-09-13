@@ -14,6 +14,7 @@ import {
   resolveCustomThemeMode
 } from '@renderer/lib/custom-themes'
 import { withExportTitle } from '@shared/export-title'
+import { settleExportImages } from '@renderer/lib/export-images'
 import '@renderer/styles/index.css'
 
 const PREFS_KEY = 'zen:prefs:v2'
@@ -448,7 +449,12 @@ function ExportNoteWindow({ notePath }: { notePath: string }): JSX.Element {
         <Preview
           markdown={withExportTitle(note.body, note.title).markdown}
           notePath={note.path}
-          onRendered={() => setExportState('ready')}
+          onRendered={() => {
+            // Images load after the DOM is in place, and the preview defers
+            // the ones below the viewport; print only once they have all
+            // settled (#769).
+            void settleExportImages(document).then(() => setExportState('ready'))
+          }}
         />
       </main>
     </>
