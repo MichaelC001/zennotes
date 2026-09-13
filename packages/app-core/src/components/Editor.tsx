@@ -84,12 +84,14 @@ import { toVimSequence } from "../lib/vim-key-sequence";
 import { registerNoteMoveExCommands } from "../lib/vim-ex-commands";
 import { promptImageWidth, setImageWidthFromInput } from "../lib/image-resize";
 import { copyLinkAtCursor } from "../lib/link-copy";
+import { followLinkTarget } from "../lib/follow-link";
 
 let vimCommandsRegistered = false;
 let syncedVimBindings: Partial<Record<KeymapId, string[]>> = {};
 
 const DEFAULT_VIM_MAPPINGS_TO_CLEAR = [
   "gd",
+  "gD",
   "<C-w>h",
   "<C-w>j",
   "<C-w>k",
@@ -219,6 +221,13 @@ function syncVimKeymaps(overrides: KeymapOverrides): void {
         action: "goToDefinition",
         bindings: [
           toVimSequence(getKeymapBinding(overrides, "vim.goToDefinition")),
+        ].filter((binding): binding is string => !!binding),
+      },
+      {
+        id: "vim.createNoteFromLink",
+        action: "zenCreateNoteFromLink",
+        bindings: [
+          toVimSequence(getKeymapBinding(overrides, "vim.createNoteFromLink")),
         ].filter((binding): binding is string => !!binding),
       },
       {
@@ -778,6 +787,20 @@ function registerVimCommands(): void {
   Vim.defineEx("pane_focus_down", "pane_focus_down", () => focusDir("j"));
   Vim.defineEx("pane_focus_up", "pane_focus_up", () => focusDir("k"));
   Vim.defineEx("pane_focus_right", "pane_focus_right", () => focusDir("l"));
+
+  // `gd` without the question: follows the link under the cursor and, when it
+  // reaches nothing, creates the note at the suggested path right away (#768).
+  // The keyboard twin of a Cmd/Ctrl-click on a rendered wikilink.
+  Vim.defineAction("zenCreateNoteFromLink", (cm: ReturnType<typeof getCM>) => {
+    const view = (cm as unknown as { cm6?: EditorView }).cm6;
+    if (!view) return;
+    const target = extractLinkAtCursor(
+      view.state.doc.toString(),
+      view.state.selection.main.head,
+    );
+    if (!target) return;
+    followLinkTarget(target, { createWithoutAsking: true });
+  });
 
   Vim.defineAction("goToDefinition", (cm: ReturnType<typeof getCM>) => {
     const view = (cm as unknown as { cm6?: EditorView }).cm6;

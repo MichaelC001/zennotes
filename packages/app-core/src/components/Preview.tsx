@@ -20,6 +20,8 @@ import {
 import {
   openWikilinkTarget,
 } from "../lib/wikilink-navigation";
+import { followLinkTarget } from "../lib/follow-link";
+import { resolveAssetPathAmong } from "../lib/asset-path-resolution";
 import { listDatabaseLinkTargets, resolveDatabaseWikilink } from "../lib/database-links";
 import { externalLinkUrl, resolveInternalNoteHref } from "../lib/internal-links";
 import { copyableLink, linkMenuItems, type CopyableLink } from "../lib/link-copy";
@@ -473,6 +475,13 @@ export const Preview = memo(function Preview({
           void openWikilinkTarget(path, anchor.dataset.wikilink ?? "");
         } else if (anchor.dataset.databaseCsv) {
           void useStore.getState().openDatabase(anchor.dataset.databaseCsv);
+        } else if (anchor.dataset.wikilink) {
+          // A link that reaches nothing used to be inert here while the editor
+          // offered to create the note. Same offer now, and with Cmd/Ctrl held
+          // the note is created at once at the suggested path (#768).
+          followLinkTarget(anchor.dataset.wikilink, {
+            createWithoutAsking: e.metaKey || e.ctrlKey,
+          });
         }
         return;
       }
@@ -719,6 +728,11 @@ export const Preview = memo(function Preview({
       if (db) {
         a.classList.remove("broken");
         a.dataset.databaseCsv = db.csvPath;
+      } else if (resolveAssetPathAmong(assetFiles, notePath ?? "", target)) {
+        // A wikilink at a file in the vault opens that file (#757); it is
+        // not a note waiting to be created, so it keeps the live-link look.
+        a.classList.remove("broken");
+        delete a.dataset.databaseCsv;
       } else {
         a.classList.add("broken");
         delete a.dataset.databaseCsv;

@@ -13,13 +13,14 @@ const state = vi.hoisted(() => ({
   ],
   setFocusedPanel: vi.fn(),
   editorViewRef: null,
-  selectNote: vi.fn(),
+  selectNote: vi.fn(() => Promise.resolve()),
   assetFiles: [{ path: 'assets/diagram.png' }],
   openNoteInTab: vi.fn(() => Promise.resolve())
 }))
 
 const openWikilinkTarget = vi.hoisted(() => vi.fn(() => new Promise<void>(() => undefined)))
 const offerCreateNoteFromLink = vi.hoisted(() => vi.fn())
+const createNoteFromLinkNow = vi.hoisted(() => vi.fn())
 
 vi.mock('../store', () => ({
   useStore: { getState: () => state }
@@ -31,7 +32,7 @@ vi.mock('./wikilink-navigation', () => ({
   openWikilinkTarget
 }))
 
-vi.mock('./create-note-from-link', () => ({ offerCreateNoteFromLink }))
+vi.mock('./create-note-from-link', () => ({ offerCreateNoteFromLink, createNoteFromLinkNow }))
 
 const { followLinkTarget } = await import('./follow-link')
 
@@ -63,5 +64,39 @@ describe('followLinkTarget: wikilinks at vault files (#757)', () => {
 
     expect(state.openNoteInTab).not.toHaveBeenCalled()
     expect(offerCreateNoteFromLink).toHaveBeenCalledWith('Nowhere')
+  })
+})
+
+// #768: with the modifier held (or `gD`), a dead link creates its note at the
+// suggested path at once; the confirmation is what the modifier answers.
+describe('followLinkTarget: creating without asking (#768)', () => {
+  it('creates the note straight away when asked not to confirm', () => {
+    offerCreateNoteFromLink.mockClear()
+    createNoteFromLinkNow.mockClear()
+
+    expect(followLinkTarget('Brand new idea', { createWithoutAsking: true })).toBe(true)
+
+    expect(createNoteFromLinkNow).toHaveBeenCalledWith('Brand new idea')
+    expect(offerCreateNoteFromLink).not.toHaveBeenCalled()
+  })
+
+  it('still asks by default', () => {
+    offerCreateNoteFromLink.mockClear()
+    createNoteFromLinkNow.mockClear()
+
+    expect(followLinkTarget('Brand new idea')).toBe(true)
+
+    expect(offerCreateNoteFromLink).toHaveBeenCalledWith('Brand new idea')
+    expect(createNoteFromLinkNow).not.toHaveBeenCalled()
+  })
+
+  it('never creates over an existing note, modifier or not', () => {
+    createNoteFromLinkNow.mockClear()
+    state.selectNote.mockClear()
+
+    expect(followLinkTarget('Current', { createWithoutAsking: true })).toBe(true)
+
+    expect(state.selectNote).toHaveBeenCalledWith('inbox/Current.md')
+    expect(createNoteFromLinkNow).not.toHaveBeenCalled()
   })
 })

@@ -1819,10 +1819,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
                   const doc = view.state.doc.toString()
                   if (event.metaKey || event.ctrlKey) {
                     const link = linkRangeAtCursor(doc, pos)
+                    // The modifier is the user's answer to "create it?": a
+                    // link at a missing note creates it at once (#768).
                     if (
                       link &&
                       pointerOverRange(view, link.from, link.to, event.clientX, event.clientY) &&
-                      followLinkTarget(link.target)
+                      followLinkTarget(link.target, { createWithoutAsking: true })
                     ) {
                       event.preventDefault()
                       return true

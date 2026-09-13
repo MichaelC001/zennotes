@@ -1,5 +1,5 @@
 import { useStore } from '../store'
-import { offerCreateNoteFromLink } from './create-note-from-link'
+import { createNoteFromLinkNow, offerCreateNoteFromLink } from './create-note-from-link'
 import { externalFileLink, openExternalFileLink } from './external-file-link'
 import { externalLinkUrl, resolveInternalNoteHref } from './internal-links'
 import { openWikilinkAttachment } from './open-wikilink-attachment'
@@ -19,8 +19,16 @@ import {
  * Shared so links follow the same way wherever they're rendered — the main
  * editor's click / Cmd-click handlers and the WYSIWYG table cell both call this
  * (#445). Returns true when it handled the target.
+ *
+ * With `createWithoutAsking`, a dead link creates its note at the suggested
+ * path right away instead of asking first: the modifier-click and `gD` fast
+ * path (#768).
  */
-export function followLinkTarget(target: string): boolean {
+export interface FollowLinkOptions {
+  createWithoutAsking?: boolean
+}
+
+export function followLinkTarget(target: string, options: FollowLinkOptions = {}): boolean {
   const external = externalLinkUrl(target)
   if (external) {
     window.open(external, '_blank')
@@ -58,6 +66,7 @@ export function followLinkTarget(target: string): boolean {
   }
   // Dead link — don't leave it a silent dead end. Offer to create the note (with
   // a confirmation), matching the `gd` follow-link path. (Discord: dead links)
-  void offerCreateNoteFromLink(target)
+  if (options.createWithoutAsking) void createNoteFromLinkNow(target)
+  else void offerCreateNoteFromLink(target)
   return true
 }
