@@ -249,11 +249,8 @@ describe('createCloudSyncClient', () => {
               upload: {
                 method: 'PUT',
                 url: 'https://objects.example.test/upload-1?signature=signed',
-                headers: {
-                  'Content-Length': String(bytes.byteLength),
-                  'Content-Type': 'application/octet-stream',
-                  'X-Upload-Header': 'signed-value'
-                }
+                // The Cloud service signs only the host: no length, no type.
+                headers: { Host: 'objects.example.test', 'X-Upload-Header': 'signed-value' }
               }
             }
           },
@@ -327,14 +324,13 @@ describe('createCloudSyncClient', () => {
     expect(directUpload?.[0]).toBe('https://objects.example.test/upload-1?signature=signed')
     expect(directUpload?.[1]?.method).toBe('PUT')
     expect(directUpload?.[1]?.redirect).toBe('error')
-    expect(new Headers(directUpload?.[1]?.headers)).toEqual(
-      new Headers({
-        'Content-Length': String(bytes.byteLength),
-        'Content-Type': 'application/octet-stream',
-        'X-Upload-Header': 'signed-value'
-      })
-    )
-    expect(new Headers(directUpload?.[1]?.headers).has('Authorization')).toBe(false)
+    // The stream has no length of its own; without Content-Length the PUT
+    // goes out chunked and object storage answers 411 (Discord, 2026-09-13).
+    const putHeaders = new Headers(directUpload?.[1]?.headers)
+    expect(putHeaders.get('Content-Length')).toBe(String(bytes.byteLength))
+    expect(putHeaders.get('Content-Type')).toBe(mutation.content.media_type)
+    expect(putHeaders.get('X-Upload-Header')).toBe('signed-value')
+    expect(putHeaders.has('Authorization')).toBe(false)
     expect(uploadedBodies[0]?.byteLength).toBe(bytes.byteLength)
     expect(uploadedBodies[0]?.[0]).toBe(7)
     expect(uploadedBodies[0]?.at(-1)).toBe(7)
@@ -344,6 +340,65 @@ describe('createCloudSyncClient', () => {
       'https://zennotes.org/api/v1/vaults/vault-1/uploads/upload-1/complete'
     )
     expect(new Headers(completion?.[1]?.headers).get('Authorization')).toBe('Bearer secret-token')
+  })
+
+  it('keeps a Content-Length and Content-Type the service already set', async () => {
+    const bytes = Buffer.alloc(INLINE_UPLOAD_LIMIT_BYTES + 1, 7)
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'zennotes-direct-upload-'))
+    temporaryDirectories.push(directory)
+    const sourcePath = path.join(directory, 'archive.zip')
+    await writeFile(sourcePath, bytes)
+    const mutation = upsertMutation(bytes.byteLength, '')
+    rememberCloudSyncUploadSource(mutation.content, sourcePath)
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, options) => {
+      const url = String(input)
+      if (url.endsWith('/uploads')) {
+        return jsonResponse(
+          {
+            data: {
+              id: 'upload-1',
+              operation_id: mutation.operation_id,
+              status: 'uploading',
+              expected_bytes: bytes.byteLength,
+              expires_at: '2026-08-19T18:30:00.000Z',
+              upload: {
+                method: 'PUT',
+                url: 'https://objects.example.test/upload-1?signature=signed',
+                headers: {
+                  'Content-Length': String(bytes.byteLength),
+                  'Content-Type': 'application/zip'
+                }
+              }
+            }
+          },
+          201
+        )
+      }
+      if (url.startsWith('https://objects.example.test/')) {
+        for await (const _chunk of options?.body as AsyncIterable<Uint8Array>) {
+          /* drain */
+        }
+        return new Response(null, { status: 200 })
+      }
+      if (url.endsWith('/complete')) {
+        return jsonResponse({
+          data: {
+            id: 'upload-1',
+            operation_id: mutation.operation_id,
+            status: 'completed',
+            result: { acknowledged: [], conflicts: [], cursor: 9 }
+          }
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const client = createCloudSyncClient('https://zennotes.org/', 'secret-token', fetchImplementation)
+
+    await client.mutate('vault-1', { mutations: [mutation] })
+
+    const putHeaders = new Headers(fetchImplementation.mock.calls[1]?.[1]?.headers)
+    expect(putHeaders.get('Content-Length')).toBe(String(bytes.byteLength))
+    expect(putHeaders.get('Content-Type')).toBe('application/zip')
   })
 
   it('aborts the upload reservation when object storage rejects the PUT', async () => {

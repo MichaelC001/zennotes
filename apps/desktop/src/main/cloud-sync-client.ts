@@ -120,13 +120,27 @@ class DesktopCloudSyncApiClient extends CloudSyncApiClient {
       throw error
     }
     const upload = instruction.upload
+    // The Cloud service signs only the host of the presigned PUT and hands back
+    // no length, and a streamed file has no length of its own, so fetch would
+    // send it chunked. Object storage refuses a chunked PUT without a
+    // Content-Length (411 Length Required), which is what every file above the
+    // inline limit ran into. The mutation knows the byte count, so it travels
+    // as Content-Length unless the service already set one; a file that
+    // changes size mid-upload then fails the request instead of storing a
+    // truncated or padded object. Content-Type likewise names the media type
+    // the service reserved.
+    const headers = new Headers(upload.headers)
+    if (!headers.has('content-length')) {
+      headers.set('content-length', String(mutation.content.byte_length))
+    }
+    if (!headers.has('content-type')) headers.set('content-type', mutation.content.media_type)
     let response: Response
 
     try {
       try {
         response = await this.fetchImplementation(uploadUrl, {
           method: upload.method,
-          headers: upload.headers,
+          headers,
           body: uploadBody.createBody(),
           signal: AbortSignal.timeout(DIRECT_UPLOAD_TIMEOUT_MS),
           redirect: 'error',

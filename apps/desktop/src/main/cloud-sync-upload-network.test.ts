@@ -55,6 +55,10 @@ describe('disk-backed Cloud uploads over HTTP', () => {
       const fixture = await setup(size)
       const result = await fixture.client().mutate('vault', { mutations: [fixture.mutation] })
       expect(result.acknowledged).toHaveLength(1)
+      // Framed with a length, never chunked (the 411 class from Discord).
+      expect(fixture.putHeaders()?.['content-length']).toBe(String(size))
+      expect(fixture.putHeaders()?.['transfer-encoding']).toBeUndefined()
+      expect(fixture.putHeaders()?.['content-type']).toBe('image/jpeg')
       const downloaded = Buffer.from(await (await fetch(`${fixture.url}/object`)).arrayBuffer())
       expect(downloaded.length).toBe(size)
       expect(sha256(downloaded)).toBe(fixture.mutation.content.sha256)
@@ -112,6 +116,7 @@ async function setup(
   }
   let failure = initialFailure
   let stored: Buffer | null = null
+  let putHeaders: import('node:http').IncomingHttpHeaders | null = null
   let aborts = 0
   let completions = 0
   let uploadMutation = mutation
@@ -134,13 +139,23 @@ async function setup(
             upload: {
               method: 'PUT',
               url: `${url}/object`,
-              headers: { 'Content-Length': String(bytes.length) }
+              // The Cloud service signs only the host of the presigned PUT and
+              // hands back nothing else; the client must supply the length.
+              headers: { Host: new URL(url).host }
             }
           }
         })
       })
     } else if (request.url === '/object' && request.method === 'PUT') {
-      if (failure === 'reject') {
+      putHeaders = request.headers
+      // Object storage (S3, R2) refuses a chunked PUT that carries no
+      // Content-Length before reading a byte: 411 Length Required. The old
+      // fixture accepted anything, which is how the real rejection stayed
+      // hidden behind green tests.
+      if (request.headers['transfer-encoding'] || !request.headers['content-length']) {
+        response.writeHead(411, { Connection: 'close' })
+        response.end()
+      } else if (failure === 'reject') {
         response.writeHead(403, { Connection: 'close' })
         response.end()
       } else if (failure === 'disconnect') {
@@ -217,7 +232,8 @@ async function setup(
       failure = null
     },
     aborts: () => aborts,
-    completions: () => completions
+    completions: () => completions,
+    putHeaders: () => putHeaders
   }
 }
 
