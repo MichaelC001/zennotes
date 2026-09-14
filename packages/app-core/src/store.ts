@@ -3691,15 +3691,9 @@ const pathSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
  *  older one to the final rename. */
 const pathSaveQueues = new Map<string, Promise<void>>()
 const PATH_SAVE_DEBOUNCE_MS = 350
-
-/**
- * The body we most recently wrote to each path. The vault file watcher
- * inevitably echoes our own writes back through `applyChange` after a
- * short delay — when we recognise the echo (disk body === what we
- * wrote) we skip the refresh. Without this, edits made between save
- * completion and echo arrival get rolled back to the older disk body.
- */
-const lastWrittenByPath = new Map<string, string>()
+// Only the latest watcher read may apply, and a newer local save invalidates
+// older reads even if it finishes or returns to the same starting body.
+const noteContentVersions = new Map<string, number>()
 
 /**
  * Old paths of renames the host has not answered yet. A rename is a move on
@@ -6559,15 +6553,21 @@ export const useStore = create<Store>((set, get) => {
     // noise left the buffer showing content that no longer existed on disk.
     if (ev.kind === 'change' || ev.kind === 'add') {
       try {
+        const beforeRead = get()
+        if (beforeRead.noteDirty[ev.path]) return
+        const bodyBeforeRead = beforeRead.noteContents[ev.path]?.body
+        const readVersion = (noteContentVersions.get(ev.path) ?? 0) + 1
+        noteContentVersions.set(ev.path, readVersion)
         const content = await window.zen.readNote(ev.path)
-        // Drop the watcher echo of our own writes. Without this, an
-        // edit made between save-completion and echo-arrival gets
-        // overwritten with the older disk body and the user sees
-        // their last keystroke (often Enter) reverted.
-        if (lastWrittenByPath.get(ev.path) === content.body) return
         set((s) => {
           const existing = s.noteContents[ev.path]
-          // Ignore noise — only push when disk differs from our buffer.
+          if (
+            s.vault?.root !== beforeRead.vault?.root ||
+            existing?.body !== bodyBeforeRead ||
+            noteContentVersions.get(ev.path) !== readVersion
+          ) return s
+          // Compare against the current buffer, not a historical local save:
+          // a Cloud restore can legitimately bring those old bytes back.
           if (existing && existing.body === content.body) return s
           // Never replace a dirty buffer: it holds edits the user has not
           // saved, and the editor applies this push as a non-undoable doc
@@ -6647,7 +6647,7 @@ export const useStore = create<Store>((set, get) => {
         // Snapshot only after earlier writes finish. A second caller sees the
         // newest buffer here, then becomes the last writer by construction.
         const writtenBody = content.body
-        lastWrittenByPath.set(path, writtenBody)
+        noteContentVersions.set(path, (noteContentVersions.get(path) ?? 0) + 1)
         const meta = await window.zen.writeNote(path, writtenBody)
         // Saving a Typst preamble note changes the definitions every note tagged
         // for it compiles against, so reload and repaint open panes. (#486)
