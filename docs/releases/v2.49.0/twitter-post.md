@@ -48,6 +48,6 @@ ZenNotes 2.49.0: Cloud sync uploads large attachments again, every image lands i
 ## Notes
 
 - Issues closed: #769, #770, #768. Discord: the 411 upload report (Sasori, unyanda), no GitHub issue; reply on Discord once released.
-- Release PR: not opened yet (open the v2.49.0 to main PR before fast-forwarding main).
+- Release PR: https://github.com/ZenNotes/zennotes/pull/771 (merged by the fast-forward of main). Released 2026-09-13; all channels verified the same evening.
 - Contributor PR #715 (PDF wikilink images) overlaps #769 with a different diagnosis; decide before the release whether to close it with a note or take its tests.
 - Media in `media/`: `zennotes-2.49.0-demo.mp4` (all three fixes, 56 s, 1080p, captioned) plus one clip per issue, `zennotes-2.49.0-issue-769.mp4` (16 s), `-issue-770.mp4` (13 s), `-issue-768.mp4` (22 s); stills `769-pdf-export-bottom-images-after.png` and `768-unresolved-wikilinks-editor.png`. Recorded from the built app over CDP (`scratchpad/demo/demo.mjs`: frame loop + in-page captions + the rendered PDF pages spliced in, assembled with ffmpeg concat).
