@@ -2926,6 +2926,9 @@ function registerIpc(): void {
   handle(IPC.CLOUD_VAULT_SYNC, () =>
     getCloudSyncService().sync(requireLocalCloudVaultRoot()),
   );
+  handle(IPC.CLOUD_VAULT_HAS_CHANGES, () =>
+    getCloudSyncService().hasRemoteChanges(requireLocalCloudVaultRoot()),
+  );
   on(IPC.CLOUD_VAULT_SYNC_WINDOW_ACK, (event, requestId: unknown, error: unknown) => {
     if (typeof requestId !== "string" || requestId.length > 100 ||
       (error !== null && (typeof error !== "string" || error.length > 2000))) return;

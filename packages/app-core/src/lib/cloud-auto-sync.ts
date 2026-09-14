@@ -17,6 +17,7 @@ export type CloudAutoSyncBridge = Pick<
   | "logoutCloudAccount"
   | "getCloudVaultLink"
   | "syncCloudVault"
+  | "hasCloudVaultChanges"
   | "onCloudSyncWindow"
   | "onVaultChange"
   | "onCloudAccountChange"
@@ -140,6 +141,13 @@ export function startCloudAutoSync(
     sync: async () => {
       await syncCloudVaultWithStatus(bridge);
     },
+    checkRemoteChanges: bridge.hasCloudVaultChanges
+      ? async () => {
+          const state = useCloudSyncStatusStore.getState();
+          if (!state.vaultName || !isCloudAccountConnectedPhase(state.phase)) return false;
+          return bridge.hasCloudVaultChanges!();
+        }
+      : undefined,
     online: environment.online,
     active: environment.active,
     debounceMs: timings.debounceMs,
@@ -456,7 +464,7 @@ export function cloudSyncAttentionMessage(
       return `Cloud storage limit reached (${formatCloudBytes(capacity.used + capacity.reserved)} of ${formatCloudBytes(capacity.limit)}). Remove files or increase your Cloud capacity.`;
     }
     if (capacity?.dimension === "sync_max_file_bytes") {
-      return `A file exceeds the ${formatCloudBytes(capacity.limit)} Cloud file-size limit.`;
+      return `A file exceeds the ${formatCloudBytes(capacity.limit)} Cloud file-size limit. Reduce or remove the oversized file to finish syncing.`;
     }
     return "Cloud capacity reached. Remove files or increase your Cloud capacity.";
   }
@@ -600,13 +608,13 @@ export function cloudSyncAttentionItems(
 }
 
 function formatCloudBytes(bytes: number): string {
-  if (bytes < 1_024) return `${bytes} B`;
+  if (bytes < 1_000) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1_024;
+  let value = bytes / 1_000;
   let unit = units[0];
   for (const candidate of units.slice(1)) {
-    if (value < 1_024) break;
-    value /= 1_024;
+    if (value < 1_000) break;
+    value /= 1_000;
     unit = candidate;
   }
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`;

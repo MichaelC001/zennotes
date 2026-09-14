@@ -8,6 +8,8 @@ import type {
   CloudServiceAccount,
   CloudSyncRunSummary,
 } from "@zennotes/bridge-contract/cloud-sync";
+import { useStore } from "../store";
+import { getPublishNoteRequest, dismissPublishNoteRequest } from "../lib/publish-note-requests";
 import { CloudSettings } from "./CloudSettings";
 import { subscribePublishedNoteChanges } from "../lib/published-note-events";
 import { clearCloudSyncStatus, useCloudSyncStatusStore } from "../lib/cloud-auto-sync";
@@ -20,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   getCloudServiceAccount: vi.fn(),
   listCloudPublishedNotes: vi.fn(),
   unpublishCloudNote: vi.fn(),
+  readNote: vi.fn(),
   clipboardWriteText: vi.fn(),
   listCloudVaults: vi.fn(),
   getCloudVaultLink: vi.fn(),
@@ -220,6 +223,106 @@ describe("CloudSettings", () => {
     expect(host.textContent).toContain("1 backup · 30-day retention");
     expect(host.textContent).toContain("1 published note");
     expect(host.textContent).not.toContain("views");
+  });
+
+  it("opens an explicit update with the latest local draft from Published notes", async () => {
+    mocks.getCloudAccountStatus.mockResolvedValue(connected);
+    mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
+    mocks.getCloudVaultLink.mockResolvedValue(null);
+    mocks.listCloudVaults.mockResolvedValue([]);
+    mocks.listCloudPublishedNotes.mockResolvedValue([{
+      id: 42, slug: "launch", url: "https://zennotes.org/s/launch",
+      title: "Launch notes", note_path: "Notes/Launch.md", created_at: null, updated_at: null,
+    }]);
+    const draft = { path: "Notes/Launch.md", title: "Launch notes", body: "Newest unsaved draft", assetEmbeds: [] };
+    useStore.setState({ noteContents: { [draft.path]: draft as never }, noteDirty: { [draft.path]: true }, notes: [draft as never] });
+    await act(async () => root.render(createElement(CloudSettings, {
+      localVaultAvailable: true, localVaultName: "Notes",
+    })));
+    expect(host.textContent).toContain("Refresh list");
+    expect(host.textContent).toContain("Edits stay private until you choose Update note");
+    const update = [...host.querySelectorAll("button")].find(b => b.textContent?.trim() === "Update note");
+    expect(update).toBeTruthy();
+    await act(async () => update!.click());
+    expect(getPublishNoteRequest()?.note.body).toBe(draft.body);
+    expect(mocks.readNote).not.toHaveBeenCalled();
+    const request = getPublishNoteRequest();
+    if (request) dismissPublishNoteRequest(request);
+    act(() => useStore.setState({ noteContents: {}, noteDirty: {}, notes: [] }));
+  });
+
+  it("reads the current file instead of a stale clean cache when updating a public note", async () => {
+    mocks.getCloudAccountStatus.mockResolvedValue(connected);
+    mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
+    mocks.getCloudVaultLink.mockResolvedValue(null);
+    mocks.listCloudVaults.mockResolvedValue([]);
+    const cached = { path: "Notes/Old.md", title: "Old", body: "Old cache", assetEmbeds: [] };
+    mocks.listCloudPublishedNotes.mockResolvedValue([{
+      id: 43, slug: "old", url: "https://zennotes.org/s/old", title: cached.title,
+      note_path: cached.path, created_at: null, updated_at: null,
+    }]);
+    mocks.readNote.mockResolvedValueOnce({ ...cached, body: "Latest from Cloud" });
+    useStore.setState({ noteContents: { [cached.path]: cached as never }, noteDirty: {}, notes: [cached as never] });
+    await act(async () => root.render(createElement(CloudSettings, {
+      localVaultAvailable: true, localVaultName: "Notes",
+    })));
+    const update = [...host.querySelectorAll("button")].find(b => b.textContent?.trim() === "Update note");
+    await act(async () => update!.click());
+    const request = getPublishNoteRequest();
+    expect(request?.note.body).toBe("Latest from Cloud");
+    if (request) dismissPublishNoteRequest(request);
+    act(() => useStore.setState({ noteContents: {}, noteDirty: {}, notes: [] }));
+  });
+
+  it("prefers a draft edited while the Update note disk read is pending", async () => {
+    mocks.getCloudAccountStatus.mockResolvedValue(connected);
+    mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
+    mocks.getCloudVaultLink.mockResolvedValue(null);
+    mocks.listCloudVaults.mockResolvedValue([]);
+    const note = { path: "Notes/Race.md", title: "Race", body: "Old disk content", assetEmbeds: [] };
+    mocks.listCloudPublishedNotes.mockResolvedValue([{
+      id: 43, slug: "race", url: "https://zennotes.org/s/race", title: note.title,
+      note_path: note.path, created_at: null, updated_at: null,
+    }]);
+    let finish!: (value: unknown) => void;
+    mocks.readNote.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    useStore.setState({ noteContents: {}, notes: [note as never] });
+    await act(async () => root.render(createElement(CloudSettings, {
+      localVaultAvailable: true, localVaultName: "Notes",
+    })));
+    const update = [...host.querySelectorAll("button")].find(b => b.textContent?.trim() === "Update note");
+    await act(async () => update!.click());
+    await act(async () => {
+      useStore.setState({ noteContents: { [note.path]: { ...note, body: "New draft" } as never }, noteDirty: { [note.path]: true } });
+      finish(note);
+    });
+    const request = getPublishNoteRequest();
+    expect(request?.note.body).toBe("New draft");
+    if (request) dismissPublishNoteRequest(request);
+    act(() => useStore.setState({ noteContents: {}, noteDirty: {}, notes: [] }));
+  });
+
+  it("asks for a smaller file instead of promising automatic recovery from an oversized upload", async () => {
+    mocks.getCloudAccountStatus.mockResolvedValue(connected);
+    mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
+    mocks.listCloudVaults.mockResolvedValue([]);
+    mocks.getCloudVaultLink.mockResolvedValue({ base_url: connected.account!.base_url,
+      vault_id: "vault-1", vault_name: "Notes", linked_at: "2026-09-14T12:00:00Z" });
+    mocks.syncCloudVault.mockResolvedValue({ cursor: 1, pulled: 0, pushed: 0,
+      bootstrap_conflicts: [], local_conflicts: [], conflicts: [{
+        operation_id: "large", item_id: "large", code: "FILE_SIZE_LIMIT_EXCEEDED",
+        current_revision: null, current_path: null,
+        capacity: { dimension: "sync_max_file_bytes", limit: 10_000_000, used: 0,
+          reserved: 0, projected: 12_600_000, can_retry_after_reduction: true },
+      }] });
+    await act(async () => root.render(createElement(CloudSettings, {
+      localVaultAvailable: true, localVaultName: "Notes",
+    })));
+    const sync = [...host.querySelectorAll("button")].find(b => b.textContent?.trim() === "Sync now");
+    await act(async () => sync!.click());
+    expect(host.textContent).toContain("10 MB Cloud file-size limit");
+    expect(host.textContent).toContain("Reduce or remove the oversized file");
+    expect(host.textContent).not.toContain("will retry automatically");
   });
 
   it("lists, copies, and unpublishes public notes", async () => {
@@ -733,7 +836,7 @@ describe("CloudSettings", () => {
         await act(async () => {
           [...host.querySelectorAll("button")]
             .find((button) => button.textContent?.trim() === (
-              operation === "publishing" ? "Refresh" : "Create backup"
+              operation === "publishing" ? "Refresh list" : "Create backup"
             ))!.click();
         });
         expect(host.textContent).toContain(actionError);

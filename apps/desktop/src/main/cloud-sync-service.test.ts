@@ -197,6 +197,24 @@ async function setup(
 }
 
 describe('DesktopCloudSyncService', () => {
+  it('probes incoming changes without locking windows or advancing the saved cursor', async () => {
+    const prepare = vi.fn(async (_root, run) => run())
+    const vault = { id: 'vault-1', name: 'Notes', cursor: 0, created_at: '2026-09-14T12:00:00Z', updated_at: '2026-09-14T12:00:00Z' }
+    const { service, client, localRoot } = await setup([vault], undefined, undefined, prepare)
+    await service.link(localRoot, vault.id)
+    expect(await service.hasRemoteChanges(localRoot)).toBe(true)
+    await service.sync(localRoot)
+    prepare.mockClear()
+    expect(await service.hasRemoteChanges(localRoot)).toBe(false)
+    client.manifest.mockResolvedValue({ data: [], cursor: 1, next_page: null })
+    expect(await service.hasRemoteChanges(localRoot)).toBe(true)
+    expect(await service.hasRemoteChanges(localRoot)).toBe(true)
+    expect(client.manifest).toHaveBeenLastCalledWith(vault.id, { includeContent: false, perPage: 1 })
+    expect(prepare).not.toHaveBeenCalled()
+    await service.unlink(localRoot)
+    expect(await service.hasRemoteChanges(localRoot)).toBe(false)
+  })
+
   it('prepares windows before taking the vault lock and coalesces preparation', async () => {
     let prepared!: () => void
     const gate = new Promise<void>((resolve) => { prepared = resolve })

@@ -26,6 +26,7 @@ import {
 } from "../lib/cloud-auto-sync";
 import { useToastStore } from "../lib/toast";
 import { notifyPublishedNoteChanged } from "../lib/published-note-events";
+import { requestPublishNote } from "../lib/publish-note-requests";
 import { Button } from "./ui/Button";
 import { useStore } from "../store";
 import { CloudPendingConflictResolver } from "./CloudPendingConflictResolver";
@@ -47,6 +48,7 @@ type CloudAction =
   | "backup-refresh"
   | "publish-refresh"
   | "publish-delete"
+  | "publish-update"
   | "settings-local"
   | "settings-cloud"
   | null;
@@ -59,6 +61,7 @@ export function CloudSettings({
   localVaultName: string;
 }): JSX.Element {
   const [bridge] = useState(() => getZenBridge());
+  const localNotes = useStore((state) => state.notes);
   const [status, setStatus] = useState<CloudAccountStatus | null>(null);
   const [serviceAccount, setServiceAccount] =
     useState<CloudServiceAccount | null>(null);
@@ -430,6 +433,21 @@ export function CloudSettings({
   const refreshPublishedNotes = (): Promise<void> =>
     runAction("publish-refresh", loadPublishedNotes);
 
+  const updatePublishedNote = (note: CloudPublishedNote): Promise<void> =>
+    runAction("publish-update", async () => {
+      if (!note.note_path || !localVaultAvailable) return;
+      const store = useStore.getState();
+      const diskOrBuffer = store.noteDirty[note.note_path] && store.noteContents[note.note_path]
+        ? store.noteContents[note.note_path]
+        : await bridge.readNote(note.note_path);
+      const current = useStore.getState();
+      const local = current.noteDirty[note.note_path] && current.noteContents[note.note_path]
+        ? current.noteContents[note.note_path]
+        : diskOrBuffer;
+      store.setSettingsOpen(false);
+      requestPublishNote(local);
+    });
+
   const copyPublishedLink = (note: CloudPublishedNote): void => {
     bridge.clipboardWriteText(note.url);
     useToastStore.getState().addToast("Public link copied.", "success");
@@ -621,6 +639,8 @@ export function CloudSettings({
                 onOpen={(note) => window.open(note.url, "_blank")}
                 onRefresh={() => void refreshPublishedNotes()}
                 onUnpublish={(note) => void unpublishNote(note)}
+                onUpdate={(note) => void updatePublishedNote(note)}
+                canUpdate={(note) => localVaultAvailable && localNotes.some((local) => local.path === note.note_path)}
               />
               <CloudBackupPanel
                 action={action}
@@ -667,6 +687,8 @@ function CloudPublishedNotesPanel({
   onOpen,
   onRefresh,
   onUnpublish,
+  onUpdate,
+  canUpdate,
 }: {
   action: CloudAction;
   loading: boolean;
@@ -678,6 +700,8 @@ function CloudPublishedNotesPanel({
   onOpen: (note: CloudPublishedNote) => void;
   onRefresh: () => void;
   onUnpublish: (note: CloudPublishedNote) => void;
+  onUpdate: (note: CloudPublishedNote) => void;
+  canUpdate: (note: CloudPublishedNote) => boolean;
 }): JSX.Element {
   if (!publishIncluded) {
     return (
@@ -706,13 +730,16 @@ function CloudPublishedNotesPanel({
               ? `${pluralize(usage.notes, "published note")} · ${pluralize(usage.assets, "asset")} using ${formatBytes(publishedBytes ?? 0)}.`
               : "Anyone with a link can view a published note until you unpublish it."}
           </p>
+          <p className="mt-1 text-xs leading-5 text-ink-500">
+            Edits stay private until you choose Update note. Refresh list checks published status.
+          </p>
         </div>
         <Button
           variant="ghost"
           disabled={action !== null || loading}
           onClick={onRefresh}
         >
-          {action === "publish-refresh" || loading ? "Refreshing…" : "Refresh"}
+          {action === "publish-refresh" || loading ? "Refreshing…" : "Refresh list"}
         </Button>
       </div>
 
@@ -744,6 +771,14 @@ function CloudPublishedNotesPanel({
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    disabled={action !== null || !canUpdate(note)}
+                    title={canUpdate(note) ? "Review and publish the latest content from this vault" : "Open the vault containing this note to update it"}
+                    onClick={() => onUpdate(note)}
+                  >
+                    Update note
+                  </Button>
                   <Button
                     variant="ghost"
                     disabled={action !== null}
@@ -1929,8 +1964,7 @@ function CloudSyncSummary({
     [
       "QUOTA_EXCEEDED",
       "CAPACITY_EXCEEDED",
-      "FILE_SIZE_LIMIT_EXCEEDED",
-    ].includes(conflict.code),
+    ].includes(conflict.code) && conflict.capacity?.dimension !== "sync_max_file_bytes",
   ).length;
   const items = cloudSyncAttentionItems(summary);
   // A note opens in the editor behind the modal; anything else (an asset, a

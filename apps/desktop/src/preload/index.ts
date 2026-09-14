@@ -258,6 +258,7 @@ const api: ZenBridge = {
   unlinkCloudVault: (): Promise<void> => ipcRenderer.invoke(IPC.CLOUD_VAULT_LINK_DELETE),
   deleteCloudVault: (): Promise<void> => ipcRenderer.invoke(IPC.CLOUD_VAULT_DELETE),
   syncCloudVault: (): Promise<CloudSyncRunSummary> => ipcRenderer.invoke(IPC.CLOUD_VAULT_SYNC),
+  hasCloudVaultChanges: (): Promise<boolean> => ipcRenderer.invoke(IPC.CLOUD_VAULT_HAS_CHANGES),
   onCloudSyncWindow: (handlers: CloudSyncWindowHandlers): (() => void) => {
     const active = new Set<string>()
     const listener = (_event: Electron.IpcRendererEvent, event: CloudSyncWindowEvent): void => {

@@ -125,6 +125,7 @@ export const IPC = {
   CLOUD_VAULT_LINK_DELETE: 'cloud-vault-link:delete',
   CLOUD_VAULT_DELETE: 'cloud-vault:delete',
   CLOUD_VAULT_SYNC: 'cloud-vault:sync',
+  CLOUD_VAULT_HAS_CHANGES: 'cloud-vault:has-changes',
   CLOUD_VAULT_SYNC_WINDOW: 'cloud-vault:sync-window',
   CLOUD_VAULT_SYNC_WINDOW_ACK: 'cloud-vault:sync-window-ack',
   CLOUD_VAULT_CONFLICT_REVIEW_RELEASE: 'cloud-vault:conflict-review-release',

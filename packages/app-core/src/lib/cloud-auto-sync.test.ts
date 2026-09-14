@@ -9,6 +9,7 @@ import {
   acknowledgeCloudConflictResolution,
   clearCloudSyncStatus,
   cloudSyncAttentionItems,
+  cloudSyncAttentionMessage,
   closeCloudConflictReview,
   connectCloudAccountFromStatusBar,
   openCloudConflictReview,
@@ -153,6 +154,16 @@ describe("cloud auto sync host wiring", () => {
   afterEach(() => {
     clearCloudSyncStatus();
     vi.useRealTimers();
+  });
+
+  it("formats a decimal 10 MB file limit and explains how to recover", () => {
+    expect(cloudSyncAttentionMessage({
+      cursor: 1, pulled: 0, pushed: 0, bootstrap_conflicts: [], local_conflicts: [],
+      conflicts: [{ operation_id: "op", item_id: "item", code: "FILE_SIZE_LIMIT_EXCEEDED",
+        current_revision: null, current_path: null,
+        capacity: { dimension: "sync_max_file_bytes", used: 0, reserved: 0,
+          limit: 10_000_000, projected: 12_600_000, can_retry_after_reduction: true } }]
+    })).toBe("A file exceeds the 10 MB Cloud file-size limit. Reduce or remove the oversized file to finish syncing.");
   });
 
   it("keeps the rest of a newly linked review queue when the shared summary is older", () => {

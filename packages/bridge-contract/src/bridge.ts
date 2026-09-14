@@ -155,6 +155,7 @@ export interface ZenBridge {
   unlinkCloudVault(): Promise<void>
   deleteCloudVault(): Promise<void>
   syncCloudVault(): Promise<CloudSyncRunSummary>
+  hasCloudVaultChanges?(): Promise<boolean>
   /** Hosts with multiple workspace windows coordinate draft saves before sync. */
   onCloudSyncWindow?(handlers: import('./cloud-sync').CloudSyncWindowHandlers): () => void
   getCloudBootstrapConflict(

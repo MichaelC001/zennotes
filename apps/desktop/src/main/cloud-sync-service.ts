@@ -31,7 +31,7 @@ import {
 import { setVaultSettings } from './vault'
 import type { CloudSyncApiClient } from '@zennotes/shared-domain/cloud-sync-api'
 import { CloudServiceRequestError } from './cloud-sync-client'
-import { createDesktopCloudSyncCoordinator } from './cloud-sync-filesystem'
+import { createDesktopCloudSyncCoordinator, DesktopCloudSyncStateStore } from './cloud-sync-filesystem'
 
 type SyncClient = Pick<
   CloudSyncApiClient,
@@ -289,6 +289,27 @@ export class DesktopCloudSyncService {
     const sync = await this.sync(localRoot)
 
     return { restore, sync }
+  }
+
+  async hasRemoteChanges(localRoot: string): Promise<boolean> {
+    if (this.runs.has(path.resolve(localRoot))) return false
+    const link = await this.readLink(localRoot)
+    if (!link) return false
+    const connection = await this.optionalConnection()
+    if (!connection || link.base_url !== connection.account.base_url) return false
+    const states = new DesktopCloudSyncStateStore(path.join(
+      this.dependencies.storageDirectory, 'states', rootFingerprint(localRoot),
+      fingerprint(connection.account.base_url)
+    ))
+    const state = await states.load(link.vault_id)
+    if (!state) return true
+    // The changes endpoint includes file contents. A one-item manifest exposes
+    // the vault cursor without downloading an attachment just to detect it.
+    const manifest = await connection.client.manifest(link.vault_id, {
+      includeContent: false,
+      perPage: 1
+    })
+    return manifest.cursor !== state.cursor
   }
 
   sync(localRoot: string): Promise<CloudSyncRunSummary> {
