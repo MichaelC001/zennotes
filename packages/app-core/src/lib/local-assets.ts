@@ -136,6 +136,14 @@ function buildImageEmbed(
 ): HTMLElement {
   const figure = document.createElement('figure')
   figure.className = 'local-image-embed not-prose'
+  // Tag the host the way PDF / audio / video embeds and attachment chips are,
+  // so the reading view's right-click asset menu (Open, Rename…, Move…,
+  // Reveal, Delete…) finds an image too. Only the `<img>` carried the URL
+  // before, and the menu handler looks for kind + url on one host, so images
+  // were the one embed with no menu.
+  figure.dataset.localAssetUrl = resolvedUrl
+  figure.dataset.localAssetKind = 'image'
+  figure.dataset.localAssetHref = rawHref
 
   const frame = document.createElement('div')
   frame.className = 'local-image-embed-frame'
