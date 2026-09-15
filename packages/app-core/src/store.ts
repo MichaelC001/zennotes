@@ -8097,7 +8097,9 @@ export const useStore = create<Store>((set, get) => {
     }
     // Group the rolled-over tasks under today's `## Tasks` heading if it has
     // one, else append them to the end (#452).
-    const nextBody = insertTasksUnderTasksHeading(todayBody, movedLines)
+    const nextBody = insertTasksUnderTasksHeading(todayBody, movedLines, {
+      replaceEmptyPlaceholders: true
+    })
     if (todayBuffer) {
       get().updateNoteBody(todayNote.path, nextBody)
     } else {

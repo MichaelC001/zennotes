@@ -313,6 +313,52 @@ describe('daily note patterns', () => {
   })
 })
 
+describe('daily task rollover', () => {
+  it.each([false, true])('replaces empty template tasks and preserves real work (open: %s)', async (open) => {
+    const iso = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0')].join('-')
+    const now = new Date()
+    const yesterday = new Date(now)
+    yesterday.setDate(yesterday.getDate() - 1)
+    const sourcePath = `inbox/Daily Notes/${iso(yesterday)}.md`
+    const targetPath = `inbox/Daily Notes/${iso(now)}.md`
+    const files = new Map([[sourcePath, '## Tasks\n\n- [ ] Carry this task\n- [ ]\n- [x] Done\n']])
+    const notes = () => [...files].map(([path, body]) => makeNote(body, path))
+    const createNote = vi.fn(async () => {
+      files.set(targetPath, '')
+      return makeNote('', targetPath)
+    })
+    installZen({
+      createNote,
+      listNotes: vi.fn(async () => notes()),
+      readNote: vi.fn(async (path: string) => makeNote(files.get(path)!, path)),
+      writeNote: vi.fn(async (path: string, body: string) => {
+        files.set(path, body)
+        return makeNote(body, path)
+      })
+    })
+    const { useStore } = await loadStore()
+    useStore.setState({
+      notes: notes(),
+      customTemplates: [{
+        id: 'custom:daily', name: 'Daily', description: '', category: 'Custom', builtin: false,
+        body: '## Tasks\n\n- [ ]\n- [ ] Existing template task\n- [ ]\n- [ ]\n\n## Notes\n'
+      }],
+      vaultSettings: {
+        ...useStore.getState().vaultSettings,
+        dailyNotes: { enabled: true, directory: 'Daily Notes', templateId: 'custom:daily' }
+      }
+    })
+
+    expect(await useStore.getState().rolloverUnfinishedTasksIntoToday({ force: true, open })).toBe(1)
+    expect(createNote).toHaveBeenCalledOnce()
+    const body = useStore.getState().noteContents[targetPath]?.body ?? files.get(targetPath)
+    expect(body).toBe('## Tasks\n\n- [ ] Existing template task\n- [ ] Carry this task\n\n## Notes\n')
+    expect(files.get(sourcePath)).toBe('## Tasks\n\n- [ ]\n- [x] Done\n')
+    expect(await useStore.getState().rolloverUnfinishedTasksIntoToday({ force: true, open })).toBe(0)
+  })
+})
+
 describe('weekly note patterns', () => {
   it('creates weekly notes using the configured directory and title patterns', async () => {
     const created = {
