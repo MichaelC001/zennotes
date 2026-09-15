@@ -217,13 +217,24 @@ export function completeStatusOrder(saved: string[], builtIds: string[]): string
   return result
 }
 
-function priorityColumns(tasks: VaultTask[]): Column[] {
+/** A board shows work that is still live. Besides done cards, the two other
+ *  closed states stay off it: a `[>]` forwarded record is the trail a task left
+ *  behind when it moved to another note (its live copy is the card), and a
+ *  `[-]` cancelled task was abandoned on purpose. The Status board drops both
+ *  through `groupTasks`; the field boards skip them explicitly; these two
+ *  boards only skipped done cards, so a task forwarded across three notes read
+ *  as three cards (#786). */
+function isBoardCard(task: VaultTask): boolean {
+  return !task.checked && !task.forwarded && !task.cancelled
+}
+
+export function priorityColumns(tasks: VaultTask[]): Column[] {
   const high: VaultTask[] = []
   const med: VaultTask[] = []
   const low: VaultTask[] = []
   const none: VaultTask[] = []
   for (const task of tasks) {
-    if (task.checked) continue
+    if (!isBoardCard(task)) continue
     if (task.priority === 'high') high.push(task)
     else if (task.priority === 'med') med.push(task)
     else if (task.priority === 'low') low.push(task)
@@ -313,7 +324,7 @@ export function folderColumns(
     else byId.set(id, { label, folder, dir, tasks: [task] })
   }
   for (const task of tasks) {
-    if (task.checked) continue
+    if (!isBoardCard(task)) continue
     if (task.noteFolder === 'archive' && !showArchived) continue
     const location = noteLocationOf(task, layout.systemFolderPaths)
     const vaultDir = [location.prefix, location.dir].filter(Boolean).join('/')
@@ -391,7 +402,7 @@ function fieldColumns(tasks: VaultTask[], fieldKey: string, order: string[]): Co
   const byValue = new Map<string, VaultTask[]>()
   const noValue: VaultTask[] = []
   for (const task of tasks) {
-    if (task.checked || task.forwarded || task.cancelled) continue
+    if (!isBoardCard(task)) continue
     const value = task.fields?.[fieldKey]
     if (value) {
       const list = byValue.get(value)
