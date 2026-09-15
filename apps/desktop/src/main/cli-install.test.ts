@@ -7,6 +7,7 @@ import {
   symlink,
   writeFile
 } from 'node:fs/promises'
+import { promises as fsPromises } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -55,12 +56,22 @@ const wrapperLoc = (): { wrapperPath: string; cliJsPath: string } => ({
 })
 
 let realPath: string | undefined
+const realReadlink = fsPromises.readlink
 
 beforeEach(async () => {
   userDataDir = await mkdtemp(path.join(os.tmpdir(), 'zn-cli-ud-'))
   home = await mkdtemp(path.join(os.tmpdir(), 'zn-cli-home-'))
   tempDirs.push(userDataDir, home)
   vi.spyOn(os, 'homedir').mockReturnValue(home)
+  // Discovery also scans fixed system bin directories outside PATH. Keep
+  // installed commands on the host from affecting these fixture-only tests.
+  vi.spyOn(fsPromises, 'readlink').mockImplementation((...args) => {
+    const candidate = String(args[0])
+    if (!tempDirs.some((dir) => candidate.startsWith(`${dir}${path.sep}`))) {
+      return Promise.reject(Object.assign(new Error('Outside test fixture'), { code: 'ENOENT' }))
+    }
+    return realReadlink(...args)
+  })
   // Candidate-directory discovery walks the REAL $PATH as well as the home
   // dirs, so a developer who has actually installed the CLI (which every
   // ZenNotes user now has, since the app heals the link on launch) would see
