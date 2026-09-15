@@ -47,6 +47,7 @@ import type {
 } from '@zennotes/bridge-contract/workflows'
 import { IPC } from '@shared/ipc'
 import type { AppConfigPortable } from '@shared/app-config'
+import type { ExternalUrlResult } from '@shared/application-links'
 import type { CustomTheme } from '@shared/custom-themes'
 import type { Override } from '@shared/overrides'
 import type {
@@ -531,6 +532,8 @@ const api: ZenBridge = {
     ipcRenderer.invoke(IPC.VAULT_REVEAL_NOTE_TARGET, relPath),
   revealFilePath: (absPath: string): Promise<void> =>
     ipcRenderer.invoke(IPC.VAULT_REVEAL_FILE_PATH, absPath),
+  openExternalUrl: (url: string): Promise<ExternalUrlResult> =>
+    ipcRenderer.invoke(IPC.APP_OPEN_EXTERNAL_URL, url),
   openExternalFile: (href: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke(IPC.VAULT_OPEN_EXTERNAL_FILE, href),
   openAssetExternally: (relPath: string): Promise<{ ok: boolean; error?: string }> =>

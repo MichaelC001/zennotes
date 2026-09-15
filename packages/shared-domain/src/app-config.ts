@@ -70,6 +70,7 @@ export const PORTABLE_PREF_KEYS = [
   // keymaps (overrides only)
   'keymapOverrides',
   'ignoredKeys',
+  'externalApplicationSchemes',
   // search
   'vaultTextSearchBackend',
   'ripgrepBinaryPath',
@@ -196,6 +197,7 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   whichKeyHintTimeoutMs: 900,
   keymapOverrides: {},
   ignoredKeys: [],
+  externalApplicationSchemes: [],
   vaultTextSearchBackend: 'auto',
   ripgrepBinaryPath: null,
   fzfBinaryPath: null,

@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { IPC } from "@shared/ipc";
+import { openExternalUrl } from "./external-urls";
 import type {
   CloudPublishNoteInput,
   CloudSyncBootstrapConflict,
@@ -504,9 +505,8 @@ function windowIconPath(): string {
 }
 
 function openAllowedExternalUrl(url: string): void {
-  if (/^(https?:|mailto:)/i.test(url)) {
-    shell.openExternal(url).catch(() => {});
-  }
+  void openExternalUrl(url, getPortableConfigSnapshot().externalApplicationSchemes,
+    (target) => shell.openExternal(target));
 }
 
 function registerAppDeepLinkProtocol(): void {
@@ -3971,6 +3971,10 @@ function registerIpc(): void {
   handle(IPC.VAULT_REVEAL_FILE_PATH, async (_e, absPath: string) => {
     shell.showItemInFolder(absPath);
   });
+
+  handle(IPC.APP_OPEN_EXTERNAL_URL, (_e, url: unknown) =>
+    openExternalUrl(url, getPortableConfigSnapshot().externalApplicationSchemes,
+      (target) => shell.openExternal(target)));
 
   // Open a file linked from a note but living outside the vault, with the OS
   // default app. The renderer confirms with the user first (this could launch

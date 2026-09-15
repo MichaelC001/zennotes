@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => {
       calendarShowWeekNumbers: true,
       calendarWeekStart: "monday",
       customTemplates: [],
+      externalApplicationSchemes: [],
+      setExternalApplicationSchemes: vi.fn(),
       darkSidebar: false,
       editorFontSize: 16,
       editorLineHeight: 1.6,
@@ -128,9 +130,12 @@ function blurInput(input: HTMLInputElement): void {
 describe("SettingsModal date note directories", () => {
   let root: Root;
   let host: HTMLDivElement;
+  let originalScrollIntoView: PropertyDescriptor | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    originalScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
+    Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
     mocks.state.vimMode = false;
     mocks.state.vimWrappedLineMotions = "logical";
     mocks.state.keymapOverrides = {};
@@ -166,6 +171,31 @@ describe("SettingsModal date note directories", () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    if (originalScrollIntoView) {
+      Object.defineProperty(Element.prototype, "scrollIntoView", originalScrollIntoView);
+    } else {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
+  it("opens application link settings and saves normalized prefixes", async () => {
+    requestSettingsTarget("external-links");
+    await act(async () => root.render(createElement(SettingsModal)));
+    const input = host.querySelector<HTMLInputElement>('input[placeholder="zotero, obsidian, vscode"]');
+    expect(input).toBeTruthy();
+    await act(async () => changeInput(input!, "Zotero://, obsidian:, zotero"));
+    await act(async () => blurInput(input!));
+    expect(mocks.state.setExternalApplicationSchemes).toHaveBeenCalledWith(["zotero", "obsidian"]);
+  });
+
+  it("rejects reserved prefixes with a visible explanation", async () => {
+    requestSettingsTarget("external-links");
+    await act(async () => root.render(createElement(SettingsModal)));
+    const input = host.querySelector<HTMLInputElement>('input[placeholder="zotero, obsidian, vscode"]')!;
+    await act(async () => changeInput(input, "javascript"));
+    await act(async () => blurInput(input));
+    expect(mocks.state.setExternalApplicationSchemes).not.toHaveBeenCalled();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('not an available application prefix');
   });
 
   it("does not restore the default daily directory while the field is being cleared", async () => {

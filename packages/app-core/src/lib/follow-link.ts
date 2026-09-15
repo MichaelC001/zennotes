@@ -1,3 +1,4 @@
+import { followApplicationLink } from './application-link-open'
 import { useStore } from '../store'
 import { createNoteFromLinkNow, offerCreateNoteFromLink } from './create-note-from-link'
 import { externalFileLink, openExternalFileLink } from './external-file-link'
@@ -29,6 +30,7 @@ export interface FollowLinkOptions {
 }
 
 export function followLinkTarget(target: string, options: FollowLinkOptions = {}): boolean {
+  if (followApplicationLink(target)) return true
   const external = externalLinkUrl(target)
   if (external) {
     window.open(external, '_blank')

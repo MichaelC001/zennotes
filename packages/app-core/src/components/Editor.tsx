@@ -30,6 +30,7 @@ import { BUILTIN_TEMPLATES } from "@shared/builtin-templates";
 import { mergeTemplates } from "@shared/template-files";
 import type { PaneLayout, PaneSplit } from "../lib/pane-layout";
 import { parseCreateNotePath, resolveWikilinkPath } from "../lib/wikilinks";
+import { followApplicationLink } from "../lib/application-link-open";
 import {
   openDatabaseFromWikilink,
   openWikilinkTarget,
@@ -810,6 +811,7 @@ function registerVimCommands(): void {
     const target = extractLinkAtCursor(doc, pos);
     if (!target) return;
 
+    if (followApplicationLink(target)) return;
     const external = externalLinkUrl(target);
     if (external) {
       window.open(external, "_blank");

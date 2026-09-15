@@ -1579,6 +1579,7 @@ export const httpBridge: ZenBridge = {
   exportNoteDocx,
   revealNote,
   openExternalFile,
+  openExternalUrl: async () => ({ ok: false, error: 'desktop-only' }),
   openAssetExternally,
   fetchLinkMetadata,
   revealNoteTarget,

@@ -140,6 +140,7 @@ import { CustomCodeLanguagesSettings } from "./CustomCodeLanguagesSettings";
 import { TextReplacementsSettings } from "./TextReplacementsSettings";
 import { CloudSettings } from "./CloudSettings";
 import { consumeSettingsTarget } from "../lib/settings-navigation";
+import { normalizeApplicationSchemes } from "@shared/application-links";
 
 type SettingsCategoryId =
   | "appearance"
@@ -475,6 +476,9 @@ export function SettingsModal(): JSX.Element {
   const setRipgrepBinaryPath = useStore((s) => s.setRipgrepBinaryPath);
   const fzfBinaryPath = useStore((s) => s.fzfBinaryPath);
   const setFzfBinaryPath = useStore((s) => s.setFzfBinaryPath);
+  const externalApplicationSchemes = useStore((s) => s.externalApplicationSchemes);
+  const setExternalApplicationSchemes = useStore((s) => s.setExternalApplicationSchemes);
+  const [externalApplicationIssue, setExternalApplicationIssue] = useState<string | null>(null);
   const livePreview = useStore((s) => s.livePreview);
   const setLivePreview = useStore((s) => s.setLivePreview);
   const renderTablesInLivePreview = useStore(
@@ -1184,13 +1188,14 @@ export function SettingsModal(): JSX.Element {
 
   const ref = useRef<HTMLDivElement | null>(null);
   const settingsSearchHighlightTimerRef = useRef<number | null>(null);
+  const [initialSettingsTarget] = useState(consumeSettingsTarget);
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(
-    () => consumeSettingsTarget() ?? "appearance",
+    () => initialSettingsTarget === "external-links" ? "editor" : initialSettingsTarget ?? "appearance",
   );
   // Per-category active sub-tab (dense categories split their content into sub-tabs).
   const [activeSubTabByCategory, setActiveSubTabByCategory] = useState<
     Partial<Record<SettingsCategoryId, string>>
-  >({});
+  >(() => initialSettingsTarget === "external-links" ? { editor: "links" } : {});
   const [activeSearchResultId, setActiveSearchResultId] = useState<
     string | null
   >(null);
@@ -1811,6 +1816,13 @@ export function SettingsModal(): JSX.Element {
       ],
       searchItems: [
         {
+          id: "external-application-links",
+          title: "External application links",
+          description: "Open links in enabled applications such as Zotero, Obsidian, and VS Code.",
+          keywords: ["uri", "scheme", "protocol", "zotero", "obsidian", "vscode", "external"],
+          available: appInfo.runtime === "desktop",
+        },
+        {
           id: "vim-mode",
           title: "Vim mode",
           description: "First-class Vim motions in the markdown editor.",
@@ -2393,6 +2405,34 @@ export function SettingsModal(): JSX.Element {
             </div>
           ),
         },
+        ...(appInfo.runtime === "desktop" ? [{
+          id: "links",
+          title: "Links",
+          searchIds: ["external-application-links"],
+          content: (
+            <Section title="Links" description="Open application links from your notes.">
+              <TextInputRow
+                label="External application links"
+                description="Enter application prefixes separated by commas, such as zotero, obsidian, or vscode. Enabled links open in the installed app. Saved in config.toml."
+                value={externalApplicationSchemes.join(", ")}
+                placeholder="zotero, obsidian, vscode"
+                settingId="external-application-links"
+                commitOnBlur
+                issue={externalApplicationIssue}
+                onChange={(value) => {
+                  const entries = (value ?? "").split(/[,\s]+/).filter(Boolean);
+                  const invalid = entries.find((entry) => normalizeApplicationSchemes([entry]).length === 0);
+                  if (invalid) {
+                    setExternalApplicationIssue(`“${invalid}” is not an available application prefix.`);
+                    return;
+                  }
+                  setExternalApplicationIssue(null);
+                  setExternalApplicationSchemes(normalizeApplicationSchemes(entries));
+                }}
+              />
+            </Section>
+          ),
+        }] : []),
         {
           id: "writing",
           title: "Writing",
@@ -5339,7 +5379,7 @@ export function SettingsModal(): JSX.Element {
             </div>
           </aside>
 
-          <div className="flex min-h-0 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-col">
             <div className="flex items-start justify-between gap-4 border-b border-paper-300/60 px-7 py-5">
               <div>
                 <div className="text-xs font-medium uppercase tracking-[0.22em] text-ink-500">
@@ -5945,11 +5985,20 @@ function CategorySubTabs({
   onSelect: (id: string) => void;
 }): JSX.Element {
   const active = tabs.find((tab) => tab.id === activeId) ?? tabs[0];
+  const tabListRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    tabListRef.current
+      ?.querySelector<HTMLElement>('[aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [active.id]);
+
   return (
     <div className="space-y-6">
       <div
+        ref={tabListRef}
         role="tablist"
-        className="flex flex-wrap items-center gap-1 rounded-2xl border border-paper-300/60 bg-paper-50/45 p-1"
+        className="flex items-center justify-between gap-1 overflow-x-auto rounded-2xl border border-paper-300/60 bg-paper-50/45 p-1"
       >
         {tabs.map((tab) => {
           const selected = tab.id === active.id;
@@ -5961,7 +6010,7 @@ function CategorySubTabs({
               aria-selected={selected}
               onClick={() => onSelect(tab.id)}
               className={[
-                "rounded-xl px-3.5 py-1.5 text-sm font-medium transition-colors",
+                "shrink-0 whitespace-nowrap rounded-xl px-2 py-1.5 text-sm font-medium transition-colors",
                 selected
                   ? "bg-paper-200/90 text-ink-900 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
                   : "text-ink-500 hover:bg-paper-200/50 hover:text-ink-800",

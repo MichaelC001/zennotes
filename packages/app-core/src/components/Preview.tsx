@@ -1,3 +1,4 @@
+import { followApplicationLink } from "../lib/application-link-open";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -498,6 +499,10 @@ export const Preview = memo(function Preview({
       // `data-local-asset-href`. (#201)
       const linkHref =
         anchor.dataset.localAssetHref || anchor.getAttribute("href") || "";
+      if (followApplicationLink(linkHref)) {
+        e.preventDefault();
+        return;
+      }
       const internalNote = resolveInternalNoteHref(
         notePathRef.current,
         linkHref,

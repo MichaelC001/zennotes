@@ -394,6 +394,11 @@ interface ListFieldMap {
 
 // List (ordered string[]) portable prefs → [section].key = ["a", "b"].
 const LIST_FIELDS: Partial<Record<PortablePrefKey, ListFieldMap>> = {
+  externalApplicationSchemes: {
+    section: 'editor',
+    tomlKey: 'external_application_schemes',
+    comment: 'application links enabled for opening, e.g. ["zotero", "obsidian", "vscode"]'
+  },
   ignoredKeys: {
     section: 'editor',
     tomlKey: 'ignored_keys',

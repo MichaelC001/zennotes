@@ -115,6 +115,7 @@ describe('TOML serialization', () => {
       savedTaskFilters: { 'Project alpha': '@project:alpha', Blocked: '@status:blocked' },
       kanbanGroupBy: 'folder',
       kanbanFolderRoot: 'Projects',
+      externalApplicationSchemes: ['zotero', 'obsidian'],
       ignoredKeys: ['KanaMode', 'F24']
     }
 
@@ -144,6 +145,7 @@ describe('TOML serialization', () => {
     expect(round.kanbanGroupBy).toBe('folder')
     expect(round.kanbanFolderRoot).toBe('Projects')
     expect(text).toContain('ignored_keys = ["KanaMode", "F24"]')
+    expect(round.externalApplicationSchemes).toEqual(['zotero', 'obsidian'])
     expect(round.ignoredKeys).toEqual(['KanaMode', 'F24'])
     expect(text).toContain('[saved_filters]')
     expect(text).toContain('"Project alpha" = "@project:alpha"')

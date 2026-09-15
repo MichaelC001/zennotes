@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
   selectedPath: 'inbox/Current.md' as string | null,
@@ -35,6 +35,7 @@ vi.mock('./wikilink-navigation', () => ({
 vi.mock('./create-note-from-link', () => ({ offerCreateNoteFromLink, createNoteFromLinkNow }))
 
 const { followLinkTarget } = await import('./follow-link')
+const { useToastStore } = await import('./toast')
 
 describe('followLinkTarget: same-note anchors (#601)', () => {
   it('opens [[^block]] in the selected note instead of offering to create a note', () => {
@@ -98,5 +99,45 @@ describe('followLinkTarget: creating without asking (#768)', () => {
 
     expect(state.selectNote).toHaveBeenCalledWith('inbox/Current.md')
     expect(createNoteFromLinkNow).not.toHaveBeenCalled()
+  })
+})
+
+describe('application links (#764)', () => {
+  const openExternalUrl = vi.fn()
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useToastStore.setState({ toasts: [] })
+    Object.defineProperty(window, 'zen', { configurable: true, value: { openExternalUrl } })
+  })
+
+  it.each([false, true])('never offers or creates a note for a disabled scheme (modifier: %s)', async (createWithoutAsking) => {
+    openExternalUrl.mockResolvedValue({ ok: false, error: 'scheme-disabled' })
+    followLinkTarget('zotero://open-pdf/library/items/W78FUE98', { createWithoutAsking })
+    await vi.waitFor(() => expect(useToastStore.getState().toasts[0]?.action?.label).toBe('Open settings'))
+    expect(offerCreateNoteFromLink).not.toHaveBeenCalled()
+    expect(createNoteFromLinkNow).not.toHaveBeenCalled()
+  })
+
+  it('hands enabled application links to the host intact', async () => {
+    openExternalUrl.mockResolvedValue({ ok: true })
+    const url = 'zotero://open-pdf/library/items/W78FUE98?page=3#annotation=ABC'
+    expect(followLinkTarget(url)).toBe(true)
+    await vi.waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith(url))
+    expect(offerCreateNoteFromLink).not.toHaveBeenCalled()
+    expect(useToastStore.getState().toasts).toEqual([])
+  })
+
+  it('blocks executable schemes before calling the host', () => {
+    followLinkTarget('javascript:alert(1)', { createWithoutAsking: true })
+    expect(openExternalUrl).not.toHaveBeenCalled()
+    expect(createNoteFromLinkNow).not.toHaveBeenCalled()
+    expect(useToastStore.getState().toasts[0]?.type).toBe('error')
+  })
+
+  it('explains failed app launches', async () => {
+    openExternalUrl.mockResolvedValue({ ok: false, error: 'open-failed' })
+    followLinkTarget('zotero://open-pdf/item')
+    await vi.waitFor(() => expect(useToastStore.getState().toasts[0]?.message).toContain('Check that its application is installed'))
+    expect(offerCreateNoteFromLink).not.toHaveBeenCalled()
   })
 })

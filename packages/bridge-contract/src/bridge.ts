@@ -83,6 +83,7 @@ import type {
   McpServerRuntime
 } from '@zennotes/shared-domain/mcp-clients'
 import type { AppConfigPortable } from '@zennotes/shared-domain/app-config'
+import type { ExternalUrlResult } from '@zennotes/shared-domain/application-links'
 import type { CustomTheme } from '@zennotes/shared-domain/custom-themes'
 import type { Override } from '@zennotes/shared-domain/overrides'
 import type {
@@ -324,6 +325,8 @@ export interface ZenBridge {
    * when the open fails, so callers can surface a message.
    */
   openExternalFile(href: string): Promise<{ ok: boolean; error?: string }>
+  /** Open a URL through the host after checking enabled application schemes. */
+  openExternalUrl(url: string): Promise<ExternalUrlResult>
   /**
    * Open a VAULT asset (vault-relative path) with the OS default app. Unlike
    * `openExternalFile` this resolves against the vault the host actually has:

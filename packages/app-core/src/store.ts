@@ -235,6 +235,7 @@ import {
   type SavedTaskFilters
 } from './lib/saved-task-filters'
 import { normalizeIgnoredKeys } from './lib/ignored-keys'
+import { normalizeApplicationSchemes } from '@shared/application-links'
 import { normalizeEditorTabSize } from './lib/editor-tab-size'
 import { recentNoteToggleTarget } from './lib/recent-note-toggle'
 
@@ -511,6 +512,7 @@ interface Prefs {
   vimInsertEscape: string
   /** Keys the app ignores entirely (#732): a remapper's tap-hold no-op, by DOM key or code. */
   ignoredKeys: string[]
+  externalApplicationSchemes: string[]
   /** When true, Vim yank/delete/change also copy to the system clipboard and
    *  `p` / `P` paste from it (like `set clipboard=unnamed`). */
   vimYankToClipboard: boolean
@@ -1026,6 +1028,7 @@ export const DEFAULT_PREFS: Prefs = {
   vimMode: true,
   vimInsertEscape: '',
   ignoredKeys: [],
+  externalApplicationSchemes: [],
   vimYankToClipboard: false,
   vimBlockImeInNormalMode: true,
   vimWrappedLineMotions: 'display',
@@ -1151,6 +1154,7 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
         ? p.vimInsertEscape.trim().slice(0, 5)
         : DEFAULT_PREFS.vimInsertEscape,
     ignoredKeys: normalizeIgnoredKeys(p.ignoredKeys),
+    externalApplicationSchemes: normalizeApplicationSchemes(p.externalApplicationSchemes),
     vimYankToClipboard:
       typeof p.vimYankToClipboard === 'boolean'
         ? p.vimYankToClipboard
@@ -2244,6 +2248,7 @@ function collectPrefs(s: {
   vimInsertEscape: string
   /** Keys the app ignores entirely (#732): a remapper's tap-hold no-op, by DOM key or code. */
   ignoredKeys: string[]
+  externalApplicationSchemes: string[]
   vimYankToClipboard: boolean
   vimBlockImeInNormalMode: boolean
   vimWrappedLineMotions: VimWrappedLineMotionMode
@@ -2346,6 +2351,7 @@ function collectPrefs(s: {
     vimMode: s.vimMode,
     vimInsertEscape: s.vimInsertEscape,
     ignoredKeys: s.ignoredKeys,
+    externalApplicationSchemes: s.externalApplicationSchemes,
     vimYankToClipboard: s.vimYankToClipboard,
     vimBlockImeInNormalMode: s.vimBlockImeInNormalMode,
     vimWrappedLineMotions: s.vimWrappedLineMotions,
@@ -2856,6 +2862,7 @@ interface Store {
   vimInsertEscape: string
   /** Keys the app ignores entirely (#732): a remapper's tap-hold no-op, by DOM key or code. */
   ignoredKeys: string[]
+  externalApplicationSchemes: string[]
   /** When true, Vim yank/delete/change also copy to the system clipboard. Persisted. */
   vimYankToClipboard: boolean
   vimBlockImeInNormalMode: boolean
@@ -3372,6 +3379,7 @@ interface Store {
   setFocusMode: (focus: boolean) => void
   setVimMode: (on: boolean) => void
   setVimInsertEscape: (sequence: string) => void
+  setExternalApplicationSchemes: (schemes: string[]) => void
   /** Replace the ignored-keys list (#732); persisted with the prefs and mirrored to config.toml. */
   setIgnoredKeys: (keys: string[]) => void
   /** Add one key to the ignored list, by the name Settings shows. */
@@ -4712,6 +4720,7 @@ export const useStore = create<Store>((set, get) => {
   vimMode: loadPrefs().vimMode,
   vimInsertEscape: loadPrefs().vimInsertEscape,
   ignoredKeys: loadPrefs().ignoredKeys,
+  externalApplicationSchemes: loadPrefs().externalApplicationSchemes,
   vimYankToClipboard: loadPrefs().vimYankToClipboard,
   vimBlockImeInNormalMode: loadPrefs().vimBlockImeInNormalMode,
   vimWrappedLineMotions: loadPrefs().vimWrappedLineMotions,
@@ -7294,6 +7303,10 @@ export const useStore = create<Store>((set, get) => {
   },
   setVimInsertEscape: (sequence) => {
     set({ vimInsertEscape: sequence.trim().slice(0, 5) })
+    savePrefs(collectPrefs(get()))
+  },
+  setExternalApplicationSchemes: (schemes) => {
+    set({ externalApplicationSchemes: normalizeApplicationSchemes(schemes) })
     savePrefs(collectPrefs(get()))
   },
   setIgnoredKeys: (keys) => {
