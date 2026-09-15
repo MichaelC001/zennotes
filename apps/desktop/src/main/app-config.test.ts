@@ -99,6 +99,7 @@ describe('TOML serialization', () => {
       editorLineHeight: 1.6,
       themeFamily: 'nord',
       themeMode: 'dark',
+      showWindowTitleBar: false,
       autoPairs: false,
       autoPairQuotesInProse: true,
       showHeadingLevelLabels: true,
@@ -130,6 +131,8 @@ describe('TOML serialization', () => {
     expect(round.editorFontSize).toBe(18)
     expect(round.editorLineHeight).toBeCloseTo(1.6)
     expect(round.themeFamily).toBe('nord')
+    expect(text).toContain('show_window_title_bar = false')
+    expect(round.showWindowTitleBar).toBe(false)
     expect(round.autoPairs).toBe(false)
     expect(round.autoPairQuotesInProse).toBe(true)
     expect(round.showHeadingLevelLabels).toBe(true)

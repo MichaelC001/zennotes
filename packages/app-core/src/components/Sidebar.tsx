@@ -520,6 +520,7 @@ export function Sidebar(): JSX.Element {
   const refreshAssets = useStore((s) => s.refreshAssets);
   const deleteAssetAction = useStore((s) => s.deleteAsset);
   const sidebarWidth = useStore((s) => s.sidebarWidth);
+  const showWindowTitleBar = useStore((s) => s.showWindowTitleBar);
   const setSidebarWidth = useStore((s) => s.setSidebarWidth);
   // Footer degrade ladder (#539). The width is the pref, which is exactly the
   // rendered width (the aside is fixed-width and shrink-0), so this stays a
@@ -3043,7 +3044,13 @@ export function Sidebar(): JSX.Element {
       onFocusCapture={() => setFocusedPanel("sidebar")}
     >
       {/* Vault header + top-right actions */}
-      <div className="flex items-center justify-between px-3 pb-3">
+      <div
+        className={`flex items-center justify-between px-3 pb-3${
+          showWindowTitleBar === false && window.zen.getAppInfo().runtime === "desktop"
+            ? " drag-region"
+            : ""
+        }`}
+      >
         {canSwitchVaults ? (
           <button
             type="button"

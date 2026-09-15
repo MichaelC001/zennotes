@@ -1483,6 +1483,37 @@ describe('viewSettingsScope (#292 — global vs per-vault)', () => {
   })
 })
 
+describe('window title bar preference (#754)', () => {
+  it('defaults on, persists off, and stays off through Zen mode', async () => {
+    installZen()
+    const { useStore } = await loadStore()
+    expect(useStore.getState().showWindowTitleBar).toBe(true)
+    useStore.getState().setShowWindowTitleBar(false)
+    useStore.getState().setFocusMode(true)
+    useStore.getState().setFocusMode(false)
+    expect(useStore.getState().showWindowTitleBar).toBe(false)
+    expect(JSON.parse(localStorage.getItem('zen:prefs:v2') ?? '{}').showWindowTitleBar).toBe(false)
+    vi.resetModules()
+    const reloaded = await import('./store')
+    expect(reloaded.useStore.getState().showWindowTitleBar).toBe(false)
+  })
+
+  it('loads the portable value and applies another window changing it', async () => {
+    let onConfigChange: ((config: Record<string, unknown>) => void) | undefined
+    installZen({
+      getConfigSync: () => ({ showWindowTitleBar: false }),
+      onConfigChange: (listener: typeof onConfigChange) => { onConfigChange = listener }
+    })
+    const { useStore, initConfigSync } = await loadStore()
+    expect(useStore.getState().showWindowTitleBar).toBe(false)
+    initConfigSync()
+    onConfigChange?.({ showWindowTitleBar: true })
+    expect(useStore.getState().showWindowTitleBar).toBe(true)
+    onConfigChange?.({ showWindowTitleBar: 'false' })
+    expect(useStore.getState().showWindowTitleBar).toBe(true)
+  })
+})
+
 describe('pdfExportUseTheme — theme in PDF export', () => {
   it('defaults off and round-trips through persistence', async () => {
     installZen()

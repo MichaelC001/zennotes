@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => {
       externalApplicationSchemes: [],
       setExternalApplicationSchemes: vi.fn(),
       darkSidebar: false,
+      showWindowTitleBar: true,
+      setShowWindowTitleBar: vi.fn(),
       editorFontSize: 16,
       editorLineHeight: 1.6,
       editorScrollOff: 0,
@@ -78,6 +80,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     state,
+    runtime: "desktop" as "desktop" | "web",
     setSettingsOpen: state.setSettingsOpen,
     setVaultSettings: state.setVaultSettings,
   };
@@ -100,7 +103,7 @@ vi.mock("../lib/app-update-state", () => ({
 vi.mock("@zennotes/bridge-contract/bridge", () => ({
   getZenBridge: () => ({
     getAppInfo: () => ({
-      runtime: "desktop",
+      runtime: mocks.runtime,
       version: "2.4.0",
       description: "ZenNotes",
       homepage: "https://github.com/ZenNotes/zennotes/releases/latest",
@@ -134,6 +137,7 @@ describe("SettingsModal date note directories", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.runtime = "desktop";
     originalScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
     Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
     mocks.state.vimMode = false;
@@ -186,6 +190,22 @@ describe("SettingsModal date note directories", () => {
     await act(async () => changeInput(input!, "Zotero://, obsidian:, zotero"));
     await act(async () => blurInput(input!));
     expect(mocks.state.setExternalApplicationSchemes).toHaveBeenCalledWith(["zotero", "obsidian"]);
+  });
+
+  it("finds the title bar setting by Hyprland and toggles it", async () => {
+    await act(async () => root.render(createElement(SettingsModal)));
+    const search = host.querySelector<HTMLInputElement>('input[placeholder="Search settings…"]');
+    await act(async () => changeInput(search!, "hyprland"));
+    const toggle = host.querySelector<HTMLButtonElement>('[data-settings-search-id="window-title-bar"] [role="switch"]');
+    expect(toggle?.getAttribute("aria-checked")).toBe("true");
+    await act(async () => toggle!.click());
+    expect(mocks.state.setShowWindowTitleBar).toHaveBeenCalledWith(false);
+  });
+
+  it("does not offer native title bar settings in the web app", async () => {
+    mocks.runtime = "web";
+    await act(async () => root.render(createElement(SettingsModal)));
+    expect(host.querySelector('[data-settings-search-id="window-title-bar"]')).toBeNull();
   });
 
   it("rejects reserved prefixes with a visible explanation", async () => {

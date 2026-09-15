@@ -273,6 +273,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'dark_sidebar',
     comment: 'tint the sidebar darker than the canvas'
   },
+  showWindowTitleBar: {
+    section: 'appearance',
+    tomlKey: 'show_window_title_bar',
+    comment: 'show the main window title bar and window controls'
+  },
   showSidebarChevrons: {
     section: 'appearance',
     tomlKey: 'show_sidebar_chevrons',

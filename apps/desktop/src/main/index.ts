@@ -1527,6 +1527,10 @@ async function createWindow(
   });
 
   workspaceWindowIds.add(win.id);
+  applyWorkspaceWindowTitleBar(win);
+  // AppKit can restore traffic lights after a native fullscreen transition.
+  win.on("enter-full-screen", () => applyWorkspaceWindowTitleBar(win));
+  win.on("leave-full-screen", () => applyWorkspaceWindowTitleBar(win));
 
   if (!mainWindow || mainWindow.isDestroyed()) {
     mainWindow = win;
@@ -4567,7 +4571,16 @@ function registerIpc(): void {
     }
   });
   handle(IPC.CONFIG_SET, async (_event, next: AppConfigPortable) => {
+    const previousTitleBar =
+      getPortableConfigSnapshot().showWindowTitleBar !== false;
     await setPortableConfig(next ?? {});
+    const showWindowTitleBar =
+      getPortableConfigSnapshot().showWindowTitleBar !== false;
+    if (showWindowTitleBar !== previousTitleBar) {
+      // Own writes bypass the file watcher. Keep other workspace windows and
+      // their native controls in step without replacing their unrelated prefs.
+      broadcastConfigChange({ showWindowTitleBar });
+    }
   });
   handle(IPC.CONFIG_GET_PATH, () => getConfigFilePath());
   handle(IPC.CONFIG_REVEAL, async () => {
@@ -4619,9 +4632,22 @@ function registerIpc(): void {
 /** Push an externally-changed config (synced dotfile / hand-edit) to every
  *  open renderer so live-reload applies it without a restart. */
 function broadcastConfigChange(next: AppConfigPortable): void {
+  const config = {
+    ...next,
+    showWindowTitleBar: next.showWindowTitleBar !== false,
+  };
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(IPC.CONFIG_ON_CHANGE, next);
+    if (win.isDestroyed()) continue;
+    applyWorkspaceWindowTitleBar(win);
+    win.webContents.send(IPC.CONFIG_ON_CHANGE, config);
   }
+}
+
+function applyWorkspaceWindowTitleBar(win: BrowserWindow): void {
+  if (!isMac() || win.isDestroyed() || !workspaceWindowIds.has(win.id)) return;
+  win.setWindowButtonVisibility(
+    getPortableConfigSnapshot().showWindowTitleBar !== false,
+  );
 }
 
 /** Push the freshly-scanned custom themes to every renderer on a file change. */

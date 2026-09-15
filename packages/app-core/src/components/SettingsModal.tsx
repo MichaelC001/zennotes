@@ -711,6 +711,8 @@ export function SettingsModal(): JSX.Element {
   const systemFolderLabels = useStore((s) => s.systemFolderLabels);
   const setSystemFolderLabel = useStore((s) => s.setSystemFolderLabel);
   const darkSidebar = useStore((s) => s.darkSidebar);
+  const showWindowTitleBar = useStore((s) => s.showWindowTitleBar);
+  const setShowWindowTitleBar = useStore((s) => s.setShowWindowTitleBar);
   const setDarkSidebar = useStore((s) => s.setDarkSidebar);
   const showSidebarChevrons = useStore((s) => s.showSidebarChevrons);
   const setShowSidebarChevrons = useStore((s) => s.setShowSidebarChevrons);
@@ -1347,6 +1349,13 @@ export function SettingsModal(): JSX.Element {
             "Tint the sidebar one step darker than the canvas so the chrome reads as a separate surface.",
         },
         {
+          id: "window-title-bar",
+          title: "Window title bar",
+          description: "Show the main window title and controls, or hide them to reclaim vertical space.",
+          keywords: ["decorations", "frameless", "traffic lights", "tiling", "hyprland", "linux"],
+          available: appInfo.runtime === "desktop",
+        },
+        {
           id: "sidebar-arrows",
           title: "Sidebar arrows",
           description:
@@ -1752,6 +1761,15 @@ export function SettingsModal(): JSX.Element {
             title="Chrome"
             description="Small visual adjustments that change how the shell feels."
           >
+            {appInfo.runtime === "desktop" && (
+              <ToggleRow
+                label="Window title bar"
+                description="Show the main window’s title and controls. Turn off to reclaim vertical space. Drag blank space around the sidebar header to move the window, or use your window manager’s shortcuts."
+                value={showWindowTitleBar}
+                settingId="window-title-bar"
+                onChange={setShowWindowTitleBar}
+              />
+            )}
             <ToggleRow
               label="Dark sidebar"
               description="Tint the sidebar one step darker than the canvas so the chrome reads as a separate surface."
