@@ -93,9 +93,9 @@ import {
   getCurrentDragPayload,
   hasZenItem,
   readDragPayload,
-  setDragPayload,
   type DragPayload,
 } from "../lib/dnd";
+import { setSidebarDragPayload } from "../lib/sidebar-drag-preview";
 import { manualOrderCompare, parentDirOf } from "../lib/manual-order";
 import { resolveSystemFolderLabels } from "../lib/system-folder-labels";
 import { assetTabPath } from "../lib/asset-tabs";
@@ -4969,7 +4969,7 @@ function SubTree({
         onContextMenu={(e) => onContextMenu(e, folder, node.subpath)}
         draggable
         onDragStart={(e) =>
-          setDragPayload(
+          setSidebarDragPayload(
             e,
             dragPayloadForItem({ kind: "folder", folder, subpath: node.subpath }),
           )
@@ -5168,7 +5168,10 @@ const NoteLeaf = memo(function NoteLeaf({
   );
   const handleDragStart = useCallback(
     (event: React.DragEvent<HTMLButtonElement>) => {
-      setDragPayload(event, dragPayloadForItem({ kind: "note", path: note.path }));
+      setSidebarDragPayload(
+        event,
+        dragPayloadForItem({ kind: "note", path: note.path }),
+      );
     },
     [dragPayloadForItem, note.path],
   );
@@ -5405,7 +5408,7 @@ function AssetLeaf({
     : "";
   const handleDragStart = useCallback(
     (event: React.DragEvent<HTMLButtonElement>) => {
-      setDragPayload(event, { kind: "asset", path: asset.path });
+      setSidebarDragPayload(event, { kind: "asset", path: asset.path });
     },
     [asset.path],
   );
