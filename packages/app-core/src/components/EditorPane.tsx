@@ -106,6 +106,7 @@ import { tablePlugin, tableVimEntry } from '../lib/cm-table'
 import { wysiwygBlocksPlugin } from '../lib/cm-wysiwyg-blocks'
 import { hashtagExtension } from '../lib/cm-hashtags'
 import { taskMetadataExtension } from '../lib/cm-task-metadata'
+import { liveTemplateTokenExtension } from '../lib/cm-live-template-tokens'
 import { taskRollupExtension } from '../lib/cm-task-rollup'
 import { hashtagSource } from '../lib/cm-hashtag-complete'
 import { frontmatterTagSource } from '../lib/cm-frontmatter-tag-complete'
@@ -440,6 +441,8 @@ function wysiwygExtensions(
     ...hashtagExtension,
     ...taskMetadataExtension,
     ...taskRollupExtension,
+    // `{{modified_date}}` and friends read as the note's last-saved time (#784).
+    ...liveTemplateTokenExtension,
     ...highlightExtension,
     ...wikilinkRenderExtension,
     mathRenderExtension(mathRenderer, typstPreamble),

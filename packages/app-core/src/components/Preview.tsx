@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import type { NoteMeta } from "@shared/ipc";
 import { renderMarkdown } from "../lib/markdown";
+import { substituteLiveTokens } from "../lib/live-template-tokens";
 import {
   setMarkdownLooseMathDelimiters,
   setMarkdownMathRenderer,
@@ -322,17 +323,25 @@ export const Preview = memo(function Preview({
   const embedsReadyRef = useRef(embedsReady);
   embedsReadyRef.current = embedsReady;
 
+  // The note's last-saved time drives the live `{{modified_date}}` tokens (#784).
+  const noteUpdatedAt = useMemo(
+    () => notes.find((note) => note.path === notePath)?.updatedAt ?? null,
+    [notes, notePath],
+  );
   const html = useMemo(() => {
     // Point the pipeline at the active engine before rendering, so a toggle
     // takes effect on the very next render without an effect-ordering race.
     setMarkdownMathRenderer(mathRenderer);
     setMarkdownLooseMathDelimiters(looseMathDelimiters);
-    return renderMarkdown(expandedForCurrent ?? markdown);
+    return renderMarkdown(
+      substituteLiveTokens(expandedForCurrent ?? markdown, noteUpdatedAt),
+    );
     // customCodeLanguagesRevision re-renders when a grammar is installed,
     // toggled, or removed; renderMarkdown keys its cache on it too.
   }, [
     expandedForCurrent,
     markdown,
+    noteUpdatedAt,
     mathRenderer,
     looseMathDelimiters,
     customCodeLanguagesRevision,
