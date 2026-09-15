@@ -4739,12 +4739,6 @@ let registeredQuickCaptureHotkey: string | null = null;
 /** When true, the quick-capture window stays pinned on top and does not
  *  auto-hide on blur. Mirrors PersistedConfig.quickCapturePinned. */
 let quickCapturePinned = false;
-/** True when the panel was summoned while ZenNotes was NOT the frontmost app
- *  (the global hotkey fired from another app). On dismiss we then hide the
- *  whole app so macOS hands focus back to that app instead of surfacing
- *  ZenNotes' main window — the Spotlight/Raycast feel. Recomputed on every
- *  show; consumed (reset to false) on the next dismiss. */
-let quickCaptureReturnFocus = false;
 
 async function ensureQuickCaptureWindow(): Promise<BrowserWindow> {
   if (quickCaptureWindow && !quickCaptureWindow.isDestroyed())
@@ -4759,6 +4753,9 @@ async function ensureQuickCaptureWindow(): Promise<BrowserWindow> {
     minWidth: 460,
     minHeight: 400,
     title: "ZenNotes Quick Capture",
+    // A macOS panel joins native fullscreen Spaces and takes keyboard focus
+    // without activating the main app or switching back to its desktop.
+    ...(mac ? { type: "panel" } : {}),
     show: false,
     frame: false,
     titleBarStyle: mac ? "hiddenInset" : "hidden",
@@ -4782,10 +4779,6 @@ async function ensureQuickCaptureWindow(): Promise<BrowserWindow> {
       backgroundThrottling: false,
     },
   });
-
-  if (mac) {
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  }
 
   // Restore the persisted pin state for this freshly created window.
   void loadConfig().then((cfg) => {
@@ -4836,22 +4829,14 @@ function applyQuickCapturePinned(): void {
   win.setAlwaysOnTop(true, quickCapturePinned ? "screen-saver" : "floating");
 }
 
-/** Dismiss the quick-capture panel. When it was summoned from another app,
- *  hide the whole app (macOS) so focus returns to that app rather than
- *  surfacing ZenNotes' main window. */
+/** The macOS panel does not activate the app, so hiding just the panel returns
+ *  keyboard focus to the previous window and leaves the current Space intact. */
 function hideQuickCaptureWindow(win: BrowserWindow): void {
   if (win.isDestroyed()) return;
-  const returnFocus = quickCaptureReturnFocus;
-  quickCaptureReturnFocus = false;
   win.hide();
-  if (returnFocus && isMac()) app.hide();
 }
 
 async function showQuickCaptureWindow(): Promise<void> {
-  // Remember whether ZenNotes was already frontmost. If no ZenNotes window is
-  // focused, the panel was summoned from another app (global hotkey / deep
-  // link) — dismissing it should hand focus back to that app.
-  quickCaptureReturnFocus = !BrowserWindow.getFocusedWindow();
   const win = await ensureQuickCaptureWindow();
   const sourceWindow = BrowserWindow.getFocusedWindow() ?? mainWindow;
   if (
