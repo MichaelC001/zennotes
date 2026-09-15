@@ -55,6 +55,8 @@ import {
 import { DEMO_TOUR_DIR } from '@shared/demo-tour'
 import { normalizeNoteComments } from '@shared/note-comments'
 import { FRONTMATTER_BLOCK_RE, frontmatterTags } from '@shared/frontmatter'
+import { rewriteAssetReferences } from '@shared/asset-link-rename'
+import { resolveAssetPathAmong } from '@shared/asset-path-resolution'
 import { IMAGE_FILE_EXTENSIONS, pastedImageFilename } from '@shared/pasted-image'
 import {
   DATABASE_SIDECAR_SUFFIX,
@@ -3705,7 +3707,14 @@ export async function renameAsset(
   const source = await assertAssetFile(root, rel)
   const cleanName = cleanAssetFilename(nextName)
   const destAbs = path.join(path.dirname(source.abs), cleanName)
-  if (destAbs !== source.abs) {
+  const willRename = destAbs !== source.abs
+  // Snapshot the vault before the move so references still resolve to the
+  // asset under its current name; they are rewritten afterwards, the way a
+  // note rename handles its inbound wikilinks (#785).
+  const [assetsBefore, notesBefore] = willRename
+    ? await Promise.all([listAssets(root), listNotes(root)])
+    : [[], []]
+  if (willRename) {
     try {
       await fs.access(destAbs)
       const [srcStat, dstStat] = await Promise.all([fs.stat(source.abs), fs.stat(destAbs)])
@@ -3723,7 +3732,55 @@ export async function renameAsset(
       await fs.rename(source.abs, destAbs)
     }
   }
-  return await assetMetaForPath(root, destAbs)
+  const meta = await assetMetaForPath(root, destAbs)
+  if (willRename && meta.path !== source.rel) {
+    await updateAssetReferences(root, notesBefore, assetsBefore, source.rel, meta.path)
+  }
+  return meta
+}
+
+/**
+ * Rewrite every reference to a renamed or moved asset across the vault (#785): the
+ * `![[embed]]` / `[[link]]` wikilinks and `![](href)` / `[](href)` markdown
+ * destinations that resolve to it. Only notes that can hold one are read: the
+ * ones flagged `hasAttachments` or carrying `assetEmbeds` (both cover embeds
+ * and file links), plus any whose plain wikilinks name a file that resolves to
+ * the asset. `notesBefore` / `assetsBefore` are the pre-rename snapshots, so
+ * resolution sees the asset under its old name.
+ */
+async function updateAssetReferences(
+  root: string,
+  notesBefore: NoteMeta[],
+  assetsBefore: AssetMeta[],
+  oldRel: string,
+  newRel: string
+): Promise<void> {
+  const candidates = notesBefore.filter(
+    (n) =>
+      n.folder !== 'trash' &&
+      (n.hasAttachments ||
+        (n.assetEmbeds ?? []).length > 0 ||
+        (n.wikilinks ?? []).some(
+          (t) =>
+            localAssetTargetKind(t) !== null &&
+            resolveAssetPathAmong(assetsBefore, n.path, t) === oldRel
+        ))
+  )
+  for (const candidate of candidates) {
+    try {
+      const content = await readNote(root, candidate.path)
+      const { body, changed } = rewriteAssetReferences(
+        content.body,
+        assetsBefore,
+        candidate.path,
+        oldRel,
+        newRel
+      )
+      if (changed > 0) await writeNote(root, candidate.path, body)
+    } catch (err) {
+      console.error('updateAssetReferences: failed for', candidate.path, err)
+    }
+  }
 }
 
 export async function moveAsset(
@@ -3735,10 +3792,17 @@ export async function moveAsset(
   const destDir = cleanAssetTargetDir(root, targetDir)
   await fs.mkdir(destDir, { recursive: true })
   if (path.resolve(destDir) === path.dirname(source.abs)) return await assetMetaForPath(root, source.abs)
+  // Snapshot before the move so references still resolve to the asset where
+  // it currently is; they are rewritten to the new location afterwards (#785).
+  const [assetsBefore, notesBefore] = await Promise.all([listAssets(root), listNotes(root)])
   const finalName = await uniqueFilename(destDir, path.basename(source.abs))
   const destAbs = path.join(destDir, finalName)
   if (destAbs !== source.abs) await fs.rename(source.abs, destAbs)
-  return await assetMetaForPath(root, destAbs)
+  const meta = await assetMetaForPath(root, destAbs)
+  if (meta.path !== source.rel) {
+    await updateAssetReferences(root, notesBefore, assetsBefore, source.rel, meta.path)
+  }
+  return meta
 }
 
 export async function duplicateAsset(root: string, rel: string): Promise<AssetMeta> {

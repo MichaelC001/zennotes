@@ -202,6 +202,8 @@ export const Preview = memo(function Preview({
   const assetFiles = useStore((s) => s.assetFiles);
   const customCodeLanguagesRevision = useStore((s) => s.customCodeLanguagesRevision);
   const refreshAssets = useStore((s) => s.refreshAssets);
+  const renameAsset = useStore((s) => s.renameAsset);
+  const moveAsset = useStore((s) => s.moveAsset);
   const deleteAssetAction = useStore((s) => s.deleteAsset);
   const diagramTheme = useDiagramTheme();
   const selectNote = useStore((s) => s.selectNote);
@@ -980,8 +982,7 @@ export const Preview = memo(function Preview({
             },
           });
           if (!next || next === asset.name) return;
-          await window.zen.renameAsset(vaultRel, next);
-          await refreshAssets();
+          await renameAsset(vaultRel, next);
         },
       });
       items.push({
@@ -1004,8 +1005,7 @@ export const Preview = memo(function Preview({
             },
           });
           if (target === null || target === currentDir) return;
-          await window.zen.moveAsset(vaultRel, target);
-          await refreshAssets();
+          await moveAsset(vaultRel, target);
         },
       });
       items.push({

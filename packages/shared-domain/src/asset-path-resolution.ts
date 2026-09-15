@@ -4,7 +4,9 @@
  * hold the list (the Connections panel's outgoing links, the follow-link path)
  * resolve without a store round trip, and the rules are unit-tested without
  * booting the store. `resolveAssetVaultRelativePath` in local-assets.ts wraps
- * this with the live `assetFiles`.
+ * this with the live `assetFiles`. Lives in shared-domain so the desktop main
+ * process (which cannot import the renderer bundle) resolves asset references
+ * identically when it rewrites them after an asset rename (#785).
  *
  * Three readings, tried in order, each matching a way people write links:
  * 1. Relative to the note's folder, the Markdown link reading.
@@ -53,11 +55,24 @@ export function posixNormalize(input: string): string {
   return out.join('/')
 }
 
-export function resolveAssetPathAmong(
+/** Which of the three readings resolved a reference. Lets a rewrite keep the
+ *  author's style: a note-relative href stays relative, a vault-root path stays
+ *  rooted, a bare file name stays bare (#785). */
+export type AssetReferenceReading = 'note-relative' | 'vault-root' | 'basename'
+
+export interface AssetReferenceResolution {
+  /** Vault-relative path of the asset the reference points at. */
+  path: string
+  reading: AssetReferenceReading
+  /** The reference was written with a leading `/` (vault-root, spelled out). */
+  absolute: boolean
+}
+
+export function resolveAssetReference(
   assets: ReadonlyArray<AssetPathRef>,
   notePath: string,
   href: string
-): string | null {
+): AssetReferenceResolution | null {
   const trimmed = href.trim()
   if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) return null
   if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)) return null
@@ -73,7 +88,13 @@ export function resolveAssetPathAmong(
   target = posixNormalize(target)
   if (target.startsWith('../') || target === '..') return null
 
-  if (assets.some((asset) => asset.path === target)) return target
+  if (assets.some((asset) => asset.path === target)) {
+    return {
+      path: target,
+      reading: isAbsolute || !noteDir ? 'vault-root' : 'note-relative',
+      absolute: isAbsolute
+    }
+  }
 
   if (!isAbsolute && noteDir) {
     const rootTarget = posixNormalize(decodedHref)
@@ -84,7 +105,7 @@ export function resolveAssetPathAmong(
       rootTarget !== '..' &&
       assets.some((asset) => asset.path === rootTarget)
     ) {
-      return rootTarget
+      return { path: rootTarget, reading: 'vault-root', absolute: false }
     }
   }
 
@@ -96,8 +117,16 @@ export function resolveAssetPathAmong(
     return assetBase === targetBase
   })
   if (basenameMatches.length === 1) {
-    return basenameMatches[0]!.path
+    return { path: basenameMatches[0]!.path, reading: 'basename', absolute: false }
   }
 
   return null
+}
+
+export function resolveAssetPathAmong(
+  assets: ReadonlyArray<AssetPathRef>,
+  notePath: string,
+  href: string
+): string | null {
+  return resolveAssetReference(assets, notePath, href)?.path ?? null
 }

@@ -558,6 +558,84 @@ describe('deleteAsset', () => {
     await expect(readFile(path.join(root, duplicated.path), 'utf8')).resolves.toBe('image-bytes')
   })
 
+  it('rewrites every reference to a renamed asset, in the shapes people write them (#785)', async () => {
+    const root = await makeTempDir('zennotes-asset-rename-links-')
+    await ensureVaultLayout(root)
+    await mkdir(path.join(root, 'assets'), { recursive: true })
+    await writeFile(path.join(root, 'assets', 'shot.png'), 'png', 'utf8')
+    await writeFile(path.join(root, 'assets', 'other.png'), 'png', 'utf8')
+    const embeds = [
+      '# Embeds',
+      '',
+      '![[assets/shot.png]]',
+      '![[assets/shot.png|300]]',
+      '![alt](assets/shot.png "Shot")',
+      '[[assets/shot.png|open it]]',
+      '[page two](/assets/shot.png#page=2)',
+      '`![[assets/shot.png]]` stays literal',
+      '![[assets/other.png]]',
+      ''
+    ]
+    await writeFile(path.join(root, 'inbox', 'Embeds.md'), embeds.join('\n'), 'utf8')
+    // Bare basenames resolve while unique in the vault; a plain file link is
+    // neither an embed nor a note wikilink, so it rides on `hasAttachments`.
+    await writeFile(
+      path.join(root, 'inbox', 'Bare.md'),
+      'See ![[shot.png]] and [the file](shot.png).\n',
+      'utf8'
+    )
+    await writeFile(path.join(root, 'inbox', 'Unrelated.md'), 'Nothing here, just [[Embeds]].\n', 'utf8')
+    const untouchedBefore = await stat(path.join(root, 'inbox', 'Unrelated.md'))
+
+    const renamed = await renameAsset(root, 'assets/shot.png', 'screenshot.png')
+    expect(renamed.path).toBe('assets/screenshot.png')
+
+    await expect(readFile(path.join(root, 'inbox', 'Embeds.md'), 'utf8')).resolves.toBe(
+      embeds
+        .join('\n')
+        .replace(/assets\/shot\.png/g, 'assets/screenshot.png')
+        .replace('`![[assets/screenshot.png]]`', '`![[assets/shot.png]]`')
+    )
+    await expect(readFile(path.join(root, 'inbox', 'Bare.md'), 'utf8')).resolves.toBe(
+      'See ![[screenshot.png]] and [the file](screenshot.png).\n'
+    )
+    const untouchedAfter = await stat(path.join(root, 'inbox', 'Unrelated.md'))
+    expect(untouchedAfter.mtimeMs).toBe(untouchedBefore.mtimeMs)
+  })
+
+  it('re-targets references when an asset moves to another folder, in the author\'s style (#785)', async () => {
+    const root = await makeTempDir('zennotes-asset-move-links-')
+    await ensureVaultLayout(root)
+    await mkdir(path.join(root, 'assets'), { recursive: true })
+    await mkdir(path.join(root, 'inbox', 'Daily'), { recursive: true })
+    await writeFile(path.join(root, 'assets', 'shot.png'), 'png', 'utf8')
+    await writeFile(
+      path.join(root, 'inbox', 'Rooted.md'),
+      '# Rooted\n\n![[assets/shot.png|300]]\n[page](/assets/shot.png#page=2)\n',
+      'utf8'
+    )
+    await writeFile(
+      path.join(root, 'inbox', 'Daily', '2026-09-15.md'),
+      '# Daily\n\n![shot](../../assets/shot.png "Shot")\n',
+      'utf8'
+    )
+    // A bare name keeps resolving by basename after the move, so it is left as written.
+    await writeFile(path.join(root, 'inbox', 'Bare.md'), 'See ![[shot.png]] and [the file](shot.png).\n', 'utf8')
+    const bareBefore = await stat(path.join(root, 'inbox', 'Bare.md'))
+
+    const moved = await moveAsset(root, 'assets/shot.png', 'media/screenshots')
+    expect(moved.path).toBe('media/screenshots/shot.png')
+
+    await expect(readFile(path.join(root, 'inbox', 'Rooted.md'), 'utf8')).resolves.toBe(
+      '# Rooted\n\n![[media/screenshots/shot.png|300]]\n[page](/media/screenshots/shot.png#page=2)\n'
+    )
+    await expect(readFile(path.join(root, 'inbox', 'Daily', '2026-09-15.md'), 'utf8')).resolves.toBe(
+      '# Daily\n\n![shot](../../media/screenshots/shot.png "Shot")\n'
+    )
+    const bareAfter = await stat(path.join(root, 'inbox', 'Bare.md'))
+    expect(bareAfter.mtimeMs).toBe(bareBefore.mtimeMs)
+  })
+
   it('removes a non-markdown asset inside the vault and can restore it', async () => {
     const root = await makeTempDir('zennotes-delete-asset-')
     await ensureVaultLayout(root)

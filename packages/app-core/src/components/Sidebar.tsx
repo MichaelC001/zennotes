@@ -518,6 +518,8 @@ export function Sidebar(): JSX.Element {
   const revealFolderAction = useStore((s) => s.revealFolder);
   const revealAssetsDir = useStore((s) => s.revealAssetsDir);
   const refreshAssets = useStore((s) => s.refreshAssets);
+  const renameAsset = useStore((s) => s.renameAsset);
+  const moveAsset = useStore((s) => s.moveAsset);
   const deleteAssetAction = useStore((s) => s.deleteAsset);
   const sidebarWidth = useStore((s) => s.sidebarWidth);
   const showWindowTitleBar = useStore((s) => s.showWindowTitleBar);
@@ -957,8 +959,7 @@ export function Sidebar(): JSX.Element {
       const curDir = slash === -1 ? "" : payload.path.slice(0, slash);
       if (curDir === targetDir) return; // already in this folder
       try {
-        await window.zen.moveAsset(payload.path, targetDir);
-        await refreshAssets();
+        await moveAsset(payload.path, targetDir);
       } catch (err) {
         window.alert((err as Error).message);
       }
@@ -2572,8 +2573,7 @@ export function Sidebar(): JSX.Element {
             },
           });
           if (!next || next === asset.name) return;
-          await window.zen.renameAsset(asset.path, next);
-          await refreshAssets();
+          await renameAsset(asset.path, next);
         },
       });
       items.push({
@@ -2596,8 +2596,7 @@ export function Sidebar(): JSX.Element {
             },
           });
           if (target === null || target === currentDir) return;
-          await window.zen.moveAsset(asset.path, target);
-          await refreshAssets();
+          await moveAsset(asset.path, target);
         },
       });
       items.push({

@@ -82,6 +82,8 @@ export function NoteList(): JSX.Element {
   const toggleNoteList = useStore((s) => s.toggleNoteList)
   const refreshNotes = useStore((s) => s.refreshNotes)
   const refreshAssets = useStore((s) => s.refreshAssets)
+  const renameAsset = useStore((s) => s.renameAsset)
+  const moveAsset = useStore((s) => s.moveAsset)
   const deleteAssetAction = useStore((s) => s.deleteAsset)
   const noteListWidth = useStore((s) => s.noteListWidth)
   const setNoteListWidth = useStore((s) => s.setNoteListWidth)
@@ -350,8 +352,7 @@ export function NoteList(): JSX.Element {
             }
           })
           if (!next || next === asset.name) return
-          await window.zen.renameAsset(asset.path, next)
-          await refreshAssets()
+          await renameAsset(asset.path, next)
         }
       })
       items.push({
@@ -374,8 +375,7 @@ export function NoteList(): JSX.Element {
             }
           })
           if (target === null || target === currentDir) return
-          await window.zen.moveAsset(asset.path, target)
-          await refreshAssets()
+          await moveAsset(asset.path, target)
         }
       })
       items.push({

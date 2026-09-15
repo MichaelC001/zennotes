@@ -3319,6 +3319,13 @@ interface Store {
   /** Dismiss the vault-root notice for the current vault, persisted (#216). */
   dismissRootContentBanner: () => void
   refreshAssets: () => Promise<void>
+  /** Rename an asset file in place. Every note referencing it is rewritten on
+   *  disk (#785), so open buffers are flushed first and notes re-listed after. */
+  renameAsset: (relPath: string, nextName: string) => Promise<AssetMeta>
+  /** Move an asset into another vault folder. Like `renameAsset`, every note
+   *  referencing it is re-targeted on disk (#785), so buffers flush first and
+   *  notes re-list after. */
+  moveAsset: (relPath: string, targetDir: string) => Promise<AssetMeta>
   deleteAsset: (relPath: string) => Promise<void>
   undoLastAssetAction: () => Promise<boolean>
   updateActiveBody: (body: string) => void
@@ -6291,6 +6298,32 @@ export const useStore = create<Store>((set, get) => {
     }
   },
 
+  renameAsset: async (relPath, nextName) => {
+    // Renaming rewrites every note that references the asset on disk. Flush
+    // open buffers first so that rewrite cannot race a pending save and get
+    // overwritten by stale editor contents immediately afterwards (#785), the
+    // same guard `renameNote` uses for inbound wikilinks.
+    await get().flushDirtyNotes()
+    if (Object.values(get().noteDirty).some(Boolean)) {
+      throw new Error('Could not rename while notes still have unsaved changes')
+    }
+    const meta = await window.zen.renameAsset(relPath, nextName)
+    // Assets for the list; notes so `assetEmbeds` (usage) and excerpts follow
+    // the rewritten bodies.
+    await Promise.all([get().refreshAssets(), get().refreshNotes()])
+    return meta
+  },
+  moveAsset: async (relPath, targetDir) => {
+    // Same guard as renameAsset: the move rewrites referencing notes on disk,
+    // which must not race a pending save (#785).
+    await get().flushDirtyNotes()
+    if (Object.values(get().noteDirty).some(Boolean)) {
+      throw new Error('Could not move while notes still have unsaved changes')
+    }
+    const meta = await window.zen.moveAsset(relPath, targetDir)
+    await Promise.all([get().refreshAssets(), get().refreshNotes()])
+    return meta
+  },
   refreshAssets: async () => {
     try {
       const startedAt = performance.now()

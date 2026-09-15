@@ -417,7 +417,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Files stay local',
     body:
-      'Drop files into a note to insert local files. ZenNotes copies them into the vault’s `assets/` folder — the same place pasted images land — so they stay together instead of cluttering your notes area, whether you keep notes in `inbox/` or at the vault root. It can reveal them from the app, and opens images, SVGs, PDFs, audio, video, and generic files inside ZenNotes tabs or reference panes where possible. In the sidebar you can drag an image, PDF, or any attachment onto a folder to move it, just like a note, or use its Move… context-menu entry.'
+      'Drop files into a note to insert local files. ZenNotes copies them into the vault’s `assets/` folder — the same place pasted images land — so they stay together instead of cluttering your notes area, whether you keep notes in `inbox/` or at the vault root. It can reveal them from the app, and opens images, SVGs, PDFs, audio, video, and generic files inside ZenNotes tabs or reference panes where possible. In the sidebar you can drag an image, PDF, or any attachment onto a folder to move it, just like a note, or use its Move… context-menu entry. Renaming or moving an asset (from the sidebar, the Assets view, a rendered image’s menu, or by dragging it onto a folder) rewrites every note that referenced it, `![[assets/old.png]]` embeds and `![](old.png)` links alike, in the style each link was written, the same way renaming a note updates its wikilinks.'
   },
   {
     title: 'Any CSV is a database',
