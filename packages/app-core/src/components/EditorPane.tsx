@@ -53,6 +53,7 @@ import { isImeComposing } from '../lib/ime'
 import { displayRowBoundaryKeymap } from '../lib/cm-display-row'
 import { resolveCodeLanguage } from '../lib/cm-code-languages'
 import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languages'
+import { markdownLinkExtension } from '../lib/cm-markdown-links'
 import {
   listIndentGuides as listIndentGuidesExt,
   listIndentWidth,
@@ -391,6 +392,7 @@ function markdownEditingExtensions(showHeadingLevelLabels = false): Extension[] 
   return [
     markdown({ base: markdownLanguage, codeLanguages: resolveCodeLanguage, addKeymap: false }),
     customCodeFenceHighlightExtension,
+    markdownLinkExtension,
     vimAwareMarkdownKeymap,
     markdownListIndentPlugin,
     frontmatterTagExtension,
@@ -472,7 +474,6 @@ const paperHighlight = HighlightStyle.define([
   { tag: t.emphasis, class: 'tok-emphasis' },
   { tag: t.strong, class: 'tok-strong' },
   { tag: t.strikethrough, class: 'tok-strikethrough' },
-  { tag: t.link, class: 'tok-link' },
   { tag: t.url, class: 'tok-url' },
   { tag: t.monospace, class: 'tok-monospace' },
   { tag: t.quote, class: 'tok-quote' },
