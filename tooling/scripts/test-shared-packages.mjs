@@ -21,8 +21,10 @@ try {
   await writeFile(join(consumer, 'package.json'), JSON.stringify({
     name: 'contract-consumer', private: true, type: 'module'
   }))
+  // npm ci caches tarballs but never the registry metadata that resolving a
+  // dependency range needs, so a fully offline install fails on a fresh CI cache.
   runNpm([
-    'install', packed.archive, domain.archive, '--ignore-scripts', '--offline', '--no-audit', '--no-fund'
+    'install', packed.archive, domain.archive, '--ignore-scripts', '--prefer-offline', '--no-audit', '--no-fund'
   ], { cwd: consumer, stdio: 'inherit' })
   const installedRoot = join(consumer, 'node_modules/@zennotes/bridge-contract')
   const installed = JSON.parse(await readFile(join(installedRoot, 'package.json'), 'utf8'))

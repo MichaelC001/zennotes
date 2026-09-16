@@ -49,7 +49,9 @@ class CDP {
         this.pending.delete(message.id); clearTimeout(pending.timer)
         if (message.error) pending.reject(new Error(message.error.message))
         else pending.done(message.result)
-      } else this.listeners.get(message.method)?.(message.params)
+      } else if (typeof message.method === 'string' && this.listeners.has(message.method)) {
+        this.listeners.get(message.method)(message.params)
+      }
     })
   }
   on(method, callback) { this.listeners.set(method, callback) }

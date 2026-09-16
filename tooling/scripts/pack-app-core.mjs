@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { filesIn, packSharedPackage, resolvePublishedImports, runNpm } from './pack-shared-package.mjs'
+import { filesIn, packSharedPackage, resolvePublishedImports, runNpm, tsconfigPath } from './pack-shared-package.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const packageRoot = join(root, 'packages/app-core')
@@ -19,13 +19,13 @@ export async function packAppCore() {
   const stage = await mkdtemp(join(tmpdir(), 'zennotes-app-core-package-'))
   try {
     const config = {
-      extends: join(packageRoot, 'tsconfig.json'),
+      extends: tsconfigPath(join(packageRoot, 'tsconfig.json')),
       compilerOptions: {
         composite: false, declaration: true, noEmit: false, types: [],
-        rootDir: join(root, 'packages'), outDir: join(stage, 'emit')
+        rootDir: tsconfigPath(join(root, 'packages')), outDir: tsconfigPath(join(stage, 'emit'))
       },
-      include: [join(packageRoot, 'src/**/*.ts'), join(packageRoot, 'src/**/*.tsx')],
-      exclude: [join(packageRoot, 'src/**/*.test.ts'), join(packageRoot, 'src/**/*.test.tsx')]
+      include: [tsconfigPath(join(packageRoot, 'src/**/*.ts')), tsconfigPath(join(packageRoot, 'src/**/*.tsx'))],
+      exclude: [tsconfigPath(join(packageRoot, 'src/**/*.test.ts')), tsconfigPath(join(packageRoot, 'src/**/*.test.tsx'))]
     }
     await writeFile(join(stage, 'tsconfig.json'), JSON.stringify(config))
     execFileSync(process.execPath, [require.resolve('typescript/bin/tsc'), '-p', join(stage, 'tsconfig.json')], { cwd: root, stdio: 'inherit' })

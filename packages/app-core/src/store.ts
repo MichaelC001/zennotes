@@ -19,7 +19,6 @@ import {
   type HarperLintConfig,
   type HarperVaultState
 } from '@shared/harper-settings'
-import { resolveFolderPath } from '@shared/system-folder-paths'
 import { normalizeTasksExcludedFolder } from '@shared/tasks-excluded-folders'
 import { cloudSyncPathKey } from '@zennotes/shared-domain/cloud-sync'
 import { useCloudSyncStatusStore } from './lib/cloud-auto-sync'
@@ -56,7 +55,6 @@ import {
   TYPST_PREAMBLE_FOLDER,
   isTypstPreamblePath,
   preambleKeyFromTitle,
-  resolveTypstPreamble,
   resolveTypstPreambleFolder,
   type TypstPreambleNote
 } from './lib/typst-preamble'
@@ -89,7 +87,7 @@ import { ATLAS_TAB_PATH, isAtlasTabPath } from '@shared/atlas-view'
 import { HELP_TAB_PATH, isHelpTabPath } from '@shared/help'
 import { ARCHIVE_TAB_PATH, isArchiveTabPath } from '@shared/archive'
 import { TRASH_TAB_PATH, isTrashTabPath } from '@shared/trash'
-import { ASSETS_VIEW_TAB_PATH, isAssetsViewTabPath } from '@shared/assets-view'
+import { ASSETS_VIEW_TAB_PATH } from '@shared/assets-view'
 import { QUICK_NOTES_TAB_PATH, isQuickNotesTabPath } from '@shared/quick-notes'
 import { isAssetTabPath, assetPathFromTab, assetTabPath } from './lib/asset-tabs'
 import {
@@ -214,7 +212,6 @@ import {
   leafWithoutTab,
   makeLeaf,
   mapLeaves,
-  replaceLeaf,
   rewritePathsInTree,
   preserveLayoutIfPruneEmptiesNoteTabs,
   splitLeaf,
@@ -2159,21 +2156,6 @@ function noteHistoryAfterJump(
     noteBackstack: appendNoteJumpHistory(state.noteBackstack, captureNoteJumpLocation(state)),
     noteForwardstack: []
   }
-}
-
-function rewriteNoteJumpHistory(
-  history: NoteJumpLocation[],
-  rewrite: (path: string) => string
-): NoteJumpLocation[] {
-  const next: NoteJumpLocation[] = []
-  for (const entry of history) {
-    const mapped = { ...entry, path: rewrite(entry.path) }
-    if (sameNoteJumpLocation(next[next.length - 1] ?? null, mapped)) continue
-    next.push(mapped)
-  }
-  return next.length > MAX_NOTE_JUMP_HISTORY
-    ? next.slice(next.length - MAX_NOTE_JUMP_HISTORY)
-    : next
 }
 
 /**

@@ -4,11 +4,17 @@ import { constants } from 'node:fs'
 import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const packageNames = ['bridge-contract', 'shared-domain']
+
+// tsc reads include and exclude as glob patterns, and globs only understand
+// forward slashes, so a Windows path.join result matches nothing (TS18003).
+export function tsconfigPath(path) {
+  return path.split(sep).join('/')
+}
 
 export function runNpm(args, options) {
   const cli = process.env.npm_execpath
@@ -101,13 +107,13 @@ export async function packSharedPackage(name, candidateVersion) {
   const require = createRequire(join(packageRoot, 'package.json'))
   try {
     const config = {
-      extends: join(packageRoot, 'tsconfig.json'),
+      extends: tsconfigPath(join(packageRoot, 'tsconfig.json')),
       compilerOptions: {
         composite: false, declaration: true, types: [], lib: ['ES2022', 'DOM'],
-        rootDir: join(packageRoot, 'src'), outDir: join(stage, 'dist')
+        rootDir: tsconfigPath(join(packageRoot, 'src')), outDir: tsconfigPath(join(stage, 'dist'))
       },
-      include: [join(packageRoot, 'src/**/*.ts')],
-      exclude: [join(packageRoot, 'src/**/*.test.ts')]
+      include: [tsconfigPath(join(packageRoot, 'src/**/*.ts'))],
+      exclude: [tsconfigPath(join(packageRoot, 'src/**/*.test.ts'))]
     }
     await writeFile(join(stage, 'tsconfig.json'), JSON.stringify(config))
     execFileSync(process.execPath, [require.resolve('typescript/bin/tsc'), '-p', join(stage, 'tsconfig.json')], {
