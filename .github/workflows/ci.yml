@@ -14,21 +14,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  server:
-    name: Go server without frontend dependencies
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/server
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version: stable
-          cache-dependency-path: apps/server/go.sum
-      - run: go vet ./...
-      - run: go test ./...
-
   production-dependency-audit:
     name: Production dependency audit
     runs-on: ubuntu-latest
@@ -67,14 +52,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          # Keep macOS on the current linker; older Go toolchains produced
-          # binaries without the LC_UUID load command required by dyld.
-          go-version: stable
-          cache-dependency-path: apps/server/go.sum
-
       - name: Install dependencies
         run: npm ci
 
@@ -111,13 +88,8 @@ jobs:
           path: ${{ runner.temp }}/app-core-browser-evidence
           if-no-files-found: ignore
 
-      - name: Verify contract fixture copies
-        run: npm run check:contract-fixtures
-
       - name: Verify browser asset build lock
         run: npm run test:web-dist-lock
 
       - name: Typecheck and build app
-        env:
-          GOCACHE: ${{ runner.temp }}/go-build-cache
         run: npm run build:prod

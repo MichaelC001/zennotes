@@ -30,12 +30,14 @@ Platform-specific code should stay in the app shells:
 
 - `apps/desktop` for Electron-only concerns such as windows, menus, updater, packaging
 - `apps/web` for browser/PWA bootstrapping
-- `apps/server` for HTTP/WebSocket serving, vault access, and deployment/runtime config
+- [ZenNotes/znserver](https://github.com/ZenNotes/znserver) for HTTP/WebSocket serving, vault access, and deployment/runtime config
 
-Go development and tests now run without frontend assets. Distribution builds use
-`-tags=embed_web` and require a complete browser bundle. The root server build,
-Docker, Nix, and browser runtime harness select that tag. See
-[the server build guide](../apps/server/README.md) for both modes.
+The Go server has its own repository. It develops and tests without frontend
+assets; its distribution builds embed the browser artifact that this repository
+publishes (`web-*` releases) and pin in its manifest. This repository's browser
+harness, perf runs, and `dev:web-stack` use the release pinned in
+`tooling/server-release.json`, an explicit `ZENNOTES_SERVER_BINARY`, or a
+checkout in `ZENNOTES_SERVER_DIR`.
 
 ## Bridge Contract
 
@@ -75,7 +77,7 @@ and [types](https://www.typescriptlang.org/tsconfig/types.html) documentation.
 Runtime ownership is:
 
 - desktop: `apps/desktop`
-- self-hosted: `apps/web` + `apps/server`
+- self-hosted: `apps/web` + the Go server from ZenNotes/znserver
 - Cloud: the separate private `ZenNotes/website` Laravel application owns
   accounts, billing, vault revisions, storage authorization, and publishing
 

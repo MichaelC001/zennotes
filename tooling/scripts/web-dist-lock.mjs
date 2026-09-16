@@ -9,11 +9,12 @@ const repoRoot = resolve(scriptDir, '..', '..')
 
 // One lock serializes every process that produces the web bundle: the vite
 // build that fills apps/web/dist (it empties the directory first, so a reader
-// can otherwise stage a half-written tree) and the swap that moves that tree
-// into apps/server/web/dist (which briefly has no dist/ at all, and `go:embed
-// all:dist` cannot compile in that window). It lives next to the tree it
-// guards so a leftover lock is easy to spot and delete by hand.
-export const WEB_DIST_LOCK_DIR = resolve(repoRoot, 'apps/server/web/.web-dist.lock')
+// can otherwise stage a half-written tree), the artifact packer that reads it,
+// and the sync that moves that tree into an external server checkout's
+// web/dist (which briefly has no dist/ at all, and `go:embed all:dist` cannot
+// compile in that window). It lives next to the tree it guards so a leftover
+// lock is easy to spot and delete by hand.
+export const WEB_DIST_LOCK_DIR = resolve(repoRoot, 'apps/web/.web-dist.lock')
 const OWNER_FILE = resolve(WEB_DIST_LOCK_DIR, 'owner.json')
 // Only an ownerless lock can expire by age. A cold Go build may legitimately
 // hold the lock much longer while the compiler reads embedded browser assets.

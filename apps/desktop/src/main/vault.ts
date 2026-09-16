@@ -1893,7 +1893,7 @@ async function folderOf(root: string, absPath: string): Promise<NoteFolder | nul
  * so its contents (e.g. a C `#include` line) must not be scanned. A
  * column-0-anchored regex missed indented fences and leaked them as tags (#293).
  * Mirrors `stripCodeContent` in packages/app-core/src/lib/tags.ts and
- * apps/server/internal/vault/parse.go — keep the three in sync.
+ * internal/vault/parse.go in ZenNotes/znserver — keep the three in sync.
  */
 function stripCodeContent(body: string): string {
   if (!body.includes('`') && !body.includes('~')) return body

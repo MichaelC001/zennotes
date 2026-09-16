@@ -615,7 +615,7 @@ async function folderOf(root: string, abs: string): Promise<NoteFolder | null> {
  * nested under a list item is still a code block (#293). Mirrors
  * `stripCodeContent` in apps/desktop/src/main/vault.ts,
  * packages/app-core/src/lib/{tags,wikilinks}.ts, and
- * apps/server/internal/vault/parse.go — keep all five in sync.
+ * internal/vault/parse.go in ZenNotes/znserver — keep all five in sync.
  */
 function stripCodeContent(body: string): string {
   if (!body.includes('`') && !body.includes('~')) return body

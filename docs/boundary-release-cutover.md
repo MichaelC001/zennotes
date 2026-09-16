@@ -48,6 +48,10 @@ must move together; they cannot mix the package store with private source import
 
 ## Go repository and channel order
 
+Status: done on September 16, 2026 through the manual publisher and a channel
+rehearsal; see the server extraction document. The steps below are kept as the
+record of the order that was followed.
+
 - Verify `ZenNotes/znserver` is still empty before import. Preserve old repository
   history and tags. The documented dry-run is complete; actual filtering must run
   only in a disposable clone of the approved checkpoint.

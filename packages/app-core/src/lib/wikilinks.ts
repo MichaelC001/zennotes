@@ -9,7 +9,7 @@ const INVALID_NOTE_PATH_CHARS = /[\\:*?"<>|#^\[\]]/
  * reads code as a link. Line-based and indentation-tolerant: a fence nested
  * under a list item is still a code block (#293). Mirrors `stripCodeContent` in
  * tags.ts, apps/desktop/src/main/vault.ts, apps/desktop/src/mcp/vault-ops.ts,
- * and apps/server/internal/vault/parse.go — keep all five in sync.
+ * and internal/vault/parse.go in ZenNotes/znserver — keep all five in sync.
  */
 function stripCodeContent(body: string): string {
   if (!body.includes('`') && !body.includes('~')) return body

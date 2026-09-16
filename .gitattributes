@@ -2,5 +2,3 @@
 # TUI consumers, so they must check out with LF on every platform, including
 # Windows runners whose Git defaults to CRLF conversion.
 packages/bridge-contract/fixtures/** text eol=lf
-apps/server/internal/vault/testdata/** text eol=lf
-apps/server/internal/httpserver/testdata/** text eol=lf

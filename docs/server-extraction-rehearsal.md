@@ -1,8 +1,11 @@
 # Local Go server extraction rehearsal
 
-Status: local verification on September 15, 2026. Nothing has been committed,
-published, or pushed as part of this migration. The working repository still owns
-the server; `ZenNotes/znserver` remains the selected destination.
+Status: completed. On September 16, 2026 the server history was extracted to
+[ZenNotes/znserver](https://github.com/ZenNotes/znserver) (main `975412e8`),
+its release `v2.50.4` was published, and the Docker channel moved to that
+repository's publisher (`adibhanna/zennotes:2.50.5`). `apps/server` and the
+rehearsal tooling were removed from this repository afterwards. The rest of
+this document records how the rehearsal was run and what it proved.
 
 ## Reproduce the source and artifact boundary
 

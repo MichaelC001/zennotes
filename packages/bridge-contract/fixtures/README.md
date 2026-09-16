@@ -31,13 +31,15 @@ TZ=America/Los_Angeles npm run test:run --workspace @zennotes/shared-domain -- t
 TZ=Pacific/Auckland npm run test:run --workspace @zennotes/shared-domain -- task-roundtrip
 ```
 
-The Go server runs the same cases in `internal/vault/task_roundtrip_contract_test.go`.
+The Go server (ZenNotes/znserver) runs the same cases in `internal/vault/task_roundtrip_contract_test.go`.
 Its client sends the edited Markdown; the server verifies storage and parsing
 before and after that write. The JSON and SHA-256 provenance are vendored in its
 `testdata` directory so `go test ./...` needs no Node or sibling checkout.
 
-After changing a fixture, run `npm run sync:contract-fixtures`, then the TypeScript
-and Go checks. CI runs `npm run check:contract-fixtures` to reject drift. The TUI
+After changing a fixture, run `npm run sync:contract-fixtures -- <znserver checkout>`
+(or set `ZENNOTES_SERVER_DIR`), then the TypeScript and Go checks in both
+repositories; `npm run check:contract-fixtures -- <checkout>` compares without
+writing. The TUI
 consumer and fixture artifact publication are still pending. Do not silently
 rewrite expected results to match a divergent implementation; identify the
 intended behavior first.

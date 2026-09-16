@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import net from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { withGoEnv } from './go-env.mjs'
+import { resolveServerBinary } from './server-binary.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const manifest = resolve(process.argv[2] || join(root, 'dist/shared-packages/app-core-consumer.json'))
@@ -75,8 +75,8 @@ class CDP {
   close() { this.socket.close() }
 }
 const apiPort = await port(), uiPort = await port(), debugPort = await port()
-const binary = join(run, process.platform === 'win32' ? 'server.exe' : 'server')
-execFileSync('go', ['build', '-o', binary, './cmd/zennotes-server'], { cwd: join(root, 'apps/server'), env: withGoEnv(), stdio: 'inherit' })
+// The server is the pinned ZenNotes/znserver release (or an explicit binary or checkout).
+const binary = await resolveServerBinary()
 const children = []
 const logs = {}
 function launch(name, command, args, options) {
@@ -94,11 +94,11 @@ const pendingAbsenceProbes = new Set()
 const absenceProbes = new Map()
 const token = 'isolated-package-test-only-token'
 try {
-  launch('server', binary, [], { cwd: run, env: withGoEnv({
+  launch('server', binary, [], { cwd: run, env: { ...process.env,
     ZENNOTES_BIND: `127.0.0.1:${apiPort}`, ZENNOTES_DEFAULT_VAULT_PATH: vault,
     ZENNOTES_CONFIG_PATH: join(run, 'server.json'), ZENNOTES_BROWSE_ROOTS: vault,
     ZENNOTES_AUTH_TOKEN: token, ZENNOTES_BASE_PATH: ''
-  }) })
+  } })
   const api = `http://127.0.0.1:${apiPort}`
   await until(async () => (await fetch(`${api}/api/healthz`, { signal: AbortSignal.timeout(1000) })).ok, 'API startup')
   const path = 'inbox/Package test.md'

@@ -14,7 +14,14 @@ import { webDistLockEnv, withWebDistLock } from './web-dist-lock.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(scriptDir, '..', '..')
-const serverRoot = resolve(repoRoot, 'apps/server')
+// The Go server lives in ZenNotes/znserver. A perf run measures the local web
+// bundle, so it needs a server that embeds it: either a checkout in
+// ZENNOTES_SERVER_DIR (web dist synced in, then `go build -tags=embed_web`) or
+// a binary the caller built the same way. The pinned release binary embeds the
+// pinned artifact instead, so it is never picked up silently; pass it through
+// ZEN_PERF_WEB_SERVER_BINARY=$(npm run -s server:binary) to measure a release.
+const serverCheckout = process.env.ZENNOTES_SERVER_DIR?.trim()
+  ? resolve(process.env.ZENNOTES_SERVER_DIR.trim()) : null
 const webDistIndex = resolve(repoRoot, 'apps/web/dist/index.html')
 const syncWebDistScript = resolve(repoRoot, 'tooling/scripts/sync-web-dist.mjs')
 
@@ -22,8 +29,8 @@ const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const noteCount = parsePositiveInt(process.env.ZEN_PERF_WEB_NOTES, 5000)
 const enforceBudgets = process.env.ZEN_PERF_ENFORCE === '1'
 const skipWebBuild = process.env.ZEN_PERF_SKIP_WEB_BUILD === '1'
-const prebuiltServer = process.env.ZEN_PERF_WEB_SERVER_BINARY?.trim()
-  ? resolve(process.env.ZEN_PERF_WEB_SERVER_BINARY.trim()) : null
+const prebuiltServerEnv = process.env.ZEN_PERF_WEB_SERVER_BINARY?.trim() || process.env.ZENNOTES_SERVER_BINARY?.trim()
+const prebuiltServer = prebuiltServerEnv ? resolve(prebuiltServerEnv) : null
 const externalVaultRoot = externalVaultRootFromEnv('ZEN_PERF_WEB_VAULT_ROOT')
 const configuredTempRoot = process.env.ZEN_PERF_WEB_TEMP_ROOT?.trim()
   ? resolve(process.env.ZEN_PERF_WEB_TEMP_ROOT.trim())
@@ -254,7 +261,7 @@ function appendBounded(buffer, chunk, maxLength = 12000) {
   return next.length > maxLength ? next.slice(next.length - maxLength) : next
 }
 
-function startGoServer({ vaultRoot, bind, serverBinary, configPath, disablePersistedMetaCache }) {
+function startGoServer({ vaultRoot, bind, serverBinary, configPath, cwd, disablePersistedMetaCache }) {
   const env = {
     ...process.env,
     ZENNOTES_BIND: bind,
@@ -264,7 +271,7 @@ function startGoServer({ vaultRoot, bind, serverBinary, configPath, disablePersi
     ...(disablePersistedMetaCache ? { ZEN_PERF_DISABLE_PERSISTED_META_CACHE: '1' } : {})
   }
   const child = spawn(serverBinary, [], {
-    cwd: serverRoot,
+    cwd,
     env,
     stdio: ['ignore', 'pipe', 'pipe']
   })
@@ -454,12 +461,12 @@ async function prepareWebDist(env) {
       env
     })
   }
-  await run(process.execPath, [syncWebDistScript], { env })
+  await run(process.execPath, [syncWebDistScript, join(serverCheckout, 'web/dist')], { env })
 }
 
 async function buildGoServer(outputPath, env) {
   await run('go', ['build', '-tags=embed_web', '-trimpath', '-o', outputPath, './cmd/zennotes-server'], {
-    cwd: serverRoot,
+    cwd: serverCheckout,
     env: withGoEnv(env)
   })
 }
@@ -590,6 +597,14 @@ async function stopChild(child) {
 }
 
 async function main() {
+  if (!prebuiltServer && !serverCheckout) {
+    throw new Error(
+      'perf:web-runtime needs a server that embeds the local web bundle: set ZENNOTES_SERVER_DIR to a ' +
+      'ZenNotes/znserver checkout, or ZEN_PERF_WEB_SERVER_BINARY to a server built with -tags=embed_web ' +
+      '(use $(npm run -s server:binary) to measure the pinned release instead)'
+    )
+  }
+  if (prebuiltServer && serverCheckout) throw new Error('Choose ZEN_PERF_WEB_SERVER_BINARY or ZENNOTES_SERVER_DIR, not both')
   const tempRoot = configuredTempRoot ?? await mkdtemp(join(tmpdir(), 'zennotes-web-perf-'))
   if (configuredTempRoot) await mkdir(tempRoot, { recursive: true })
   const vaultRoot = externalVaultRoot ?? join(tempRoot, 'vault')
@@ -627,6 +642,7 @@ async function main() {
       bind: `127.0.0.1:${serverPort}`,
       serverBinary,
       configPath: join(tempRoot, 'zennotes-perf-server.json'),
+      cwd: tempRoot,
       disablePersistedMetaCache: Boolean(externalVaultRoot)
     })
     await waitForHttpOk(`http://127.0.0.1:${serverPort}/healthz`, 20000)

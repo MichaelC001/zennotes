@@ -5,7 +5,6 @@ on:
   pull_request:
     paths:
       - 'apps/web/**'
-      - 'apps/server/**'
       - 'packages/**'
       - 'tooling/scripts/**'
       - 'package*.json'
@@ -34,34 +33,3 @@ jobs:
           name: self-hosted-web-candidate
           path: dist/web-artifacts/*
           if-no-files-found: error
-
-  server:
-    needs: browser
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          sparse-checkout: apps/server
-      - uses: actions/setup-go@v6
-        with:
-          go-version: stable
-          cache-dependency-path: apps/server/go.sum
-      - uses: actions/download-artifact@v4
-        with:
-          name: self-hosted-web-candidate
-          path: ${{ runner.temp }}/web-artifact
-      - name: Test and build using the pinned archive with Go alone
-        shell: bash
-        working-directory: apps/server
-        run: |
-          go vet ./...
-          go test ./...
-          manifests=("$RUNNER_TEMP"/web-artifact/*.tgz.json)
-          test "${#manifests[@]}" -eq 1
-          go run ./cmd/prepare-web -manifest "${manifests[0]}" -output web/dist
-          go test -tags=embed_web ./web
-          go build -tags=embed_web -trimpath -o bin/zennotes-server ./cmd/zennotes-server
