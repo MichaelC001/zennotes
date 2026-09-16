@@ -172,6 +172,9 @@ try {
   await client.send('Input.insertText', { text: token })
   await client.evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Sign In').click()`)
   await until(() => client.evaluate(`(() => { [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Skip setup')?.click(); return !!document.querySelector('[data-sidebar-type="folder"]') })()`), 'workspace')
+  // Public navigation drops calls made while the workspace is still
+  // restoring, so wait for the shell's readiness signal like a host would.
+  await until(() => client.evaluate('window.packageShell?.getShellSnapshot().workspaceRestored === true'), 'workspace restored')
   await client.evaluate(`window.packageNavigation.openNote(${JSON.stringify(path)})`)
   // The first note open fetches the editor, store, and Markdown chunks on a
   // cold runner; allow the same window as the lazy renders below.

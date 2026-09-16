@@ -1655,7 +1655,8 @@ describe('Empty Trash transaction',()=>{
     await writeNoteComments(root,'trash/One.md',[{notePath:'trash/One.md',anchorStart:0,anchorEnd:0,anchorText:'',id:'comment',body:'Keep discussion',createdAt:1,updatedAt:1}])
     const rename=fsPromises.rename
     const spy=vi.spyOn(fsPromises,'rename').mockImplementation(async(from,to)=>{
-      if(String(from).endsWith('.zennotes/comments/trash'))throw new Error('Comment move refused')
+      // Windows joins with backslashes, so compare the normalized path.
+      if(String(from).replace(/\\/g,'/').endsWith('.zennotes/comments/trash'))throw new Error('Comment move refused')
       return rename(from,to)
     })
     try {await expect(emptyTrash(root)).rejects.toThrow('Comment move refused')}
