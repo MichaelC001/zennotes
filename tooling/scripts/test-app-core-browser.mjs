@@ -26,6 +26,10 @@ async function until(check, label, timeout = 30000) {
   }
   throw new Error(`${label}: ${last?.message || 'timed out'}`)
 }
+// Public navigation drops calls made while the workspace is still restoring,
+// so every scripted navigation after a page load waits for the shell's
+// readiness signal, exactly as a host would.
+const workspaceReady = () => until(() => client.evaluate('window.packageShell?.getShellSnapshot().workspaceRestored === true'), 'workspace restored')
 async function port() {
   return new Promise((done, reject) => {
     const server = net.createServer()
@@ -172,9 +176,7 @@ try {
   await client.send('Input.insertText', { text: token })
   await client.evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Sign In').click()`)
   await until(() => client.evaluate(`(() => { [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Skip setup')?.click(); return !!document.querySelector('[data-sidebar-type="folder"]') })()`), 'workspace')
-  // Public navigation drops calls made while the workspace is still
-  // restoring, so wait for the shell's readiness signal like a host would.
-  await until(() => client.evaluate('window.packageShell?.getShellSnapshot().workspaceRestored === true'), 'workspace restored')
+  await workspaceReady()
   await client.evaluate(`window.packageNavigation.openNote(${JSON.stringify(path)})`)
   // The first note open fetches the editor, store, and Markdown chunks on a
   // cold runner; allow the same window as the lazy renders below.
@@ -214,6 +216,7 @@ try {
   await client.send('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('zen:prefs:v2', JSON.stringify({vimMode:false,livePreview:false,harperEnabled:true}))` })
   await client.send('Page.navigate', { url: `${url}/?grammar=1` })
   await until(() => client.evaluate(`location.search === '?grammar=1' && !!window.packageNavigation`), 'reload')
+  await workspaceReady()
   await client.evaluate(`window.packageNavigation.openNote(${JSON.stringify(path)})`)
   await until(() => client.evaluate(`!!document.querySelector('.cm-content')`), 'reloaded editor')
   await client.evaluate(`document.querySelector('.cm-content').focus()`)
@@ -330,6 +333,7 @@ try {
 
   await client.send('Page.navigate', { url: `${url}/?host=1` })
   await until(() => client.evaluate('!!window.packageHost'), 'host registration before mount')
+  await workspaceReady()
   await client.evaluate(`window.packageNavigation.openNote(${JSON.stringify(hostPath)})`)
   await until(() => client.evaluate(`document.querySelector('.cm-content')?.textContent.includes('Host scroll line 1')`), 'host note')
   await client.evaluate(`document.querySelector('.cm-content').focus()`)
@@ -368,6 +372,7 @@ try {
   await client.send('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('zen:prefs:v2', JSON.stringify({vimMode:false,livePreview:false,noteSortOrder:'name-asc'}))` })
   await client.send('Page.navigate', { url: `${url}/?shell=1` })
   await until(() => client.evaluate(`!!document.querySelector('[data-consumer-adjacent]')`), 'host note navigation')
+  await workspaceReady()
   await client.evaluate(`window.packageNavigation.openNote(${JSON.stringify(orderedPaths[0])})`)
   await until(() => client.evaluate(`document.querySelector('[data-consumer-title]')?.textContent === 'Note 2'`), 'shell React snapshot')
   const shellProof = await client.evaluate(`(() => {
@@ -698,6 +703,7 @@ try {
   await client.evaluate(`window.zen.writeDatabaseSchema(${JSON.stringify(projectsDir + '/data.csv')}, ${JSON.stringify(rowsSchema)}, ${JSON.stringify(rowData)})`)
   await client.send('Page.navigate', { url: `${url}/?browse=1&rows=1` })
   await until(() => client.evaluate(`location.search.includes('rows=1') && window.packageBrowse?.getBrowseSnapshot().databases.some(row => row.title === 'Projects')`), 'seeded database indexed after reload')
+  await workspaceReady()
   await client.evaluate(`window.packageNavigation.openNote(window.packageBrowse.getBrowseSnapshot().databases.find(row => row.title === 'Projects').path)`)
   await until(() => client.evaluate(`document.querySelector('[role="grid"]')?.textContent.includes('Ready')`),'linked rows loaded')
   async function deleteFirstRecord(choice) {
