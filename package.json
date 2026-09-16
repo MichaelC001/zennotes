@@ -57,7 +57,9 @@
     "test:app-core-package": "node tooling/scripts/test-app-core-package.mjs",
     "test:app-core-browser": "node tooling/scripts/test-app-core-browser.mjs",
     "pack:share-viewer": "node tooling/scripts/pack-share-viewer.mjs",
-    "server:binary": "node tooling/scripts/server-binary.mjs"
+    "server:binary": "node tooling/scripts/server-binary.mjs",
+    "terminal:stage": "node tooling/scripts/terminal-artifact.mjs",
+    "test:terminal": "node --test tooling/scripts/terminal-artifact.test.mjs tooling/scripts/terminal-launcher.test.mjs"
   },
   "devDependencies": {
     "patch-package": "8.0.1",

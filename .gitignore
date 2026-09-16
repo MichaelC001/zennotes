@@ -28,3 +28,6 @@ result
 result-*
 # Release notes / launch copy are kept local only, never committed.
 docs/releases/
+# Verified native CLI artifacts; release pins are tracked separately.
+apps/desktop/build/terminal/
+apps/desktop/build/terminal.stage-*

@@ -3,6 +3,7 @@ import type {
   AppUpdateState,
   AssetMeta,
   CliInstallStatus,
+  CliInstallRequest,
   DeletedAsset,
   ExternalFileContent,
   ExternalFileLink,
@@ -436,7 +437,7 @@ export interface ZenBridge {
   mcpGetInstructions(): Promise<McpInstructionsPayload>
   mcpSetInstructions(next: string | null): Promise<McpInstructionsPayload>
   cliGetStatus(): Promise<CliInstallStatus>
-  cliInstall(): Promise<CliInstallStatus>
+  cliInstall(request?: CliInstallRequest): Promise<CliInstallStatus>
   cliUninstall(): Promise<CliInstallStatus>
   raycastGetStatus(): Promise<RaycastExtensionStatus>
   raycastInstall(): Promise<RaycastExtensionStatus>

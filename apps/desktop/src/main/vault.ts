@@ -1,3 +1,4 @@
+import { noteMetadataPath, readNoteCreatedAt, prepareNoteCreation, removeNoteCreation } from './note-creation-metadata'
 import { promises as fs, type Dirent } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -2831,6 +2832,7 @@ async function readMeta(
   const relPath = toPosix(path.relative(root, abs))
   const cacheKey = noteMetaCacheKey(root, abs)
   const cached = noteMetaCache.get(cacheKey)
+  const createdAt = await readNoteCreatedAt(root, relPath, stat.birthtimeMs || stat.ctimeMs)
   const resolvedSiblingOrder = siblingOrder ?? (await readSiblingOrder(abs))
   // stat() follows symlinks, so it can't tell us whether `abs` itself is a
   // link. The walk already knows from the readdir entry and passes it in;
@@ -2851,7 +2853,7 @@ async function readMeta(
     cached.meta.path === relPath &&
     cached.meta.folder === folder
   ) {
-    return { ...cached.meta, siblingOrder: resolvedSiblingOrder, isSymlink: linked }
+    return { ...cached.meta, createdAt, siblingOrder: resolvedSiblingOrder, isSymlink: linked }
   }
 
   // Excalidraw drawings are JSON, not Markdown — don't parse their body for
@@ -2862,7 +2864,7 @@ async function readMeta(
       title: path.basename(abs, path.extname(abs)),
       folder,
       siblingOrder: resolvedSiblingOrder,
-      createdAt: stat.birthtimeMs || stat.ctimeMs,
+      createdAt,
       updatedAt: stat.mtimeMs,
       size: stat.size,
       tags: [],
@@ -2894,7 +2896,7 @@ async function readMeta(
     title: path.basename(abs, path.extname(abs)),
     folder,
     siblingOrder: resolvedSiblingOrder,
-    createdAt: stat.birthtimeMs || stat.ctimeMs,
+    createdAt,
     updatedAt: stat.mtimeMs,
     size: stat.size,
     tags: isPreamble ? [] : extractTags(body),
@@ -3130,6 +3132,7 @@ export async function writeNote(root: string, rel: string, body: string): Promis
   // The renderer then sees an empty "external change" and replaces the open
   // buffer with it, wiping the note. With temp-file + rename, no reader can
   // ever observe a half-written note.
+  if (!isEphemeralRoot(root)) await prepareNoteCreation(root, toPosix(path.relative(root, abs)))
   await writeFileAtomic(abs, body)
   invalidateNoteMetaCache(root, rel)
   invalidateVaultTextSearchCache(root)
@@ -3420,6 +3423,7 @@ export async function createNote(
   const finalTitle = await uniqueTitle(dir, base)
   const abs = path.join(dir, `${finalTitle}.md`)
   const body = `# ${finalTitle}\n\n`
+  await removeNoteCreation(root, toPosix(path.relative(root, abs)))
   await fs.writeFile(abs, body, 'utf8')
   invalidateNoteMetaCache(root, toPosix(path.relative(root, abs)))
   invalidateVaultTextSearchCache(root)
@@ -3450,6 +3454,7 @@ export async function createExcalidraw(
     }
   }
   const abs = path.join(dir, `${finalTitle}.excalidraw`)
+  await removeNoteCreation(root, toPosix(path.relative(root, abs)))
   await fs.writeFile(abs, JSON.stringify(emptyExcalidrawDocument(), null, 2), 'utf8')
   invalidateNoteMetaCache(root, toPosix(path.relative(root, abs)))
   return await readMeta(root, abs, folder)
@@ -3490,6 +3495,7 @@ export async function convertObsidianExcalidraw(root: string, rel: string): Prom
     }
   }
   const destAbs = path.join(dir, `${finalTitle}.excalidraw`)
+  await removeNoteCreation(root, toPosix(path.relative(root, destAbs)))
   await fs.writeFile(destAbs, JSON.stringify(scene, null, 2), 'utf8')
   invalidateNoteMetaCache(root, toPosix(path.relative(root, destAbs)))
   return await readMeta(root, destAbs, folder)
@@ -3508,6 +3514,7 @@ export async function importExternalNote(root: string, sourceAbsPath: string): P
   const finalTitle = await uniqueTitle(destDir, baseTitle)
   const destAbs = path.join(destDir, `${finalTitle}.md`)
   const body = await fs.readFile(source, 'utf8')
+  await removeNoteCreation(root, toPosix(path.relative(root, destAbs)))
   await fs.writeFile(destAbs, body, 'utf8')
   await fs.rm(source, { force: true })
   const rel = toPosix(path.relative(root, destAbs))
@@ -3537,7 +3544,7 @@ export async function renameNote(
   const nextRel = toPosix(path.relative(root, target))
   let meta!: NoteMeta
   await relocateFolderTrees(
-    [[abs, target], [noteCommentsPath(root, rel), noteCommentsPath(root, nextRel)]],
+    [[abs, target], [noteCommentsPath(root, rel), noteCommentsPath(root, nextRel)], [await noteMetadataPath(root, rel), await noteMetadataPath(root, nextRel)]],
     async () => { meta = await readMeta(root, target, folder) }
   )
   invalidateNoteMetaCache(root, rel)
@@ -3615,7 +3622,7 @@ async function moveBetweenFolders(
   const nextRel = toPosix(path.relative(root, destAbs))
   let meta!: NoteMeta
   await relocateFolderTrees(
-    [[abs, destAbs], [noteCommentsPath(root, rel), noteCommentsPath(root, nextRel)]],
+    [[abs, destAbs], [noteCommentsPath(root, rel), noteCommentsPath(root, nextRel)], [await noteMetadataPath(root, rel), await noteMetadataPath(root, nextRel)]],
     async () => { meta = await readMeta(root, destAbs, target) }
   )
   invalidateNoteMetaCache(root, rel)
@@ -3676,7 +3683,8 @@ export async function emptyTrash(root: string): Promise<void> {
   const temporary = await fs.mkdtemp(path.join(root, INTERNAL_VAULT_DIR, 'trash-delete-'))
   await relocateFolderTrees([
     [trashDir, path.join(temporary, 'content')],
-    [comments, path.join(temporary, 'comments')]
+    [comments, path.join(temporary, 'comments')],
+    [await noteMetadataPath(root, trashRel, true), path.join(temporary, 'metadata')]
   ], async () => {})
   await fs.rm(temporary, { recursive: true, force: true }).catch(error => console.warn('Trash cleanup pending', error))
   invalidateNoteMetaCache(root)
@@ -3702,7 +3710,8 @@ export async function deleteNote(root: string, rel: string): Promise<void> {
     const temporary = await fs.mkdtemp(path.join(root, INTERNAL_VAULT_DIR, 'note-delete-'))
     await relocateFolderTrees([
       [abs, path.join(temporary, 'content')],
-      [comments, path.join(temporary, 'comments')]
+      [comments, path.join(temporary, 'comments')],
+      [await noteMetadataPath(root, toPosix(path.relative(root, abs)), source?.isDirectory() ?? false), path.join(temporary, 'metadata')]
     ], async () => {})
     // Once detached, cleanup cannot attach the old discussion to a new note.
     await fs.rm(temporary, { recursive: true, force: true }).catch(error => console.warn('Note cleanup pending', error))
@@ -4031,7 +4040,8 @@ export async function renameFolderTrees(
   if ((newAbs + path.sep).startsWith(oldAbs + path.sep)) throw new Error('Cannot move a folder into itself')
   const oldComments = resolveSafe(noteCommentsRoot(root), toPosix(path.relative(root, oldAbs)))
   const newComments = resolveSafe(noteCommentsRoot(root), toPosix(path.relative(root, newAbs)))
-  await relocateFolderTrees([[oldAbs, newAbs], [oldComments, newComments]], persistSettings)
+  await relocateFolderTrees([[oldAbs, newAbs], [oldComments, newComments],
+    [await noteMetadataPath(root, oldRelative, true), await noteMetadataPath(root, newRelative, true)]], persistSettings)
   invalidateNoteMetaCache(root)
   invalidateVaultTextSearchCache(root)
 }
@@ -4122,7 +4132,8 @@ export async function deleteFolder(
   await relocateFolderTrees(
     [
       [abs, path.join(temporary, 'content')],
-      [comments, path.join(temporary, 'comments')]
+      [comments, path.join(temporary, 'comments')],
+      [await noteMetadataPath(root, toPosix(path.relative(root, abs)), true), path.join(temporary, 'metadata')]
     ],
     () => setVaultSettings(root, nextSettings)
   )
@@ -4350,7 +4361,7 @@ export async function moveNote(
   const nextRel = toPosix(path.relative(root, destAbs))
   let meta!: NoteMeta
   await relocateFolderTrees(
-    [[oldAbs, destAbs], [noteCommentsPath(root, oldRel), noteCommentsPath(root, nextRel)]],
+    [[oldAbs, destAbs], [noteCommentsPath(root, oldRel), noteCommentsPath(root, nextRel)], [await noteMetadataPath(root, oldRel), await noteMetadataPath(root, nextRel)]],
     async () => { meta = await readMeta(root, destAbs, targetFolder) }
   )
   invalidateNoteMetaCache(root, oldRel)
@@ -4369,6 +4380,7 @@ export async function duplicateNote(root: string, rel: string): Promise<NoteMeta
   const copyTitle = await uniqueTitle(dir, `${baseTitle} copy`)
   const destAbs = path.join(dir, `${copyTitle}${ext}`)
   const body = await fs.readFile(abs, 'utf8')
+  await removeNoteCreation(root, toPosix(path.relative(root, destAbs)))
   await fs.writeFile(destAbs, body, 'utf8')
   const meta = await readMeta(root, destAbs, folder)
   await copyNoteComments(root, rel, meta.path)

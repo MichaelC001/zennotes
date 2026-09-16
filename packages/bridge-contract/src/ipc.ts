@@ -223,8 +223,24 @@ export type AppUpdatePhase =
   | 'downloaded'
   | 'error'
 
-/** Where on disk the `zen` shim is currently installed (or could be). */
+export interface CliInstallRequest {
+  /** Main-issued approval for a specific dangling historical shortcut. */
+  repairToken: string
+}
+
+/** Where on disk the `zn` shim is currently installed (or could be). */
 export interface CliInstallStatus {
+  /** Runtime supplied by this desktop build or its retained managed install. */
+  runtime?: 'go' | 'node'
+  runtimeVersion?: string
+  runtimeError?: string
+  /** Offered only for a missing historical app target without an ownership receipt. */
+  repair?: {
+    token: string
+    oldTarget: string
+    newTarget: string
+    backupPath: string
+  }
   /** True if the wrapper script is shipped with this build. False in
    *  dev runs where electron-vite has not bundled the CLI yet. */
   available: boolean

@@ -1144,7 +1144,7 @@ export const HELP_SETTINGS: HelpSettingsSection[] = [
   {
     title: 'CLI',
     items: [
-      { label: 'Install Command-Line Tool', detail: 'Symlink the bundled `zn` wrapper into a usable PATH location so any terminal session can capture, search, and edit notes. ZenNotes prefers user-writable directories and only prompts for admin access when no writable PATH target is available. The CLI runtime stays packaged with the app, including the dependencies needed by `zn mcp`, so updates ship together.' },
+      { label: 'Install Command-Line Tool', detail: 'Symlink the bundled `zn` wrapper into a usable PATH location so any terminal session can capture, search, and edit notes. ZenNotes prefers user-writable directories and only prompts for admin access when no writable PATH target is available. The app carries the tested CLI runtime, so desktop-managed updates ship together. Builds with the terminal app install a persistent copy that also works after desktop closes.' },
       { label: 'Status, path, and quick reference', detail: 'Settings → CLI shows whether `zn` is installed, where the symlink lives, and a copy-able quick reference of the most useful commands. If the chosen directory is not on PATH yet, Settings shows the exact shell command to add it. An "External install" badge appears when something else owns `zn` so ZenNotes never clobbers an unmanaged binary.' },
       { label: 'Paths with spaces', detail: 'Quote note paths like `zn read "hellointerview/system design.md"` or pass them with `--path "hellointerview/system design.md"` so your shell keeps the path as one argument.' },
       { label: 'Raycast on macOS', detail: 'The Raycast extension requires `zn` and can be installed locally from this settings page. ZenNotes copies the bundled extension into app data, installs dependencies, builds it, and imports it into Raycast. It searches with `zn list --json`, then opens notes in ZenNotes through `zennotes://open` or `zennotes://open-window` and exposes archive, unarchive, trash, reveal, copy path, and copy wikilink actions from Raycast.' },
@@ -1192,6 +1192,11 @@ export const HELP_CLI: HelpCard[] = [
     title: 'Install it once from Settings',
     body:
       'Open Settings → CLI and click Install. ZenNotes symlinks the bundled wrapper into a usable PATH location, preferring user-writable directories and only asking for admin access when no writable PATH target is available. After that, `zn --help` works in any new terminal. You can also run the install from the command palette via "Install Command-Line Tool (zn)".'
+  },
+  {
+    title: 'The terminal app and existing installations',
+    body:
+      'Builds with the Go terminal tool include `zn tui`. Update and open ZenNotes once to upgrade an existing desktop-managed CLI; keep using the same `zn` commands. Settings shows the installed terminal version and offers Repair if an upgrade needs attention. Desktop-installed commands keep following the desktop vault, while the TUI remembers its own selection. Explicit `--vault` and `--server` flags still win. Set `ZENNOTES_WORKSPACE_SOURCE=terminal` to use the terminal default for a command, or `ZENNOTES_CLI_ENGINE=legacy` to run the previous CLI during the transition. Homebrew and manual installations stay managed by their own installer. A shortcut left behind by a moved Mac app or an old AppImage can be repaired from Settings: review the old target, replacement and backup path before choosing Repair shortcut. Note saves preserve creation dates in small files under `.zennotes/note-metadata` without changing Markdown; keep the `.zennotes` folder with vault backups. Explicit legacy rollback needs the original app resources to remain available.'
   },
   {
     title: 'No app required',

@@ -226,6 +226,7 @@ import {
 import {
   getCliInstallStatus,
   installCli,
+  migrateInstalledCli,
   migrateLegacyCliLink,
   uninstallCli,
 } from "./cli-install";
@@ -4553,7 +4554,9 @@ function registerIpc(): void {
   );
 
   handle(IPC.CLI_GET_STATUS, async () => await getCliInstallStatus());
-  handle(IPC.CLI_INSTALL, async () => await installCli());
+  handle(IPC.CLI_INSTALL, async (_event, request: unknown) =>
+    await installCli(request),
+  );
   handle(IPC.CLI_UNINSTALL, async () => await uninstallCli());
   handle(IPC.RAYCAST_GET_STATUS, async () => await getRaycastExtensionStatus());
   handle(IPC.RAYCAST_INSTALL, async () => await installRaycastExtension());
@@ -5248,16 +5251,16 @@ app.whenReady().then(async () => {
 
   await migrateLegacyRemoteWorkspaceSecrets();
 
-  // Fire-and-forget: heals the pre-2.10 `zen` symlink into `zn` for users who
-  // never re-ran the CLI installer. Must not delay or fail startup — a broken
-  // PATH probe is a log line, not a launch problem. (#126)
+  // Heal the legacy command name and upgrade existing desktop-owned shortcuts.
+  // A PATH or runtime staging failure must not delay or fail app startup.
   void migrateLegacyCliLink()
+    .then(() => migrateInstalledCli())
     .then((linkPath) => {
       if (linkPath)
-        console.log(`[cli] migrated legacy zen symlink to ${linkPath}`);
+        console.log(`[cli] updated managed CLI shortcut at ${linkPath}`);
     })
     .catch((err) =>
-      console.warn("[cli] legacy symlink migration failed:", err),
+      console.warn("[cli] managed CLI migration failed:", err),
     );
 
   protocol.handle(LOCAL_ASSET_SCHEME, async (request) => {

@@ -59,6 +59,7 @@ import type {
   AppUpdateState,
   AssetMeta,
   CliInstallStatus,
+  CliInstallRequest,
   DeletedAsset,
   DirectoryBrowseResult,
   ExternalFileContent,
@@ -691,7 +692,8 @@ const api: ZenBridge = {
   mcpSetInstructions: (next: string | null): Promise<McpInstructionsPayload> =>
     ipcRenderer.invoke(IPC.MCP_SET_INSTRUCTIONS, next),
   cliGetStatus: (): Promise<CliInstallStatus> => ipcRenderer.invoke(IPC.CLI_GET_STATUS),
-  cliInstall: (): Promise<CliInstallStatus> => ipcRenderer.invoke(IPC.CLI_INSTALL),
+  cliInstall: (request?: CliInstallRequest): Promise<CliInstallStatus> =>
+    ipcRenderer.invoke(IPC.CLI_INSTALL, request),
   cliUninstall: (): Promise<CliInstallStatus> => ipcRenderer.invoke(IPC.CLI_UNINSTALL),
   raycastGetStatus: (): Promise<RaycastExtensionStatus> =>
     ipcRenderer.invoke(IPC.RAYCAST_GET_STATUS),
