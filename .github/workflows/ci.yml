@@ -99,6 +99,18 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: npm run test:app-core-browser
 
+      - name: Collect browser evidence
+        if: always() && matrix.os == 'ubuntu-latest'
+        run: node tooling/scripts/collect-app-core-evidence.mjs "$RUNNER_TEMP/app-core-browser-evidence"
+
+      - name: Retain browser evidence
+        if: always() && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-core-browser-evidence
+          path: ${{ runner.temp }}/app-core-browser-evidence
+          if-no-files-found: ignore
+
       - name: Verify contract fixture copies
         run: npm run check:contract-fixtures
 

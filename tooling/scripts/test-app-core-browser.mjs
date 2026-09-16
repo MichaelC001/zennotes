@@ -173,7 +173,9 @@ try {
   await client.evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Sign In').click()`)
   await until(() => client.evaluate(`(() => { [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Skip setup')?.click(); return !!document.querySelector('[data-sidebar-type="folder"]') })()`), 'workspace')
   await client.evaluate(`window.packageNavigation.openNote(${JSON.stringify(path)})`)
-  await until(() => client.evaluate(`document.querySelector('.cm-content')?.textContent.includes('Read and edit')`), 'editor')
+  // The first note open fetches the editor, store, and Markdown chunks on a
+  // cold runner; allow the same window as the lazy renders below.
+  await until(() => client.evaluate(`document.querySelector('.cm-content')?.textContent.includes('Read and edit')`), 'editor', 60000)
   assert.equal(await client.evaluate(`document.querySelector('[data-consumer-selection]').textContent`), path)
   assert.equal(await client.evaluate(`getComputedStyle(document.querySelector('#root > *')).display`), 'flex', 'Compiled Tailwind styles did not load')
   const beforeLazy = requests.filter((url) => /mermaid\.core|typst.*\.wasm|harper.*\.wasm/.test(url))
@@ -744,7 +746,24 @@ try {
   await writeFile(join(run, 'result.json'), JSON.stringify(result, null, 2) + '\n')
   console.log(`PASS: ${result.passed.join(', ')}\nEvidence: ${run}`)
 } catch (error) {
+  // CI keeps only the console, so say what the page and the helpers saw
+  // before the evidence directory is uploaded or lost.
+  console.error(`Browser check failed: ${error.message}`)
+  console.error(`Page errors: ${JSON.stringify(errors, null, 2)}`)
+  console.error(`Failed requests: ${JSON.stringify(failed, null, 2)}`)
+  console.error(`Network log errors: ${JSON.stringify(networkErrors.map(entry => entry.text), null, 2)}`)
+  for (const [name, log] of Object.entries(logs)) {
+    const tail = log.split('\n').slice(-40).join('\n').trim()
+    if (tail) console.error(`--- ${name} output (tail) ---\n${tail}`)
+  }
   if (client) {
+    const pageState = await client.evaluate(`({
+      url: location.href, title: document.title,
+      editors: document.querySelectorAll('.cm-content').length,
+      dialogs: [...document.querySelectorAll('[role="dialog"]')].map(node => node.textContent.slice(0, 200)),
+      text: document.body.innerText.slice(0, 1500)
+    })`).catch((reason) => ({ unavailable: reason.message }))
+    console.error(`Page state: ${JSON.stringify(pageState, null, 2)}`)
     await writeFile(join(run, 'failure.txt'), await client.evaluate('document.body.innerText').catch(() => ''))
     const screenshot = await client.send('Page.captureScreenshot', { format: 'png' }).catch(() => null)
     if (screenshot) await writeFile(join(run, 'failure.png'), Buffer.from(screenshot.data, 'base64'))
