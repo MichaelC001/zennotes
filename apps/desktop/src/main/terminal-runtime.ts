@@ -1,4 +1,5 @@
-import { promises as fs } from 'node:fs'
+import { constants, promises as fs } from 'node:fs'
+import type { FileHandle } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -119,19 +120,7 @@ async function prepare(
   const current = path.join(runtimeRoot, 'current')
   const launcherPath = path.join(base, 'zn')
   await fs.mkdir(versions, { recursive: true, mode: 0o700 })
-  try {
-    const stat = await fs.lstat(launcherPath)
-    if (
-      !stat.isFile() ||
-      !(await fs.readFile(launcherPath, 'utf8')).startsWith(
-        `#!/bin/sh\n${LAUNCHER_MARKER}\n`,
-      )
-    ) {
-      throw new Error(`${launcherPath} is not a managed ZenNotes launcher.`)
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
+  await readManagedLauncher(launcherPath)
   try {
     if (!(await fs.lstat(current)).isSymbolicLink())
       throw new Error('The active terminal path is not a managed link.')
@@ -206,6 +195,34 @@ async function prepare(
   }
 }
 
+/**
+ * Reads a launcher this app may replace. One handle, opened without following
+ * links, serves both the type check and the content check, so nothing can be
+ * swapped in between: the result is a regular file carrying our marker, or
+ * null when there is no launcher at all. Anything else is refused.
+ */
+async function readManagedLauncher(launcherPath: string): Promise<string | null> {
+  const refuse = () =>
+    new Error(`${launcherPath} is not a managed ZenNotes launcher.`)
+  let handle: FileHandle
+  try {
+    handle = await fs.open(launcherPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return null
+    if (code === 'ELOOP') throw refuse()
+    throw error
+  }
+  try {
+    if (!(await handle.stat()).isFile()) throw refuse()
+    const content = await handle.readFile('utf8')
+    if (!content.startsWith(`#!/bin/sh\n${LAUNCHER_MARKER}\n`)) throw refuse()
+    return content
+  } finally {
+    await handle.close()
+  }
+}
+
 /** Retain a verified installed version when a new bundle cannot be activated. */
 export async function readActiveTerminalRuntime(
   userData: string,
@@ -217,14 +234,23 @@ export async function readActiveTerminalRuntime(
     const installed = JSON.parse(
       await fs.readFile(path.join(current, 'installed.json'), 'utf8'),
     )
+    // The mode check and the digest come from one open handle, so the bytes
+    // that are hashed are the bytes whose mode was checked.
+    const binary = await fs.open(binaryPath, 'r')
+    let executable = false
+    let bytes: Buffer
+    try {
+      executable = Boolean((await binary.stat()).mode & 0o111)
+      bytes = await binary.readFile()
+    } finally {
+      await binary.close()
+    }
     if (
       installed.protocol !== 1 ||
       typeof installed.version !== 'string' ||
-      !((await fs.stat(binaryPath)).mode & 0o111) ||
-      digest(await fs.readFile(binaryPath)) !== installed.sha256 ||
-      !(await fs.readFile(launcherPath, 'utf8')).startsWith(
-        `#!/bin/sh\n${LAUNCHER_MARKER}\n`,
-      )
+      !executable ||
+      digest(bytes) !== installed.sha256 ||
+      (await readManagedLauncher(launcherPath)) === null
     )
       return null
     return {
