@@ -299,7 +299,14 @@
       "compression": "xz"
     },
     "pacman": {
-      "compression": "xz"
+      "compression": "xz",
+      "fpm": [
+        "--provides",
+        "zennotes",
+        "--conflicts",
+        "zennotes-bin",
+        "build/zennotes=/usr/bin/zennotes"
+      ]
     }
   }
 }

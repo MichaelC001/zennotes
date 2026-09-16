@@ -354,6 +354,8 @@ function formatUpdatePhaseLabel(phase: AppUpdateState["phase"]): string {
       return "Downloading";
     case "downloaded":
       return "Ready to install";
+    case "installing":
+      return "Installing";
     case "error":
       return "Update error";
     case "idle":
@@ -369,6 +371,7 @@ function updatePhaseBadgeClass(phase: AppUpdateState["phase"]): string {
       return "border-accent/30 bg-accent/10 text-accent";
     case "checking":
     case "downloading":
+    case "installing":
       return "border-paper-300/70 bg-paper-100/85 text-ink-700";
     case "error":
       return "border-red-400/25 bg-red-500/10 text-red-700";
@@ -5077,12 +5080,14 @@ export function SettingsModal(): JSX.Element {
                           onClick={triggerUpdateCheck}
                           disabled={
                             appUpdateState?.phase === "checking" ||
-                            appUpdateState?.phase === "downloading"
+                            appUpdateState?.phase === "downloading" ||
+                            appUpdateState?.phase === "installing"
                           }
                           className={[
                             "rounded-xl border px-3.5 py-2 text-xs font-medium transition-colors",
                             appUpdateState?.phase === "checking" ||
-                            appUpdateState?.phase === "downloading"
+                            appUpdateState?.phase === "downloading" ||
+                            appUpdateState?.phase === "installing"
                               ? "cursor-not-allowed border-paper-300/60 bg-paper-100/45 text-ink-400"
                               : "border-paper-300/70 bg-paper-100/80 text-ink-800 hover:bg-paper-200",
                           ].join(" ")}

@@ -1,3 +1,4 @@
+import { requestSettingsTarget } from './lib/settings-navigation'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
   useStore,
@@ -254,6 +255,11 @@ function AppUpdateNotice({
       void window.zen.downloadAppUpdate()
       return
     }
+    if (updateState?.phase === 'error') {
+      requestSettingsTarget('about')
+      useStore.getState().setSettingsOpen(true)
+      return
+    }
     if (updateState?.phase === 'downloaded') {
       void window.zen.installAppUpdate()
     }
@@ -266,7 +272,7 @@ function AppUpdateNotice({
       className="fixed bottom-4 right-4 z-40 flex max-w-[min(28rem,calc(100vw-2rem))] items-center gap-2 rounded-xl border border-accent/30 bg-paper-50/95 px-3 py-2 text-sm text-ink-800 shadow-float backdrop-blur"
     >
       <span className="h-2 w-2 shrink-0 rounded-full bg-accent shadow-[0_0_0_4px_rgb(var(--z-accent)/0.12)]" />
-      <span className="min-w-0 truncate font-medium">{label}</span>
+      <span className="min-w-0 font-medium">{label}</span>
       {updateState?.phase === 'downloading' && (
         <span className="shrink-0 rounded-md bg-paper-200/80 px-1.5 py-0.5 text-xs font-medium text-ink-600">
           {Math.round(updateState.progressPercent ?? 0)}%

@@ -12,6 +12,7 @@ pkgbase = zennotes-bin
 	depends = desktop-file-utils
 	provides = zennotes
 	conflicts = zennotes
+	conflicts = ZenNotes
 	options = !strip
 	source = ZenNotes-2.50.4-linux-x64.tar.gz::https://github.com/ZenNotes/zennotes/releases/download/v2.50.4/ZenNotes-2.50.4-linux-x64.tar.gz
 	sha256sums = 428bdec0f436f4671c34e04a73d38a0f9345fb7119924e7938add50094703527

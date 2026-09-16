@@ -21,7 +21,7 @@ license=('MIT')
 # without it, zennotes:// deep links silently go nowhere on a minimal install.
 depends=('gtk3' 'nss' 'alsa-lib' 'libxss' 'desktop-file-utils')
 provides=('zennotes')
-conflicts=('zennotes')
+conflicts=('zennotes' 'ZenNotes')
 options=('!strip')
 
 source=(
