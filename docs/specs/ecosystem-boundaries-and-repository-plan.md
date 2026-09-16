@@ -300,7 +300,7 @@ Specify error categories, cancellation, content encoding, and save preconditions
 
 Give each protocol a documented capability/version contract and request/response fixtures. Share identifiers, error concepts, and applicable semantics, but preserve backend-specific auth and persistence rules. If a machine-readable schema is introduced, pilot it on one endpoint before committing to broad code generation.
 
-The standalone TUI CLI/MCP and desktop-bundled CLI/MCP also need an explicit compatibility inventory. Keep existing `zn` installation and command resolution working. Replacing one CLI with the other is a separate decision.
+The standalone TUI CLI/MCP and desktop-bundled CLI/MCP also need an explicit compatibility inventory. Keep existing `zn` installation and command resolution working. The [desktop CLI migration assessment](desktop-cli-tui-migration.md) recommends consuming the standalone Go binary, with compatibility checks and managed installation migration before replacement.
 
 ## 6. Packages, artifacts, CI, and release ownership
 
