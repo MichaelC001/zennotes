@@ -116,7 +116,9 @@ afterEach(() => {
   else Reflect.deleteProperty(process, 'resourcesPath')
 })
 
-describe('downloaded .pacman update installation', () => {
+// The suite fakes a Linux platform, but its download and pkexec doubles are
+// POSIX shell scripts, so it only runs where those can execute.
+describe.skipIf(process.platform === 'win32')('downloaded .pacman update installation', () => {
   it('does not leave a hidden terminal authentication prompt waiting in a GUI session', async () => {
     boundary.execFile.mockImplementation((_file: string, args: string[], ...rest: unknown[]) => {
       // pkexec can fall back to a textual agent on the controlling terminal.

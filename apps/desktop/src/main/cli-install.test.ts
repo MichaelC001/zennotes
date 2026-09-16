@@ -316,7 +316,9 @@ it.skipIf(process.platform === 'win32')(
   }
 )
 
-describe('stale desktop CLI shortcuts', () => {
+// The desktop CLI shortcut is a POSIX symlink and the repair paths are
+// AppImage mounts and macOS bundles; CLI install is not offered on Windows.
+describe.skipIf(process.platform === 'win32')('stale desktop CLI shortcuts', () => {
   const goWrapper = () => ({
     ...wrapperLoc(),
     wrapperPath: path.join(userDataDir, 'cli', 'zn'),
