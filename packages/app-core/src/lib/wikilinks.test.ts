@@ -246,8 +246,6 @@ describe('extractMarkdownLinkHrefs (#70dark)', () => {
 })
 
 describe('resolveWikilinkTarget trims slash runs without regex backtracking', () => {
-  const notes = [{ path: 'inbox/My Document.md' }, { path: 'inbox/projects/Spec.md' }]
-
   it('resolves an explicit path wrapped in slashes', () => {
     expect(resolveWikilinkTarget(notes, '/projects/Spec/')?.path).toBe('inbox/projects/Spec.md')
     expect(resolveWikilinkTarget(notes, '///projects/Spec///')?.path).toBe('inbox/projects/Spec.md')
