@@ -90,13 +90,33 @@ export function CloudSettings({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    return useCloudSyncStatusStore.subscribe((next, previous) => {
+    let mounted = true;
+    const unsubscribe = useCloudSyncStatusStore.subscribe((next, previous) => {
       // A saved decision updates this panel immediately, then the remaining
       // vault sync may finish later. Adopt that result (or a vault reset), but
       // keep explicit restore/manual summaries through unrelated status changes.
       if (next.lastSummary !== previous.lastSummary) setSummary(next.lastSummary);
+      if (next.phase === "unlinked" && next.error) {
+        void bridge.getCloudVaultLink().then((currentLink) => {
+          if (!mounted || currentLink !== null) return;
+          setLink(null);
+          const remainingVaults = cloudVaults.filter((vault) => vault.id !== link?.vault_id);
+          setCloudVaults(remainingVaults);
+          setSelectedVaultId((selected) => remainingVaults.some((vault) => vault.id === selected)
+            ? selected : (remainingVaults[0]?.id ?? ""));
+          setSummary(null);
+          setSettingsConflict(null);
+          setBackups([]);
+          setBackupSchedule(null);
+          setExpandedBackupId(null);
+          setBackupItems([]);
+          setRestoreResult(null);
+          setError(next.error);
+        }).catch(() => {});
+      }
     });
-  }, []);
+    return () => { mounted = false; unsubscribe(); };
+  }, [bridge, link, cloudVaults]);
 
   const loadStatus = useCallback(
     async (nextStatus?: CloudAccountStatus): Promise<void> => {

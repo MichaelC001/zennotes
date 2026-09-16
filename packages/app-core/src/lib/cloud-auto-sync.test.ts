@@ -262,6 +262,26 @@ describe("cloud auto sync host wiring", () => {
     } finally { unregister(); runtime.stop(); }
   });
 
+  it("clears the stale success state when the metadata probe discovers an unlinked vault", async () => {
+    const host = setup();
+    const missing = new Error("This Cloud vault is no longer available. Your local notes are unchanged.");
+    const probe = vi.fn(async () => { host.setLinked(false); throw missing; });
+    const runtime = startCloudAutoSync({ ...host.bridge, hasCloudVaultChanges: probe }, host.environment, {
+      intervalMs: 60_000, onError: vi.fn(),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      expect(useCloudSyncStatusStore.getState().lastSummary).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(probe).toHaveBeenCalledOnce();
+      expect(useCloudSyncStatusStore.getState()).toMatchObject({
+        phase: "unlinked", vaultName: null, lastSummary: null, lastSyncedAt: null,
+        conflictReviewOpen: false, error: missing.message,
+      });
+      expect(host.logoutCloudAccount).not.toHaveBeenCalled();
+    } finally { runtime.stop(); }
+  });
+
   it("syncs at startup and debounces syncable vault changes", async () => {
     const host = setup();
     const runtime = startCloudAutoSync(host.bridge, host.environment, {

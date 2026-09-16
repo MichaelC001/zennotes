@@ -978,6 +978,59 @@ describe("CloudSettings", () => {
     expect(host.textContent).not.toContain("Everything is up to date");
   });
 
+  it.each(["manual", "background"] as const)(
+    "retires deleted Cloud actions after a %s sync confirms that the host removed the link (#791)",
+    async (trigger) => {
+      mocks.getCloudAccountStatus.mockResolvedValue(connected);
+      mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
+      mocks.listCloudVaults.mockResolvedValue([{ id: "vault-1", name: "Cloud Notes" }, { id: "vault-2", name: "Other preserved vault" }]);
+      mocks.getCloudVaultLink.mockResolvedValue({
+        base_url: connected.account!.base_url,
+        vault_id: "vault-1",
+        vault_name: "Cloud Notes",
+        linked_at: "2026-08-10T12:00:00.000Z",
+      });
+      mocks.syncCloudVault.mockResolvedValueOnce({
+        cursor: 7, pulled: 0, pushed: 0, conflicts: [], bootstrap_conflicts: [], local_conflicts: [],
+      }).mockImplementationOnce(async () => {
+        // Host confirmation retires only the remote association. Settings
+        // must discover that result even while this panel stays mounted.
+        mocks.getCloudVaultLink.mockResolvedValue(null);
+        throw new Error("Error invoking remote method 'cloud-vault:sync': Error: This Cloud vault no longer exists. Your local notes are safe.");
+      });
+      await act(async () => root.render(createElement(CloudSettings, {
+        localVaultAvailable: true, localVaultName: "Notes",
+      })));
+      const sync = () => [...host.querySelectorAll("button")].find(
+        (button) => button.textContent?.trim() === "Sync now",
+      );
+      await act(async () => sync()!.click());
+      expect(host.textContent).toContain("Everything is up to date");
+      if (trigger === "manual") {
+        await act(async () => sync()!.click());
+      } else {
+        const actual = await vi.importActual<typeof import("../lib/cloud-auto-sync")>("../lib/cloud-auto-sync");
+        await act(async () => {
+          await actual.syncCloudVaultWithStatus(mocks, "Cloud Notes").catch(() => undefined);
+        });
+      }
+
+      expect(host.textContent).not.toContain("Linked to Cloud Notes");
+      expect(host.textContent).not.toContain("Cloud Notes");
+      expect(host.textContent).not.toContain("Error invoking remote method");
+      expect(host.textContent).toContain("This Cloud vault no longer exists. Your local notes are safe.");
+      const actions = [...host.querySelectorAll("button")].map((button) => button.textContent?.trim());
+      expect(actions).not.toContain("Sync now");
+      expect(actions).not.toContain("Unlink this device");
+      expect(actions).not.toContain("Delete Cloud vault");
+      expect(host.textContent).not.toContain("Everything is up to date");
+      const open = [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Open on this device");
+      expect(open).toBeDefined();
+      expect(open!.disabled).toBe(false);
+      expect(mocks.logoutCloudAccount).not.toHaveBeenCalled();
+    },
+  );
+
   // Settings that differ between devices are a question, not a silent merge.
   // Doing nothing keeps this device's settings, so the local choice leads.
   it("asks which vault settings to keep and applies the answer", async () => {

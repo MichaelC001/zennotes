@@ -1,3 +1,4 @@
+import { humanIpcError } from "./ipc-error";
 import type { ZenBridge } from "@zennotes/bridge-contract/bridge";
 import { getZenBridge } from "@zennotes/bridge-contract/bridge";
 import type { CloudSyncRunSummary } from "@zennotes/bridge-contract/cloud-sync";
@@ -145,7 +146,12 @@ export function startCloudAutoSync(
       ? async () => {
           const state = useCloudSyncStatusStore.getState();
           if (!state.vaultName || !isCloudAccountConnectedPhase(state.phase)) return false;
-          return bridge.hasCloudVaultChanges!();
+          try {
+            return await bridge.hasCloudVaultChanges!();
+          } catch (error) {
+            await refreshRemovedCloudLink(bridge, error);
+            throw error;
+          }
         }
       : undefined,
     online: environment.online,
@@ -179,6 +185,7 @@ export function startCloudAutoSync(
           phase: "error",
           error: syncFailureMessage(error),
         });
+        void refreshRemovedCloudLink(bridge, error);
       }
       useCloudSyncStatusStore.setState({ syncWindowLocked: false });
     },
@@ -231,7 +238,7 @@ export async function connectCloudAccountFromStatusBar(
 }
 
 export async function syncCloudVaultWithStatus(
-  bridge: Pick<CloudAutoSyncBridge, "syncCloudVault"> = getZenBridge(),
+  bridge: Pick<CloudAutoSyncBridge, "syncCloudVault"> & Partial<Pick<CloudAutoSyncBridge, "getCloudVaultLink">> = getZenBridge(),
   vaultName?: string | null,
 ): Promise<CloudSyncRunSummary> {
   const current = useCloudSyncStatusStore.getState();
@@ -250,13 +257,29 @@ export async function syncCloudVaultWithStatus(
     applyCloudSyncSummary(summary, nextVaultName);
     return summary;
   } catch (error) {
-    useCloudSyncStatusStore.setState({
-      phase: "error",
-      vaultName: nextVaultName,
-      error: syncFailureMessage(error),
-    });
+    if (!await refreshRemovedCloudLink(bridge, error)) {
+      useCloudSyncStatusStore.setState({
+        phase: "error",
+        vaultName: nextVaultName,
+        error: syncFailureMessage(error),
+      });
+    }
     throw error;
   }
+}
+
+async function refreshRemovedCloudLink(
+  bridge: Partial<Pick<CloudAutoSyncBridge, "getCloudVaultLink">>,
+  error: unknown,
+): Promise<boolean> {
+  if (!bridge.getCloudVaultLink) return false;
+  try {
+    if (await bridge.getCloudVaultLink() !== null) return false;
+  } catch {
+    return false;
+  }
+  markCloudSyncUnlinked(syncFailureMessage(error));
+  return true;
 }
 
 /** Retire only the acknowledged decision, not the status of the whole vault. */
@@ -381,13 +404,15 @@ function markCloudSyncConnecting(): void {
   });
 }
 
-function markCloudSyncUnlinked(): void {
+function markCloudSyncUnlinked(error: string | null = null): void {
   useCloudSyncStatusStore.setState({
     phase: "unlinked",
     vaultName: null,
     lastSyncedAt: null,
     resolutionSaved: false,
-    error: null,
+    error,
+    lastSummary: null,
+    conflictReviewOpen: false,
   });
 }
 
@@ -442,7 +467,7 @@ function syncFailureMessage(error: unknown): string {
 }
 
 function cloudSyncErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return humanIpcError(error instanceof Error ? error : new Error(String(error)), "Cloud sync failed.");
 }
 
 export function cloudSyncAttentionMessage(
