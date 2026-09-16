@@ -7,7 +7,6 @@ import { withGoEnv } from './go-env.mjs'
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(scriptDir, '..', '..')
 const serverRoot = resolve(repoRoot, 'apps/server')
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
 function run(command, args, cwd = repoRoot, options = {}) {
   const shell = options.shell ?? false
@@ -30,10 +29,6 @@ function run(command, args, cwd = repoRoot, options = {}) {
     child.on('error', rejectPromise)
   })
 }
-
-await run(npmCommand, ['run', 'prepare-web'], serverRoot, {
-  shell: process.platform === 'win32',
-})
 
 await run('go', ['test', './...'], serverRoot, {
   env: withGoEnv(),

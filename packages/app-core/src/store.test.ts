@@ -1698,15 +1698,17 @@ describe('deleteDatabaseRows (#391 — purge record-page schema mappings)', () =
   }
 
   it('purges the deleted row page mapping and trashes the note on confirm', async () => {
-    const moveToTrash = vi.fn().mockResolvedValue({})
+    const moveToTrash = vi.fn().mockResolvedValue({ ...makeNote('', 'trash/r1.md'), folder: 'trash' })
     installZen({
       moveToTrash,
+      writeNote: vi.fn().mockImplementation(async (path) => makeNote('', path)),
+      setVaultSettings: vi.fn().mockImplementation(async (settings) => settings),
       writeDatabaseSchema: vi.fn().mockResolvedValue(undefined),
       writeDatabaseRows: vi.fn().mockResolvedValue(undefined)
     })
     const { useStore } = await loadStore()
     const { getConfirmRequest, settleConfirmRequest } = await import('./lib/confirm-requests')
-    useStore.setState({ databases: { [CSV]: makeDbDoc() } })
+    useStore.setState({ vault: { root: '/test', name: 'Test' }, databases: { [CSV]: makeDbDoc() } })
 
     const p = useStore.getState().deleteDatabaseRows(CSV, ['r1'])
     const req = getConfirmRequest()
@@ -1722,15 +1724,17 @@ describe('deleteDatabaseRows (#391 — purge record-page schema mappings)', () =
   })
 
   it('keeps the note on cancel but still purges the stale mapping', async () => {
-    const moveToTrash = vi.fn().mockResolvedValue({})
+    const moveToTrash = vi.fn().mockResolvedValue({ ...makeNote('', 'trash/r1.md'), folder: 'trash' })
     installZen({
       moveToTrash,
+      writeNote: vi.fn().mockImplementation(async (path) => makeNote('', path)),
+      setVaultSettings: vi.fn().mockImplementation(async (settings) => settings),
       writeDatabaseSchema: vi.fn().mockResolvedValue(undefined),
       writeDatabaseRows: vi.fn().mockResolvedValue(undefined)
     })
     const { useStore } = await loadStore()
     const { getConfirmRequest, settleConfirmRequest } = await import('./lib/confirm-requests')
-    useStore.setState({ databases: { [CSV]: makeDbDoc() } })
+    useStore.setState({ vault: { root: '/test', name: 'Test' }, databases: { [CSV]: makeDbDoc() } })
 
     const p = useStore.getState().deleteDatabaseRows(CSV, ['r1'])
     settleConfirmRequest(getConfirmRequest()!, false) // "Keep note"
@@ -1749,7 +1753,7 @@ describe('deleteDatabaseRows (#391 — purge record-page schema mappings)', () =
     })
     const { useStore } = await loadStore()
     const { getConfirmRequest } = await import('./lib/confirm-requests')
-    useStore.setState({ databases: { [CSV]: makeDbDoc() } })
+    useStore.setState({ vault: { root: '/test', name: 'Test' }, databases: { [CSV]: makeDbDoc() } })
 
     await useStore.getState().deleteDatabaseRows(CSV, ['r2']) // r2 has no linked page
     expect(getConfirmRequest()).toBeNull() // no prompt
@@ -2193,7 +2197,7 @@ describe('deleteActivePermanently (#712)', () => {
     const { useStore } = await loadStore()
     const { getConfirmRequest, settleConfirmRequest } = await import('./lib/confirm-requests')
     const note = trashedNote()
-    useStore.setState({
+    useStore.setState({ vault: { root: '/test', name: 'Test' },
       notes: [note],
       selectedPath: TRASHED,
       activeNote: note,
@@ -2219,7 +2223,7 @@ describe('deleteActivePermanently (#712)', () => {
     const { useStore } = await loadStore()
     const { getConfirmRequest, settleConfirmRequest } = await import('./lib/confirm-requests')
     const note = trashedNote()
-    useStore.setState({ notes: [note], selectedPath: TRASHED, activeNote: note, noteContents: { [TRASHED]: note } })
+    useStore.setState({ vault: { root: '/test', name: 'Test' }, notes: [note], selectedPath: TRASHED, activeNote: note, noteContents: { [TRASHED]: note } })
 
     const p = useStore.getState().deleteActivePermanently()
     settleConfirmRequest(getConfirmRequest()!, false)
@@ -2237,7 +2241,7 @@ describe('deleteActivePermanently (#712)', () => {
     const { getConfirmRequest, settleConfirmRequest } = await import('./lib/confirm-requests')
     const { useToastStore } = await import('./lib/toast')
     const note = trashedNote()
-    useStore.setState({ notes: [note], selectedPath: TRASHED, activeNote: note, noteContents: { [TRASHED]: note } })
+    useStore.setState({ vault: { root: '/test', name: 'Test' }, notes: [note], selectedPath: TRASHED, activeNote: note, noteContents: { [TRASHED]: note } })
 
     const p = useStore.getState().deleteActivePermanently()
     settleConfirmRequest(getConfirmRequest()!, true)
@@ -2252,7 +2256,7 @@ describe('deleteActivePermanently (#712)', () => {
     const deleteNote = vi.fn().mockResolvedValue(undefined)
     installZen({ deleteNote })
     const { useStore } = await loadStore()
-    useStore.setState({ selectedPath: null, activeNote: null })
+    useStore.setState({ vault: { root: '/test', name: 'Test' }, selectedPath: null, activeNote: null })
     await useStore.getState().deleteActivePermanently()
     expect(deleteNote).not.toHaveBeenCalled()
   })
@@ -2449,5 +2453,29 @@ describe('ignored keys (#732)', () => {
     expect(useStore.getState().ignoredKeys).toEqual(['KanaMode', 'Lang1'])
     useStore.getState().setIgnoredKeys([])
     expect(useStore.getState().ignoredKeys).toEqual([])
+  })
+})
+
+
+describe('file-task lifecycle coordination', () => {
+  it('trashes a file task outside the inline-task queue and keeps it on failure', async () => {
+    const source = makeNote('---\ntags: [task]\n---\nDraft.\n')
+    const moveToTrash=vi.fn().mockRejectedValueOnce(new Error('permission denied')).mockResolvedValue({...source,path:'trash/Note.md',folder:'trash'})
+    installZen({moveToTrash,listNotes:vi.fn().mockResolvedValue([{...source,path:'trash/Note.md',folder:'trash'}])})
+    const {useStore}=await loadStore()
+    const {getConfirmRequest,settleConfirmRequest}=await import('./lib/confirm-requests')
+    const task:VaultTask={...makeTask('Note',-1),id:'inbox/Note.md#file',taskIndex:-1,kind:'file',rawText:''}
+    useStore.setState({vault:{root:'/test',name:'Test'},notes:[source],noteContents:{[source.path]:source},vaultTasks:[task]})
+    const failed=useStore.getState().deleteTaskFromList(task)
+    settleConfirmRequest(getConfirmRequest()!,true)
+    await failed
+    expect(moveToTrash).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().vaultTasks).toEqual([task])
+    expect(useStore.getState().noteContents[source.path]).toBeDefined()
+    const deleting=useStore.getState().deleteTaskFromList(task)
+    settleConfirmRequest(getConfirmRequest()!,true)
+    await deleting
+    expect(moveToTrash).toHaveBeenCalledTimes(2)
+    expect(useStore.getState().noteContents[source.path]).toBeUndefined()
   })
 })

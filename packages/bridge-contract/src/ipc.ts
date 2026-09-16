@@ -1,6 +1,8 @@
 // Shared IPC channel names and types between main + renderer.
 // Keeping these in one file gives us a single source of truth.
 
+import type { ZenPlatform } from './platform.js'
+
 export const IPC = {
   WORKSPACE_GET_INFO: 'workspace:get-info',
   WORKSPACE_CONNECT_REMOTE: 'workspace:connect-remote',
@@ -773,7 +775,7 @@ export interface LocalVaultEntry extends VaultInfo {
 
 export interface ServerCapabilities {
   version: string
-  platform: NodeJS.Platform
+  platform: ZenPlatform
   authRequired: boolean
   supportsSessionLogin: boolean
   browseRootsEnforced: boolean

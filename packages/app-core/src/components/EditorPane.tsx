@@ -1,3 +1,4 @@
+import { noteEditingSync, noteEditingLockExtension, refreshNoteEditingLock } from '../lib/note-lifecycle-lock'
 /**
  * Single pane of the editor split view. Each leaf in the pane-layout
  * tree renders an `EditorPane` — owning its own CodeMirror view, tab
@@ -38,6 +39,8 @@ import {
 } from '@codemirror/view'
 import { Vim, getCM, vim } from '@replit/codemirror-vim'
 import type { AssetMeta, ImportedAsset, NoteComment, NoteFolder } from '@shared/ipc'
+import { registerNoteEditor } from '../lib/note-editor-context'
+import { noteEditorHostExtension } from '../lib/editor-host'
 import {
   history,
   historyKeymap,
@@ -1727,9 +1730,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         initialBody.length >= LARGE_DOC_LIVE_PREVIEW_DEFER_CHARS && !s0.livePreview
       richMarkdownDeferredRef.current = deferInitialRichMarkdown
       const stateStartedAt = performance.now()
+      viewPathRef.current = initialPath
       const state = EditorState.create({
         doc: initialBody,
         extensions: [
+          noteEditingLockExtension(() => ({ vault: useStore.getState().vault, path: viewPathRef.current })),
+          noteEditorHostExtension(),
           appMarkdownSnippetExtension(),
           vimCompartment.of(s0.vimMode ? vim() : []),
           // No text input outside Vim insert mode, so a CJK input method
@@ -1980,6 +1986,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       })
       viewRef.current = view
       viewPathRef.current = initialPath
+      registerNoteEditor(view, () => viewPathRef.current, paneId)
       if (initialContent && useStore.getState().activePaneId === paneId) {
         setEditorViewRef(view)
       }
@@ -2097,9 +2104,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       }
     }
     const dispatchStartedAt = performance.now()
+    viewPathRef.current = nextPath
+    refreshNoteEditingLock(view)
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: nextBody },
       annotations: [
+        noteEditingSync.of(true),
         programmatic.of(true),
         skipOrderedListRenumber.of(true),
         // A programmatic swap (tab switch / external file sync) must never be

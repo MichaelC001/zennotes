@@ -43,6 +43,7 @@ buildGoModule (finalAttrs: {
   modRoot = "apps/server";
 
   subPackages = [ "cmd/zennotes-server" ];
+  tags = [ "embed_web" ];
   ldflags = [
     "-s"
     "-w"

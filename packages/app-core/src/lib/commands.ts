@@ -9,6 +9,7 @@
 import { isTagsViewActive, isTasksViewActive, isTrashViewActive, useStore } from '../store'
 import { confirmApp } from './confirm-requests'
 import { promptApp } from './prompt-requests'
+import { captureNavigationContext } from './navigation-context'
 import { buildMoveNotePrompt, parseMoveNoteTarget } from './move-note'
 import { focusPaneInDirection } from './pane-nav'
 import { focusSidebarPanel } from './sidebar-focus'
@@ -314,6 +315,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       category: 'Note',
       when: () => !!getState().activeNote,
       run: async () => {
+        const isCurrent = captureNavigationContext()
         const active = getState().activeNote
         if (!active) return
         const next = await promptApp({
@@ -321,7 +323,8 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
           initialValue: active.title,
           okLabel: 'Rename'
         })
-        if (next && next !== active.title) await getState().renameActive(next)
+        if (next && next !== active.title && isCurrent() && getState().selectedPath === active.path)
+          await getState().renameActive(next)
       }
     },
     {
@@ -524,13 +527,14 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       keywords: 'move mv relocate folder archive inbox',
       when: () => !!getState().activeNote,
       run: async () => {
+        const isCurrent = captureNavigationContext()
         const state = getState()
         const active = state.activeNote
         if (!active) return
         const target = await promptApp(buildMoveNotePrompt(active, state.folders))
-        if (!target) return
+        if (!target || !isCurrent()) return
         const dest = parseMoveNoteTarget(target)
-        await state.moveNote(active.path, dest.folder, dest.subpath)
+        await state.moveNote(active.path, dest.folder, dest.subpath, isCurrent)
       }
     }
   )

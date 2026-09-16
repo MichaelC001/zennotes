@@ -1,3 +1,4 @@
+import { noteEditingSync, noteEditingLockExtension, refreshNoteEditingLock } from '../lib/note-lifecycle-lock'
 /**
  * Always-visible side panel that shows a single companion note — a
  * "reference pane" writers and researchers can keep open while drafting
@@ -208,9 +209,11 @@ export function PinnedReferencePane(): JSX.Element | null {
       const s0 = useStore.getState()
       const initialPath = s0.pinnedRefPath
       const initialContent = initialPath ? s0.noteContents[initialPath] ?? null : null
+      viewPathRef.current = initialPath
       const state = EditorState.create({
         doc: initialContent?.body ?? '',
         extensions: [
+          noteEditingLockExtension(() => ({ vault: useStore.getState().vault, path: viewPathRef.current })),
           appMarkdownSnippetExtension(),
           vimCompartment.of(s0.vimMode ? vim() : []),
           vimVisualHighlightExtension,
@@ -306,9 +309,11 @@ export function PinnedReferencePane(): JSX.Element | null {
     const sel = view.state.selection.main
     const clampedAnchor = Math.min(sel.anchor, nextBody.length)
     const clampedHead = Math.min(sel.head, nextBody.length)
+    viewPathRef.current = nextPath
+    refreshNoteEditingLock(view)
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: nextBody },
-      annotations: programmatic.of(true),
+      annotations: [programmatic.of(true), noteEditingSync.of(true)],
       selection: pathChanged ? { anchor: 0 } : { anchor: clampedAnchor, head: clampedHead }
     })
     viewPathRef.current = nextPath

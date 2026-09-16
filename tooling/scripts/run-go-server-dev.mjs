@@ -6,9 +6,13 @@ import { withGoEnv } from './go-env.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(scriptDir, '..', '..')
-const serverRoot = resolve(repoRoot, 'apps/server')
+const serverRoot = process.env.ZENNOTES_SERVER_DIR
+  ? resolve(process.env.ZENNOTES_SERVER_DIR)
+  : resolve(repoRoot, 'apps/server')
+const binary = process.env.ZENNOTES_SERVER_BINARY
+if (binary && process.env.ZENNOTES_SERVER_DIR) throw new Error('Choose ZENNOTES_SERVER_BINARY or ZENNOTES_SERVER_DIR')
 
-const child = spawn('go', ['run', './cmd/zennotes-server'], {
+const child = spawn(binary ? resolve(binary) : 'go', binary ? [] : ['run', './cmd/zennotes-server'], {
   cwd: serverRoot,
   env: withGoEnv({
     ZENNOTES_DEV: '1'

@@ -1,0 +1,10 @@
+.git
+**/node_modules
+.turbo
+**/.turbo
+dist
+apps/desktop/out
+apps/web/dist
+apps/share-viewer/dist
+apps/server/web/dist
+apps/server/bin

@@ -123,7 +123,8 @@ const DESKTOP_APP_INFO: ZenAppInfo = {
   version: appPackage.version,
   description: appPackage.description,
   homepage: appPackage.homepage,
-  runtime: 'desktop'
+  runtime: 'desktop',
+  hostKind: 'desktop'
 }
 
 let remoteWorkspaceInfo: RemoteWorkspaceInfo | null = null

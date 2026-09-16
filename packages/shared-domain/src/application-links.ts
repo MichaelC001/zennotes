@@ -1,3 +1,5 @@
+export type { ExternalUrlResult } from '@zennotes/bridge-contract/application-links'
+
 /** Application links are classified before note lookup, even when disabled. */
 const SCHEME_RE = /^([a-z][a-z\d+.-]*):/i
 const STANDARD_SCHEMES = new Set(['http', 'https', 'mailto', 'tel'])
@@ -64,10 +66,4 @@ export function classifyApplicationLink(href: string): ApplicationLink | null {
       url.length > 8192 ||
       url.length === scheme.length + 1
   }
-}
-
-export type ExternalUrlResult = {
-  ok: boolean
-  error?: 'scheme-disabled' | 'blocked' | 'open-failed' | 'desktop-only'
-  scheme?: string
 }

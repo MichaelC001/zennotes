@@ -1,3 +1,4 @@
+import { runNoteLifecycleAction, runNoteBatchAction, runEmptyTrash } from "../lib/note-lifecycle-actions";
 import {
   createContext,
   memo,
@@ -23,8 +24,6 @@ import {
   useStore,
 } from "../store";
 import { Button } from "./ui/Button";
-import { confirmMoveToTrash } from "../lib/confirm-trash";
-import { moveNoteToTrash } from "../lib/trash-note";
 import { buildMoveNotePrompt, parseMoveNoteTarget } from "../lib/move-note";
 import { buildTagTree, extractTags, flattenTagTree } from "../lib/tags";
 import { isTypstPreamblePath, resolveTypstPreambleFolder } from "../lib/typst-preamble";
@@ -1692,19 +1691,7 @@ export function Sidebar(): JSX.Element {
       items.push({
         label: `Move ${liveNotes.length} note${liveNotes.length === 1 ? "" : "s"}…`,
         onSelect: async () => {
-          const target = await promptApp(
-            buildMoveNotePrompt(
-              { title: `${liveNotes.length} notes`, path: liveNotes[0]!.path },
-              allFolders,
-            ),
-          );
-          if (!target) return;
-          const dest = parseMoveNoteTarget(target);
-          for (const note of liveNotes) {
-            await window.zen.moveNote(note.path, dest.folder, dest.subpath);
-          }
-          if (selectedActiveNote) await selectNote(null);
-          await refreshAndClear();
+          if (await runNoteBatchAction(liveNotes.map(note => note.path), "move")) clearSelection();
         },
       });
     }
@@ -1714,13 +1701,7 @@ export function Sidebar(): JSX.Element {
         label: `Move ${archivableNotes.length} note${archivableNotes.length === 1 ? "" : "s"} to ${folderLabels.archive}`,
         icon: <ArchiveIcon />,
         onSelect: async () => {
-          const paths = archivableNotes.map((note) => note.path);
-          if (!(await useStore.getState().confirmArchiveNotes(paths))) return;
-          for (const note of archivableNotes) {
-            await window.zen.archiveNote(note.path);
-          }
-          if (selectedActiveNote) await selectNote(null);
-          await refreshAndClear();
+          if (await runNoteBatchAction(archivableNotes.map(note => note.path), "archive")) clearSelection();
         },
       });
     }
@@ -1730,11 +1711,7 @@ export function Sidebar(): JSX.Element {
         label: `Move ${archivedNotes.length} archived note${archivedNotes.length === 1 ? "" : "s"} to ${folderLabels.inbox}`,
         icon: <ArrowUpRightIcon />,
         onSelect: async () => {
-          for (const note of archivedNotes) {
-            await window.zen.unarchiveNote(note.path);
-          }
-          if (selectedActiveNote) await selectNote(null);
-          await refreshAndClear();
+          if (await runNoteBatchAction(archivedNotes.map(note => note.path), "restore")) clearSelection();
         },
       });
     }
@@ -1745,20 +1722,7 @@ export function Sidebar(): JSX.Element {
         icon: <TrashIcon />,
         danger: true,
         onSelect: async () => {
-          const ok = await confirmApp({
-            title: `Move ${liveNotes.length} note${liveNotes.length === 1 ? "" : "s"} to ${folderLabels.trash}?`,
-            description: "You can restore them from Trash later.",
-            confirmLabel: `Move to ${folderLabels.trash}`,
-            danger: true,
-          });
-          if (!ok) return;
-          for (const note of liveNotes) {
-            await moveNoteToTrash(note.path, {
-              temporarySession: vault?.temporary === true,
-            });
-          }
-          if (selectedActiveNote) await selectNote(null);
-          await refreshAndClear();
+          if (await runNoteBatchAction(liveNotes.map(note => note.path), "trash")) clearSelection();
         },
       });
     }
@@ -1768,11 +1732,7 @@ export function Sidebar(): JSX.Element {
         label: `Restore ${trashedNotes.length} note${trashedNotes.length === 1 ? "" : "s"}`,
         icon: <ArrowUpRightIcon />,
         onSelect: async () => {
-          for (const note of trashedNotes) {
-            await window.zen.restoreFromTrash(note.path);
-          }
-          if (selectedActiveNote) await selectNote(null);
-          await refreshAndClear();
+          if (await runNoteBatchAction(trashedNotes.map(note => note.path), "restore")) clearSelection();
         },
       });
       items.push({
@@ -1780,18 +1740,7 @@ export function Sidebar(): JSX.Element {
         icon: <TrashIcon />,
         danger: true,
         onSelect: async () => {
-          const ok = await confirmApp({
-            title: `Delete ${trashedNotes.length} note${trashedNotes.length === 1 ? "" : "s"} permanently?`,
-            description: "This cannot be undone.",
-            confirmLabel: "Delete permanently",
-            danger: true,
-          });
-          if (!ok) return;
-          for (const note of trashedNotes) {
-            await window.zen.deleteNote(note.path);
-          }
-          if (selectedActiveNote) await selectNote(null);
-          await refreshAndClear();
+          if (await runNoteBatchAction(trashedNotes.map(note => note.path), "delete")) clearSelection();
         },
       });
     }
@@ -1905,18 +1854,7 @@ export function Sidebar(): JSX.Element {
           icon: <TrashIcon />,
           danger: true,
           disabled: trashCount === 0,
-          onSelect: async () => {
-            const ok = await confirmApp({
-              title: `Delete ${trashCount} trashed note${trashCount === 1 ? "" : "s"} permanently?`,
-              description: "This cannot be undone.",
-              confirmLabel: `Empty ${folderLabels.trash}`,
-              danger: true,
-            });
-            if (!ok) return;
-            await window.zen.emptyTrash();
-            await refreshNotes();
-            if (selectedPath?.startsWith("trash/")) await selectNote(null);
-          },
+          onSelect: runEmptyTrash,
         },
         { kind: "separator" },
         ...iconItems,
@@ -2435,10 +2373,7 @@ export function Sidebar(): JSX.Element {
         label: folderLabels.archive,
         icon: <ArchiveIcon />,
         onSelect: async () => {
-          if (!(await useStore.getState().confirmArchiveNotes([n.path]))) return;
-          await window.zen.archiveNote(n.path);
-          await refreshNotes();
-          if (selectedPath === n.path) await selectNote(null);
+          await runNoteLifecycleAction(n.path, "archive");
         },
       });
       items.push({
@@ -2446,15 +2381,7 @@ export function Sidebar(): JSX.Element {
         icon: <TrashIcon />,
         danger: true,
         onSelect: async () => {
-          if (!(await confirmMoveToTrash(n.title))) return;
-          if (
-            !(await moveNoteToTrash(n.path, {
-              temporarySession: vault?.temporary === true,
-            }))
-          )
-            return;
-          await refreshNotes();
-          if (selectedPath === n.path) await selectNote(null);
+          await runNoteLifecycleAction(n.path, "trash");
         },
       });
     } else if (n.folder === "archive") {
@@ -2462,9 +2389,7 @@ export function Sidebar(): JSX.Element {
         label: `Move to ${folderLabels.inbox}`,
         icon: <ArrowUpRightIcon />,
         onSelect: async () => {
-          const meta = await window.zen.unarchiveNote(n.path);
-          await refreshNotes();
-          if (selectedPath === n.path) await selectNote(meta.path);
+          await runNoteLifecycleAction(n.path, "restore");
         },
       });
       items.push({
@@ -2472,15 +2397,7 @@ export function Sidebar(): JSX.Element {
         icon: <TrashIcon />,
         danger: true,
         onSelect: async () => {
-          if (!(await confirmMoveToTrash(n.title))) return;
-          if (
-            !(await moveNoteToTrash(n.path, {
-              temporarySession: vault?.temporary === true,
-            }))
-          )
-            return;
-          await refreshNotes();
-          if (selectedPath === n.path) await selectNote(null);
+          await runNoteLifecycleAction(n.path, "trash");
         },
       });
     } else {
@@ -2488,9 +2405,7 @@ export function Sidebar(): JSX.Element {
         label: "Restore",
         icon: <ArrowUpRightIcon />,
         onSelect: async () => {
-          const meta = await window.zen.restoreFromTrash(n.path);
-          await refreshNotes();
-          if (selectedPath === n.path) await selectNote(meta.path);
+          await runNoteLifecycleAction(n.path, "restore");
         },
       });
       items.push({
@@ -2498,9 +2413,7 @@ export function Sidebar(): JSX.Element {
         icon: <TrashIcon />,
         danger: true,
         onSelect: async () => {
-          await window.zen.deleteNote(n.path);
-          await refreshNotes();
-          if (selectedPath === n.path) await selectNote(null);
+          await runNoteLifecycleAction(n.path, "delete");
         },
       });
     }

@@ -1,0 +1,67 @@
+name: Self-hosted web artifact boundary
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/web/**'
+      - 'apps/server/**'
+      - 'packages/**'
+      - 'tooling/scripts/**'
+      - 'package*.json'
+      - 'tsconfig.base.json'
+      - 'LICENSE'
+      - '.github/workflows/web-artifact.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:web-artifact
+      - run: npm run check:contract-fixtures
+      - run: npm run artifact:web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: self-hosted-web-candidate
+          path: dist/web-artifacts/*
+          if-no-files-found: error
+
+  server:
+    needs: browser
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: apps/server
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache-dependency-path: apps/server/go.sum
+      - uses: actions/download-artifact@v4
+        with:
+          name: self-hosted-web-candidate
+          path: ${{ runner.temp }}/web-artifact
+      - name: Test and build using the pinned archive with Go alone
+        shell: bash
+        working-directory: apps/server
+        run: |
+          go vet ./...
+          go test ./...
+          manifests=("$RUNNER_TEMP"/web-artifact/*.tgz.json)
+          test "${#manifests[@]}" -eq 1
+          go run ./cmd/prepare-web -manifest "${manifests[0]}" -output web/dist
+          go test -tags=embed_web ./web
+          go build -tags=embed_web -trimpath -o bin/zennotes-server ./cmd/zennotes-server

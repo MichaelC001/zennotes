@@ -1,3 +1,4 @@
+import { runNoteLifecycleAction } from '../lib/note-lifecycle-actions'
 /**
  * Right-side calendar panel — a date navigator for daily and weekly notes,
  * modelled on Obsidian's Calendar plugin.
@@ -37,8 +38,6 @@ import { CloudTaskConflictIndicator } from './CloudTaskConflictIndicator'
 import { resolveWeekStartDay } from '../lib/week-start'
 import { ChevronLeftIcon, ChevronRightIcon } from './icons'
 import { confirmApp } from '../lib/confirm-requests'
-import { confirmMoveToTrash } from '../lib/confirm-trash'
-import { moveNoteToTrash } from '../lib/trash-note'
 import { usePanelResize } from '../lib/use-panel-resize'
 import { PanelResizeHandle } from './PanelResizeHandle'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
@@ -389,10 +388,7 @@ export function CalendarPanel({ note }: { note: NoteContent }): JSX.Element {
   // --- Context menu --------------------------------------------------------
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null)
   const trashNote = useCallback(async (meta: NoteMeta) => {
-    if (!(await confirmMoveToTrash(meta.title))) return
-    await moveNoteToTrash(meta.path, {
-      temporarySession: useStore.getState().vault?.temporary === true
-    })
+    await runNoteLifecycleAction(meta.path, 'trash')
   }, [])
   const openDayMenu = useCallback(
     (e: React.MouseEvent, day: Date, iso: string) => {

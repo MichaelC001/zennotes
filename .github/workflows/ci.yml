@@ -14,6 +14,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  server:
+    name: Go server without frontend dependencies
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/server
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache-dependency-path: apps/server/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+
   production-dependency-audit:
     name: Production dependency audit
     runs-on: ubuntu-latest
@@ -55,16 +70,40 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          # Pin a modern Go instead of go.mod's `go 1.22`: the 1.22 macOS
-          # linker omits the LC_UUID load command, which the updated
-          # macos-latest dyld now rejects ("missing LC_UUID", abort trap) when
-          # launching `go test` binaries. go.mod stays at 1.22 (its real
-          # minimum), so Nix/release builds are unaffected.
+          # Keep macOS on the current linker; older Go toolchains produced
+          # binaries without the LC_UUID load command required by dyld.
           go-version: stable
           cache-dependency-path: apps/server/go.sum
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify standalone shared packages
+        run: npm run test:shared-packages
+
+      - name: Verify isolated editor package and assets
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run test:app-core-package
+
+      - name: Exercise the installed editor in Chrome
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run test:app-core-browser
+
+      - name: Verify the editor with the mobile Vite version
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          ZEN_CORE_VITE_VERSION: 8.2.2
+        run: npm run test:app-core-package
+
+      - name: Exercise the Vite 8 editor in Chrome
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run test:app-core-browser
+
+      - name: Verify contract fixture copies
+        run: npm run check:contract-fixtures
+
+      - name: Verify browser asset build lock
+        run: npm run test:web-dist-lock
 
       - name: Typecheck and build app
         env:

@@ -1,3 +1,4 @@
+import type { ZenPlatform } from './platform.js'
 import type {
   AppUpdateState,
   AssetMeta,
@@ -34,8 +35,8 @@ import type {
   VaultTextSearchCapabilities,
   VaultTextSearchMatch,
   VaultTextSearchToolPaths
-} from './ipc'
-import type { CustomTemplateFile, WriteTemplateInput } from './templates'
+} from './ipc.js'
+import type { CustomTemplateFile, WriteTemplateInput } from './templates.js'
 import type {
   CloudAccountConnectResult,
   CloudAccountStatus,
@@ -58,7 +59,7 @@ import type {
   CloudSyncSettingsConflict,
   CloudSyncVault,
   CloudVaultLink
-} from './cloud-sync'
+} from './cloud-sync.js'
 import type {
   ApplyWorkflowInput,
   ExportWorkflowInput,
@@ -68,29 +69,29 @@ import type {
   WorkflowRunSummary,
   WorkflowUndoResult,
   WriteWorkflowInput
-} from './workflows'
-import type { VaultTask } from '@zennotes/shared-domain/tasks'
+} from './workflows.js'
+import type { VaultTask } from './tasks.js'
 import type {
   DatabaseDoc,
   DatabaseSidecar,
   DatabaseSummary,
   DbRow
-} from '@zennotes/shared-domain/databases'
+} from './databases.js'
 import type {
   McpClientId,
   McpClientStatus,
   McpInstructionsPayload,
   McpServerRuntime
-} from '@zennotes/shared-domain/mcp-clients'
-import type { AppConfigPortable } from '@zennotes/shared-domain/app-config'
-import type { ExternalUrlResult } from '@zennotes/shared-domain/application-links'
-import type { CustomTheme } from '@zennotes/shared-domain/custom-themes'
-import type { Override } from '@zennotes/shared-domain/overrides'
+} from './mcp-clients.js'
+import type { AppConfigPortable } from './app-config.js'
+import type { ExternalUrlResult } from './application-links.js'
+import type { CustomTheme } from './custom-themes.js'
+import type { Override } from './overrides.js'
 import type {
   CustomCodeLanguage,
   CustomCodeLanguageInstallInput,
   CustomCodeLanguageUpdateInput
-} from '@zennotes/shared-domain/custom-code-languages'
+} from './custom-code-languages.js'
 
 export interface ZenCapabilities {
   supportsUpdater: boolean
@@ -118,15 +119,17 @@ export interface ZenAppInfo {
   version: string
   description: string
   homepage?: string
+  /** Legacy renderer family. Use hostKind to distinguish native mobile shells. */
   runtime: 'desktop' | 'web'
+  hostKind?: 'desktop' | 'browser' | 'ios' | 'android'
 }
 
 export interface ZenBridge {
   getCapabilities(): ZenCapabilities
   getAppInfo(): ZenAppInfo
 
-  platform(): Promise<NodeJS.Platform>
-  platformSync(): NodeJS.Platform
+  platform(): Promise<ZenPlatform>
+  platformSync(): ZenPlatform
   listSystemFonts(): Promise<string[]>
   getAppIconDataUrl(): Promise<string | null>
   zoomInApp(): Promise<number>
@@ -158,7 +161,7 @@ export interface ZenBridge {
   syncCloudVault(): Promise<CloudSyncRunSummary>
   hasCloudVaultChanges?(): Promise<boolean>
   /** Hosts with multiple workspace windows coordinate draft saves before sync. */
-  onCloudSyncWindow?(handlers: import('./cloud-sync').CloudSyncWindowHandlers): () => void
+  onCloudSyncWindow?(handlers: import('./cloud-sync.js').CloudSyncWindowHandlers): () => void
   getCloudBootstrapConflict(
     conflict: CloudSyncBootstrapConflict
   ): Promise<CloudSyncBootstrapConflictDetails>

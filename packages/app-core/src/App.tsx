@@ -346,10 +346,10 @@ function App(): JSX.Element {
   const mountedAtRef = useRef(performance.now())
   const workspaceReadyLoggedRef = useRef(false)
   const searchPaletteWarmupCleanupRef = useRef<(() => void) | null>(null)
-  const pendingOpenNoteRequestsRef = useRef<string[]>([])
+  const pendingOpenNoteRequestsRef = useRef<Array<{ path: string; vault: ReturnType<typeof useStore.getState>['vault'] }>>([])
   const vault = useStore((s) => s.vault)
   const init = useStore((s) => s.init)
-  const workspaceRestored = useStore((s) => s.workspaceRestored)
+  const workspaceRestored = useStore((s) => s.workspaceRestored && !s.workspaceTransitioning)
   const searchOpen = useStore((s) => s.searchOpen)
   const setSearchOpen = useStore((s) => s.setSearchOpen)
   const vaultTextSearchOpen = useStore((s) => s.vaultTextSearchOpen)
@@ -464,11 +464,11 @@ function App(): JSX.Element {
   useEffect(() => {
     return window.zen.onOpenNoteRequested((relPath) => {
       const state = useStore.getState()
-      if (state.vault && state.workspaceRestored) {
+      if (state.vault && state.workspaceRestored && !state.workspaceTransitioning) {
         void state.openNoteInTab(relPath)
         return
       }
-      pendingOpenNoteRequestsRef.current.push(relPath)
+      pendingOpenNoteRequestsRef.current.push({ path: relPath, vault: state.vault })
     })
   }, [])
 
@@ -529,8 +529,9 @@ function App(): JSX.Element {
   useEffect(() => {
     if (!vault || !workspaceRestored || pendingOpenNoteRequestsRef.current.length === 0) return
     const requests = pendingOpenNoteRequestsRef.current.splice(0)
-    for (const relPath of requests) {
-      void useStore.getState().openNoteInTab(relPath)
+    for (const request of requests) {
+      if (request.vault && request.vault !== vault) continue
+      void useStore.getState().openNoteInTab(request.path)
     }
   }, [vault, workspaceRestored])
 

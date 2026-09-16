@@ -23,6 +23,7 @@ COPY packages/shared-domain/package.json packages/shared-domain/package.json
 COPY packages/shared-ui/package.json packages/shared-ui/package.json
 COPY apps/desktop/package.json apps/desktop/package.json
 COPY apps/server/package.json apps/server/package.json
+COPY apps/share-viewer/package.json apps/share-viewer/package.json
 
 RUN npm ci --no-audit --no-fund --loglevel=error
 
@@ -55,7 +56,7 @@ ENV CGO_ENABLED=0 \
     GOFLAGS=-trimpath
 
 WORKDIR /app/apps/server
-RUN go build -ldflags="-s -w" -o /out/zennotes-server ./cmd/zennotes-server
+RUN go build -tags=embed_web -ldflags="-s -w" -o /out/zennotes-server ./cmd/zennotes-server
 
 FROM scratch
 LABEL org.opencontainers.image.title="ZenNotes" \
