@@ -225,6 +225,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'default_view_mode',
     comment: 'edit | split | preview — the mode a note opens in before it has a remembered one'
   },
+  keepViewModeAcrossNotes: {
+    section: 'editor',
+    tomlKey: 'keep_view_mode_across_notes',
+    comment: 'true = stay in the current Edit / Split / Preview mode when opening another note; false = each note reopens in its own last mode'
+  },
   lineNumberMode: {
     section: 'editor',
     tomlKey: 'line_number_mode',
