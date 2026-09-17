@@ -277,9 +277,9 @@ import { isWorkspaceVirtualTabPath } from '../lib/workspace-tabs'
 import {
   CALENDAR_PANEL_CLOSED,
   calendarPanelOnNote,
-  calendarPanelOnToggle,
-  type CalendarPanelState
+  calendarPanelOnToggle
 } from '../lib/calendar-panel-auto'
+import { usePanePanels } from '../lib/use-pane-panels'
 import {
   assetPathFromTab,
   assetTitleFromPath,
@@ -892,11 +892,21 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     keepViewModeAcrossNotes && paneStickyMode
       ? paneStickyMode
       : paneModeForPath(modesByPath, activeTab, defaultPaneMode)
-  const [connectionsOpen, setConnectionsOpen] = useState(false)
-  const [outlineOpen, setOutlineOpen] = useState(false)
+  // One sticky set per pane, or one per note when "Keep panels when switching
+  // notes" is off (#794). Same names and setter shape as the four `useState`s
+  // this replaced, so every toggle and auto-open below is unchanged.
+  const {
+    connections: connectionsOpen,
+    outline: outlineOpen,
+    comments: commentsOpen,
+    calendar: calendarPanel,
+    calendarAutoOpenAllowed,
+    setConnectionsOpen,
+    setOutlineOpen,
+    setCommentsOpen,
+    setCalendarPanel
+  } = usePanePanels(paneId, activeTab)
   const [activeOutlineLine, setActiveOutlineLine] = useState<number | null>(null)
-  const [commentsOpen, setCommentsOpen] = useState(false)
-  const [calendarPanel, setCalendarPanel] = useState<CalendarPanelState>(CALENDAR_PANEL_CLOSED)
   const calendarOpen = calendarPanel.open
   // The calendar panel is a date navigator. It auto-opens while the pane shows
   // a daily/weekly note, but stays available (Obsidian-style) on any note as
@@ -1195,11 +1205,13 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     setCalendarPanel((state) =>
       calendarPanelOnNote(state, {
         isDateNote,
-        autoEnabled: autoCalendarPanel,
+        // With panels kept per note, a calendar the user closed on this note
+        // stays closed when they come back to it. (#794)
+        autoEnabled: autoCalendarPanel && calendarAutoOpenAllowed,
         available: calendarAvailable
       })
     )
-  }, [content?.path, isDateNote, autoCalendarPanel, calendarAvailable])
+  }, [content?.path, isDateNote, autoCalendarPanel, calendarAutoOpenAllowed, calendarAvailable])
 
   useEffect(() => {
     if (!isActive) return

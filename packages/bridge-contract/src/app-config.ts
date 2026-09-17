@@ -34,6 +34,7 @@ export const PORTABLE_PREF_KEYS = [
   'harperDialect',
   'looseMathDelimiters',
   'keepViewModeAcrossNotes',
+  'keepPanelsAcrossNotes',
   'defaultPaneMode',
   'syncTitleHeadingOnRename',
   'markdownSnippets',

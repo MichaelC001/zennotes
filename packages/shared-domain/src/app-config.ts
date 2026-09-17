@@ -98,6 +98,7 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   harperDialect: 'american',
   looseMathDelimiters: false,
   keepViewModeAcrossNotes: false,
+  keepPanelsAcrossNotes: true,
   defaultPaneMode: 'edit',
   syncTitleHeadingOnRename: true,
   markdownSnippets: true,

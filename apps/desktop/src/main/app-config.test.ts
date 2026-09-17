@@ -208,6 +208,15 @@ describe('TOML serialization', () => {
     expect(PORTABLE_PREF_KEYS.filter((key) => !(key in portable))).toEqual([])
   })
 
+  it('carries both keep-across-notes preferences', () => {
+    const text = serializeConfig({ keepPanelsAcrossNotes: false, keepViewModeAcrossNotes: true })
+    expect(text).toContain('keep_panels_across_notes = false')
+    expect(text).toContain('keep_view_mode_across_notes = true')
+    const { portable } = deserializeConfig(text)
+    expect(portable.keepPanelsAcrossNotes).toBe(false)
+    expect(portable.keepViewModeAcrossNotes).toBe(true)
+  })
+
   it('round-trips visual tweaks (colors + sliders) through the [tweaks] table', () => {
     const tweaks = { accent: '#ff3b30', density: 'comfortable', cornerRadius: 'rounded' }
     const text = serializeConfig({ themeTweaks: tweaks })

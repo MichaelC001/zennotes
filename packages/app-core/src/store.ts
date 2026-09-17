@@ -229,6 +229,12 @@ import {
   type PaneModesByPath
 } from './lib/pane-mode'
 import {
+  panePanelsForPath,
+  panePanelsWithPath,
+  type PanePanelsByPath,
+  type PanePanelsState
+} from './lib/pane-panels'
+import {
   normalizeTextReplacements,
   type TextReplacements
 } from './lib/cm-text-replacements'
@@ -567,6 +573,10 @@ interface Prefs {
   /** Keep the current view mode (Edit / Split / Preview) when switching notes
    *  instead of resolving each note's own last mode. Off = per-note (default). */
   keepViewModeAcrossNotes: boolean
+  /** Keep the right-hand panels (Connections, Outline, Comments, Calendar) as
+   *  they are when switching notes. On (default) = one sticky set per pane,
+   *  as always; off = each note remembers its own for the session. (#794) */
+  keepPanelsAcrossNotes: boolean
   /** The mode a note opens in before the user has picked one for it: Edit
    *  (default), Split, or Preview for read-first workflows. (#543) */
   defaultPaneMode: PaneMode
@@ -1051,6 +1061,7 @@ export const DEFAULT_PREFS: Prefs = {
   harperLintConfig: {},
   looseMathDelimiters: false,
   keepViewModeAcrossNotes: false,
+  keepPanelsAcrossNotes: true,
   defaultPaneMode: 'edit',
   syncTitleHeadingOnRename: true,
   markdownSnippets: true,
@@ -1237,6 +1248,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.keepViewModeAcrossNotes === 'boolean'
         ? p.keepViewModeAcrossNotes
         : DEFAULT_PREFS.keepViewModeAcrossNotes,
+    keepPanelsAcrossNotes:
+      typeof p.keepPanelsAcrossNotes === 'boolean'
+        ? p.keepPanelsAcrossNotes
+        : DEFAULT_PREFS.keepPanelsAcrossNotes,
     defaultPaneMode: isPaneMode(p.defaultPaneMode) ? p.defaultPaneMode : DEFAULT_PREFS.defaultPaneMode,
     syncTitleHeadingOnRename:
       typeof p.syncTitleHeadingOnRename === 'boolean'
@@ -2263,6 +2278,7 @@ function collectPrefs(s: {
   harperLintConfig: HarperLintConfig
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
+  keepPanelsAcrossNotes: boolean
   defaultPaneMode: PaneMode
   syncTitleHeadingOnRename: boolean
   markdownSnippets: boolean
@@ -2367,6 +2383,7 @@ function collectPrefs(s: {
     harperLintConfig: s.harperLintConfig,
     looseMathDelimiters: s.looseMathDelimiters,
     keepViewModeAcrossNotes: s.keepViewModeAcrossNotes,
+    keepPanelsAcrossNotes: s.keepPanelsAcrossNotes,
     defaultPaneMode: s.defaultPaneMode,
     syncTitleHeadingOnRename: s.syncTitleHeadingOnRename,
     markdownSnippets: s.markdownSnippets,
@@ -2882,6 +2899,9 @@ interface Store {
   harperLintConfig: HarperLintConfig
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
+  /** One sticky set of right-hand panels per pane (on, the default) or one per
+   *  note (off). Persisted. (#794) */
+  keepPanelsAcrossNotes: boolean
   /** The mode a note opens in before it has a remembered one. Persisted. (#543) */
   defaultPaneMode: PaneMode
   /** Renaming a note rewrites its leading `# Heading` to match. Persisted. (#455) */
@@ -3102,6 +3122,11 @@ interface Store {
    *  `keepViewModeAcrossNotes` is on, so every note in the pane follows the
    *  pane's current mode instead of its own. Ephemeral, like `paneModes`. */
   paneStickyModes: Record<string, PaneMode>
+  /** Right-hand panels per pane, per note path, read only while
+   *  `keepPanelsAcrossNotes` is off. Ephemeral like `paneModes`, and in the
+   *  store for the same reasons: it survives EditorPane remounts, follows a
+   *  rename, and a split inherits it. (#794) */
+  panePanels: Record<string, PanePanelsByPath>
   noteListCursorIndex: number
   connectionsCursorIndex: number
   /** Row cursor for the Outline panel, mirroring the connections cursor so
@@ -3413,6 +3438,7 @@ interface Store {
   saveHarperVaultState: (next: HarperVaultState) => Promise<void>
   setLooseMathDelimiters: (on: boolean) => void
   setKeepViewModeAcrossNotes: (on: boolean) => void
+  setKeepPanelsAcrossNotes: (on: boolean) => void
   setDefaultPaneMode: (mode: PaneMode) => void
   setSyncTitleHeadingOnRename: (on: boolean) => void
   setMarkdownSnippets: (on: boolean) => void
@@ -3628,6 +3654,11 @@ interface Store {
   /** Update sizes on a split node (for divider drag). */
   resizeSplit: (splitId: string, sizes: number[]) => void
   setPaneModeForPath: (paneId: string, path: string | null, mode: PaneMode) => void
+  updatePanePanelsForPath: (
+    paneId: string,
+    path: string | null,
+    update: (panels: PanePanelsState) => PanePanelsState
+  ) => void
   /** Pin a tab within a specific pane — sticks it to the left of the
    *  strip and protects it from "Close Others" / "Close Tabs to Right". */
   pinTabInPane: (paneId: string, path: string) => void
@@ -4257,6 +4288,9 @@ function rewriteFolderWorkspace(
     ),
     paneModes: Object.fromEntries(
       Object.entries(s.paneModes).map(([pane, modes]) => [pane, remap(modes, (mode) => mode)])
+    ),
+    panePanels: Object.fromEntries(
+      Object.entries(s.panePanels).map(([pane, panels]) => [pane, remap(panels, (open) => open)])
     ),
     noteRefs: Object.fromEntries(
       Object.entries(s.noteRefs).flatMap(([owner, ref]) => {
@@ -5525,6 +5559,7 @@ export const useStore = create<Store>((set, get) => {
   harperLintConfig: loadPrefs().harperLintConfig,
   looseMathDelimiters: loadPrefs().looseMathDelimiters,
   keepViewModeAcrossNotes: loadPrefs().keepViewModeAcrossNotes,
+  keepPanelsAcrossNotes: loadPrefs().keepPanelsAcrossNotes,
   defaultPaneMode: loadPrefs().defaultPaneMode,
   syncTitleHeadingOnRename: loadPrefs().syncTitleHeadingOnRename,
   markdownSnippets: loadPrefs().markdownSnippets,
@@ -5621,6 +5656,7 @@ export const useStore = create<Store>((set, get) => {
   sidebarCursorIndex: 0,
   dateNavExpanded: [],
   paneModes: {},
+  panePanels: {},
   paneStickyModes: {},
   noteListCursorIndex: 0,
   connectionsCursorIndex: 0,
@@ -8419,6 +8455,10 @@ export const useStore = create<Store>((set, get) => {
     set({ keepViewModeAcrossNotes: on })
     savePrefs(collectPrefs(get()))
   },
+  setKeepPanelsAcrossNotes: (on) => {
+    set({ keepPanelsAcrossNotes: on })
+    savePrefs(collectPrefs(get()))
+  },
   setDefaultPaneMode: (mode) => {
     set({ defaultPaneMode: mode })
     savePrefs(collectPrefs(get()))
@@ -9865,6 +9905,11 @@ export const useStore = create<Store>((set, get) => {
           ...cur.paneModes,
           [newLeaf.id]: cur.paneModes[sourcePaneId ?? targetPaneId] ?? {}
         },
+        // Same for per-note panels: the note keeps its panels in the new pane.
+        panePanels: {
+          ...cur.panePanels,
+          [newLeaf.id]: cur.panePanels[sourcePaneId ?? targetPaneId] ?? {}
+        },
         ...activeFieldsFrom(layout, newLeaf.id, nextContents, nextDirty)
       }
     })
@@ -9880,6 +9925,15 @@ export const useStore = create<Store>((set, get) => {
       // every note in this pane follow it.
       paneStickyModes: { ...s.paneStickyModes, [paneId]: mode }
     })),
+
+  updatePanePanelsForPath: (paneId, path, update) => {
+    // `update` runs out here, not inside `set`: the panel toggles do store
+    // writes of their own in it (closing a preview, moving focus), and a
+    // write nested in a `set` callback is clobbered when that callback returns.
+    const current = get().panePanels[paneId] ?? {}
+    const next = panePanelsWithPath(current, path, update(panePanelsForPath(current, path)))
+    if (next !== current) set((s) => ({ panePanels: { ...s.panePanels, [paneId]: next } }))
+  },
 
   resizeSplit: (splitId, sizes) => {
     set((s) => {

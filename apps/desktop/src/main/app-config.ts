@@ -364,6 +364,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'auto_calendar_panel',
     comment: 'auto-show the calendar for daily / weekly notes'
   },
+  keepPanelsAcrossNotes: {
+    section: 'view',
+    tomlKey: 'keep_panels_across_notes',
+    comment: 'true = Connections / Outline / Comments / Calendar stay as set while you switch notes; false = each note remembers its own panels for the session'
+  },
   calendarWeekStart: {
     section: 'view',
     tomlKey: 'calendar_week_start',

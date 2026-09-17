@@ -1496,6 +1496,15 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       run: () => getState().setTabsEnabled(!getState().tabsEnabled)
     },
     {
+      id: 'editor.keep-panels.toggle',
+      title: getState().keepPanelsAcrossNotes
+        ? 'Remember Panels per Note'
+        : 'Keep Panels When Switching Notes',
+      category: 'Editor',
+      keywords: 'panels connections outline comments calendar sticky per note remember switch',
+      run: () => getState().setKeepPanelsAcrossNotes(!getState().keepPanelsAcrossNotes)
+    },
+    {
       id: 'editor.word-wrap.toggle',
       title: getState().wordWrap ? 'Disable Word Wrap' : 'Enable Word Wrap',
       category: 'Editor',

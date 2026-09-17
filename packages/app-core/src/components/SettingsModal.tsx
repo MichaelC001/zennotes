@@ -516,6 +516,8 @@ export function SettingsModal(): JSX.Element {
   const keepViewModeAcrossNotes = useStore((s) => s.keepViewModeAcrossNotes);
   const defaultPaneMode = useStore((s) => s.defaultPaneMode);
   const setDefaultPaneMode = useStore((s) => s.setDefaultPaneMode);
+  const keepPanelsAcrossNotes = useStore((s) => s.keepPanelsAcrossNotes);
+  const setKeepPanelsAcrossNotes = useStore((s) => s.setKeepPanelsAcrossNotes);
   const setKeepViewModeAcrossNotes = useStore(
     (s) => s.setKeepViewModeAcrossNotes,
   );
@@ -2047,6 +2049,30 @@ export function SettingsModal(): JSX.Element {
           ],
         },
         {
+          id: "keep-view-mode",
+          title: "Keep view mode when switching notes",
+          description:
+            "Stay in the current Edit / Split / Preview mode when you open another note.",
+          keywords: ["view mode", "edit", "split", "preview", "sticky", "switch", "per note"],
+        },
+        {
+          id: "keep-panels",
+          title: "Keep panels when switching notes",
+          description:
+            "Connections, Outline, Comments and Calendar stay as you set them, or each note remembers its own.",
+          keywords: [
+            "panels",
+            "connections",
+            "outline",
+            "comments",
+            "calendar",
+            "sticky",
+            "per note",
+            "remember",
+            "switch",
+          ],
+        },
+        {
           id: "sync-title-heading-on-rename",
           title: "Sync title heading on rename",
           description:
@@ -2477,6 +2503,8 @@ export function SettingsModal(): JSX.Element {
             "render-tables",
             "harper-enabled",
             "harper-dialect",
+            "keep-view-mode",
+            "keep-panels",
             "sync-title-heading-on-rename",
             "markdown-overrides",
             "heading-level-labels",
@@ -2608,6 +2636,13 @@ export function SettingsModal(): JSX.Element {
                   value={keepViewModeAcrossNotes}
                   settingId="keep-view-mode"
                   onChange={setKeepViewModeAcrossNotes}
+                />
+                <ToggleRow
+                  label="Keep panels when switching notes"
+                  description="Connections, Outline, Comments and Calendar stay as you set them while you move between notes. Turn off and each note remembers its own panels until you quit, so a note you have not opened yet starts with none."
+                  value={keepPanelsAcrossNotes}
+                  settingId="keep-panels"
+                  onChange={setKeepPanelsAcrossNotes}
                 />
                 <ToggleRow
                   label="Sync title heading on rename"
