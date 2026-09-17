@@ -9,6 +9,7 @@ import {
 } from '@codemirror/autocomplete'
 import { Prec } from '@codemirror/state'
 import { EditorView, keymap, type KeyBinding } from '@codemirror/view'
+import { wikilinkDisplayTextEdit } from './cm-wikilink-tail'
 
 /**
  * macOS AltGr-style keyboard layouts (custom Ukelele `.keylayout` files, a
@@ -168,7 +169,36 @@ export const completionNavKeymap = Prec.highest(
         return true
       }
 
+      // `|` on a note, asset or database suggestion: the picker's own tip says
+      // "Type | to change display text", so the key takes the highlighted
+      // suggestion, the way Enter does, and leaves the caret behind a `|`
+      // inside the brackets. It used to be plain text, which threw the
+      // highlighted name away and left `[[|]]`. (#804)
+      if (isTypedPipe(event)) {
+        if (completionStatus(view.state) !== 'active') return false
+        const completion = selectedCompletion(view.state) as
+          | { _kind?: string; _target?: string }
+          | null
+        if (completion?._kind !== 'wikilink' || completion._target == null) return false
+        if (!acceptCompletion(view)) return false
+        view.dispatch(wikilinkDisplayTextEdit(view.state, view.state.selection.main.head))
+        event.preventDefault()
+        event.stopPropagation()
+        return true
+      }
+
       return false
     }
   })
 )
+
+/**
+ * A `|` that is being typed, on any layout. It is Shift+\ on a US keyboard,
+ * Option+7 on a German Mac and AltGr+< on a German PC (which reports Ctrl and
+ * Alt together), so the modifiers cannot be pinned down; only a bare Ctrl or a
+ * Cmd chord is certainly not text.
+ */
+function isTypedPipe(event: KeyboardEvent): boolean {
+  if (event.key !== '|' || event.metaKey) return false
+  return !(event.ctrlKey && !event.altKey)
+}

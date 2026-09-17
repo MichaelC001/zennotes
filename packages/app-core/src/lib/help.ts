@@ -377,7 +377,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: '[[ opens the wikilink picker',
     body:
-      'Type `[[` and the wikilink picker lists matching notes, images, PDFs, SVGs, and CSV databases; keep typing to narrow it. ↑/↓ or Ctrl+J/K (Ctrl+N/P) move through the suggestions, Enter inserts the link, Tab inserts it and keeps the caret inside the brackets so you can add a `#heading`, and Esc closes the picker. Type `|` after the target to set the display text, or `/path/to/note` for an exact link; picking a database drops a `[[Database]]` link that opens its grid.'
+      'Type `[[` and the wikilink picker lists matching notes, images, PDFs, SVGs, and CSV databases; keep typing to narrow it. ↑/↓ or Ctrl+J/K (Ctrl+N/P) move through the suggestions, Enter inserts the link, Tab inserts it and keeps the caret inside the brackets so you can add a `#heading`, and Esc closes the picker. Press `|` to take the highlighted suggestion and start its display text: you get `[[Note|]]` with the caret behind the `|` (to give display text to a name that is not in the list, press Esc first). Type `/path/to/note` for an exact link; picking a database drops a `[[Database]]` link that opens its grid.'
   },
   {
     title: 'Templates scaffold new notes',
