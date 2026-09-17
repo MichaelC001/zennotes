@@ -273,6 +273,7 @@ import {
 import { resolveCommentAnchor, selectionToCommentAnchor } from '../lib/comments'
 import { ZEN_OPEN_EDITOR_CONTEXT_MENU_EVENT } from '../lib/keyboard-context-menu'
 import { armMiddleClickPasteGuard } from '../lib/middle-click-paste-guard'
+import { isWorkspaceVirtualTabPath } from '../lib/workspace-tabs'
 import {
   CALENDAR_PANEL_CLOSED,
   calendarPanelOnNote,
@@ -1062,16 +1063,24 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     })
   }, [focusedPanel, setConnectionPreview, setFocusedPanel])
 
+  // The panel shortcuts act on the note this pane is showing. On a view tab
+  // (Trash, Tasks, Help, an asset) there is no panel to see, and the toggle
+  // used to flip the pane's panels anyway, so they turned up on the next note
+  // without having been asked for. Keyed on the kind of tab, not on loaded
+  // content, so a shortcut pressed while a note is still loading is kept.
+  const panelShortcutsApply =
+    isActive && activeTab != null && !isWorkspaceVirtualTabPath(activeTab)
+
   // ⌘2 toggles the connections panel — only the active pane responds so
   // the shortcut targets the pane the user is currently working in.
   useEffect(() => {
-    if (!isActive) return
+    if (!panelShortcutsApply) return
     const handler = (): void => {
       toggleConnectionsPanel()
     }
     window.addEventListener('zen:toggle-connections', handler)
     return () => window.removeEventListener('zen:toggle-connections', handler)
-  }, [isActive, toggleConnectionsPanel])
+  }, [panelShortcutsApply, toggleConnectionsPanel])
 
   // Mirror `set clipboard=unnamed`: when enabled, Vim yank/delete/change also
   // copy to the system clipboard, and `p` / `P` paste from it. The patch is
@@ -1128,32 +1137,32 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   // `zen:toggle-outline` — routed only to the active pane, same pattern
   // as the connections toggle.
   useEffect(() => {
-    if (!isActive) return
+    if (!panelShortcutsApply) return
     const handler = (): void => {
       toggleOutlinePanel()
     }
     window.addEventListener('zen:toggle-outline', handler)
     return () => window.removeEventListener('zen:toggle-outline', handler)
-  }, [isActive, toggleOutlinePanel])
+  }, [panelShortcutsApply, toggleOutlinePanel])
 
   useEffect(() => {
-    if (!isActive) return
+    if (!panelShortcutsApply) return
     const handler = (): void => {
       toggleCommentsPanel()
     }
     window.addEventListener('zen:toggle-comments', handler)
     return () => window.removeEventListener('zen:toggle-comments', handler)
-  }, [isActive, toggleCommentsPanel])
+  }, [panelShortcutsApply, toggleCommentsPanel])
 
   // `zen:toggle-calendar` — same active-pane routing as the panels above.
   useEffect(() => {
-    if (!isActive) return
+    if (!panelShortcutsApply) return
     const handler = (): void => {
       toggleCalendarPanel()
     }
     window.addEventListener('zen:toggle-calendar', handler)
     return () => window.removeEventListener('zen:toggle-calendar', handler)
-  }, [isActive, toggleCalendarPanel])
+  }, [panelShortcutsApply, toggleCalendarPanel])
 
   // `zen:close-right-panel` — Esc (when a right panel is focused) or the
   // "Close right panel" command dismiss whichever right-hand panel is open in
