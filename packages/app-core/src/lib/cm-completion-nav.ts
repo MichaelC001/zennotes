@@ -1,7 +1,9 @@
 import {
   acceptCompletion,
+  closeCompletion,
   completionKeymap,
   completionStatus,
+  currentCompletions,
   moveCompletionSelection,
   selectedCompletion
 } from '@codemirror/autocomplete'
@@ -22,9 +24,32 @@ import { EditorView, keymap, type KeyBinding } from '@codemirror/view'
  * cm-vim-default-keymap.ts.) Use this in place of the raw `completionKeymap`.
  */
 const MAC_TEXT_ENTRY_CHORDS = new Set(['Alt-`', 'Alt-i'])
-export const completionKeymapForEditor: readonly KeyBinding[] = completionKeymap.filter(
-  (binding) => !(typeof binding.mac === 'string' && MAC_TEXT_ENTRY_CHORDS.has(binding.mac))
-)
+
+/**
+ * Escape is spent on a completion only when there is a popup to close (#803).
+ *
+ * The stock `closeCompletion` reports the key handled whenever any source is
+ * not inactive, and every typed character puts all sources into "pending" for
+ * the `activateOnTyping` debounce (about 100ms) even when none of them will
+ * match. This keymap runs at `Prec.highest`, ahead of the Vim plugin, so an
+ * Escape pressed right after the last character was swallowed by a completion
+ * nobody could see and Vim stayed in insert mode: easy to hit with Escape on
+ * Caps Lock, and what kept a block `I` in insert mode for fast typists.
+ *
+ * A pending query is still cancelled, so a popup cannot open after the mode
+ * has changed, but the key then falls through to whoever owns it.
+ */
+export function closeVisibleCompletion(view: EditorView): boolean {
+  const visible = currentCompletions(view.state).length > 0
+  closeCompletion(view)
+  return visible
+}
+
+export const completionKeymapForEditor: readonly KeyBinding[] = completionKeymap
+  .filter((binding) => !(typeof binding.mac === 'string' && MAC_TEXT_ENTRY_CHORDS.has(binding.mac)))
+  .map((binding) =>
+    binding.key === 'Escape' ? { ...binding, run: closeVisibleCompletion } : binding
+  )
 
 /**
  * Mount this instead of spreading the bindings into an editor's general
