@@ -55,13 +55,21 @@ export async function readUndoHistory(
 ): Promise<string | null> {
   const file = undoHistoryFile(baseDir, vaultIdentity, notePath)
   if (!file) return null
+  // One handle for the size check and the read. Checking the path and then
+  // reading the path again would let the file be swapped in between.
+  let handle: fsp.FileHandle
   try {
-    const stat = await fsp.stat(file)
-    if (stat.size > MAX_UNDO_HISTORY_BYTES) return null
-    return await fsp.readFile(file, 'utf8')
+    handle = await fsp.open(file, 'r')
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw err
+  }
+  try {
+    const stat = await handle.stat()
+    if (stat.size > MAX_UNDO_HISTORY_BYTES) return null
+    return await handle.readFile('utf8')
+  } finally {
+    await handle.close()
   }
 }
 
