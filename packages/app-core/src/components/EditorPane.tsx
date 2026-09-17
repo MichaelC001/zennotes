@@ -14,7 +14,8 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState
+  useState,
+  type SetStateAction
 } from 'react'
 import {
   Annotation,
@@ -98,7 +99,7 @@ import {
 } from '../lib/cm-heading-fold'
 import { tags as t } from '@lezer/highlight'
 import { autocompletion } from '@codemirror/autocomplete'
-import { useStore } from '../store'
+import { MIN_RIGHT_PANEL_WIDTH, useStore } from '../store'
 import type { LineNumberMode } from '../store'
 import type { PaneEdge, PaneLeaf } from '../lib/pane-layout'
 import { findLeaf, inferPaneDropEdge } from '../lib/pane-layout'
@@ -283,9 +284,19 @@ import {
 import { latestPathRewriteSeq, pathAfterRewrites } from '../lib/path-rewrites'
 import { minimalTextChange } from '../lib/minimal-text-change'
 import {
+  MIN_NOTE_WIDTH,
+  MIN_SPLIT_NOTE_WIDTH,
+  bumpSidePanel,
+  fitSidePanels,
+  syncSidePanelRecency,
+  type SidePanelId
+} from '../lib/side-panel-fit'
+import { TuckedPanelsRail } from './TuckedPanelsRail'
+import {
   CALENDAR_PANEL_CLOSED,
   calendarPanelOnNote,
-  calendarPanelOnToggle
+  calendarPanelOnToggle,
+  type CalendarPanelState
 } from '../lib/calendar-panel-auto'
 import { usePanePanels } from '../lib/use-pane-panels'
 import {
@@ -909,11 +920,51 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     comments: commentsOpen,
     calendar: calendarPanel,
     calendarAutoOpenAllowed,
-    setConnectionsOpen,
-    setOutlineOpen,
-    setCommentsOpen,
-    setCalendarPanel
+    setConnectionsOpen: setConnectionsOpenRaw,
+    setOutlineOpen: setOutlineOpenRaw,
+    setCommentsOpen: setCommentsOpenRaw,
+    setCalendarPanel: setCalendarPanelRaw
   } = usePanePanels(paneId, activeTab)
+  // Which panel was asked for last, most recent first. In a pane too narrow
+  // for all the open panels the most recent ones are shown and the rest are
+  // tucked into a rail, see lib/side-panel-fit. (#805)
+  const [sidePanelRecency, setSidePanelRecency] = useState<SidePanelId[]>([])
+  const tuckedSidePanelsRef = useRef<readonly SidePanelId[]>([])
+  const revealSidePanel = useCallback((id: SidePanelId) => {
+    setSidePanelRecency((recency) => bumpSidePanel(recency, id))
+  }, [])
+  // Opening a panel that is already open has to bring it forward, or code that
+  // asks for a tucked panel (jumping to a comment opens Comments) would get
+  // nothing. A panel that goes from closed to open is picked up by the effect
+  // that keeps the recency in line with what is open.
+  const setConnectionsOpen = useCallback(
+    (next: SetStateAction<boolean>) => {
+      if (next === true) revealSidePanel('connections')
+      setConnectionsOpenRaw(next)
+    },
+    [revealSidePanel, setConnectionsOpenRaw]
+  )
+  const setOutlineOpen = useCallback(
+    (next: SetStateAction<boolean>) => {
+      if (next === true) revealSidePanel('outline')
+      setOutlineOpenRaw(next)
+    },
+    [revealSidePanel, setOutlineOpenRaw]
+  )
+  const setCommentsOpen = useCallback(
+    (next: SetStateAction<boolean>) => {
+      if (next === true) revealSidePanel('comments')
+      setCommentsOpenRaw(next)
+    },
+    [revealSidePanel, setCommentsOpenRaw]
+  )
+  const setCalendarPanel = useCallback(
+    (next: SetStateAction<CalendarPanelState>) => {
+      if (typeof next !== 'function' && next.open) revealSidePanel('calendar')
+      setCalendarPanelRaw(next)
+    },
+    [revealSidePanel, setCalendarPanelRaw]
+  )
   const [activeOutlineLine, setActiveOutlineLine] = useState<number | null>(null)
   const calendarOpen = calendarPanel.open
   // The calendar panel is a date navigator. It auto-opens while the pane shows
@@ -1075,6 +1126,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   }, [])
 
   const toggleConnectionsPanel = useCallback(() => {
+    // Open but tucked away: the key that would close it shows it instead.
+    if (tuckedSidePanelsRef.current.includes('connections')) {
+      revealSidePanel('connections')
+      return
+    }
     setConnectionsOpen((open) => {
       const next = !open
       if (!next) {
@@ -1085,7 +1141,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       }
       return next
     })
-  }, [focusedPanel, setConnectionPreview, setFocusedPanel])
+  }, [focusedPanel, revealSidePanel, setConnectionPreview, setConnectionsOpen, setFocusedPanel])
 
   // The panel shortcuts act on the note this pane is showing. On a view tab
   // (Trash, Tasks, Help, an asset) there is no panel to see, and the toggle
@@ -1117,16 +1173,19 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   }, [vimYankToClipboard])
 
   const toggleOutlinePanel = useCallback(() => {
+    if (tuckedSidePanelsRef.current.includes('outline')) return revealSidePanel('outline')
     setOutlineOpen((open) => !open)
-  }, [])
+  }, [revealSidePanel, setOutlineOpen])
 
   const toggleCommentsPanel = useCallback(() => {
+    if (tuckedSidePanelsRef.current.includes('comments')) return revealSidePanel('comments')
     setCommentsOpen((open) => !open)
-  }, [])
+  }, [revealSidePanel, setCommentsOpen])
 
   const toggleCalendarPanel = useCallback(() => {
+    if (tuckedSidePanelsRef.current.includes('calendar')) return revealSidePanel('calendar')
     setCalendarPanel(calendarPanelOnToggle)
-  }, [])
+  }, [revealSidePanel, setCalendarPanel])
 
 
   const applyPaneMode = useCallback((nextMode: PaneMode) => {
@@ -3413,6 +3472,68 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     [comments]
   )
 
+  // The note keeps a readable width; the panels share what is left. (#805)
+  const paneRowRef = useRef<HTMLDivElement | null>(null)
+  const [paneRowWidth, setPaneRowWidth] = useState(0)
+  useLayoutEffect(() => {
+    const row = paneRowRef.current
+    if (!row) return
+    const measure = (): void => setPaneRowWidth(Math.round(row.getBoundingClientRect().width))
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(row)
+    return () => observer.disconnect()
+  }, [])
+  const sidePanelWidths = useStore((s) => s.panelWidths)
+  const openSidePanels = useMemo(() => {
+    const open: SidePanelId[] = []
+    if (!content || zenMode) return open
+    if (connectionsOpen && isActive) open.push('connections')
+    if (commentsOpen) open.push('comments')
+    if (outlineOpen) open.push('outline')
+    if (calendarOpen && calendarAvailable) open.push('calendar')
+    return open
+  }, [
+    calendarAvailable,
+    calendarOpen,
+    commentsOpen,
+    connectionsOpen,
+    content,
+    isActive,
+    outlineOpen,
+    zenMode
+  ])
+  useEffect(() => {
+    setSidePanelRecency((recency) => syncSidePanelRecency(recency, openSidePanels))
+  }, [openSidePanels])
+  const sidePanelFit = useMemo(
+    () =>
+      fitSidePanels(
+        paneRowWidth,
+        mode === 'split' ? MIN_SPLIT_NOTE_WIDTH : MIN_NOTE_WIDTH,
+        // Synced here as well as in the effect above, so the render in which
+        // a panel opens already treats it as the most recent one.
+        syncSidePanelRecency(sidePanelRecency, openSidePanels).map((id) => ({
+          id,
+          width: sidePanelWidths[id]
+        })),
+        MIN_RIGHT_PANEL_WIDTH
+      ),
+    [mode, openSidePanels, paneRowWidth, sidePanelRecency, sidePanelWidths]
+  )
+  tuckedSidePanelsRef.current = sidePanelFit.tucked
+  const sidePanelShown = (id: SidePanelId): boolean =>
+    openSidePanels.includes(id) && !sidePanelFit.tucked.includes(id)
+  // A panel that is tucked away while it has the keyboard would leave the keys
+  // going nowhere, so they go back to the note.
+  useEffect(() => {
+    if (!isActive) return
+    if (!focusedPanel || !(sidePanelFit.tucked as readonly string[]).includes(focusedPanel)) return
+    setFocusedPanel('editor')
+    viewRef.current?.focus()
+  }, [focusedPanel, isActive, setFocusedPanel, sidePanelFit.tucked])
+
   const toolbar = useMemo(() => {
     if (!content) return null
     const folder = content.folder
@@ -3420,6 +3541,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     // Markdown-specific controls (edit/split/preview, connections, comments,
     // outline, calendar, PDF export) don't apply to a canvas.
     const isDrawing = isExcalidrawPath(content.path)
+    // A tucked panel is open, but the button brings it forward rather than
+    // closing it, so its tooltip has to say so.
+    const tucked = sidePanelFit.tucked
     return (
       <div className="flex items-center gap-1 text-ink-500">
         {!isDrawing && (
@@ -3427,7 +3551,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             <ToggleGroup mode={mode} onChange={applyPaneMode} />
             <div className="mx-2 h-4 w-px bg-paper-300" />
             <IconBtn
-              title={connectionsOpen ? 'Hide connections' : 'Show connections'}
+              title={
+                connectionsOpen && !tucked.includes('connections')
+                  ? 'Hide connections'
+                  : 'Show connections'
+              }
               active={connectionsOpen}
               onClick={toggleConnectionsPanel}
             >
@@ -3435,7 +3563,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             </IconBtn>
             <IconBtn
               title={
-                commentsOpen
+                commentsOpen && !tucked.includes('comments')
                   ? 'Hide comments'
                   : `Show comments${openCommentCount > 0 ? ` (${openCommentCount})` : ''}`
               }
@@ -3445,7 +3573,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               <FeedbackIcon />
             </IconBtn>
             <IconBtn
-              title={outlineOpen ? 'Hide outline' : 'Show outline'}
+              title={outlineOpen && !tucked.includes('outline') ? 'Hide outline' : 'Show outline'}
               active={outlineOpen}
               onClick={toggleOutlinePanel}
             >
@@ -3453,7 +3581,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             </IconBtn>
             {calendarAvailable && (
               <IconBtn
-                title={calendarOpen ? 'Hide calendar' : 'Show calendar'}
+                title={
+                  calendarOpen && !tucked.includes('calendar') ? 'Hide calendar' : 'Show calendar'
+                }
                 active={calendarOpen}
                 onClick={toggleCalendarPanel}
               >
@@ -3505,6 +3635,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     calendarAvailable,
     calendarOpen,
     toggleCalendarPanel,
+    sidePanelFit.tucked,
     trashActive,
     deleteActivePermanently,
     archiveActive,
@@ -3905,7 +4036,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           {toolbar}
         </header>
       )}
-      <div className="min-h-0 min-w-0 flex flex-1">
+      <div ref={paneRowRef} className="min-h-0 min-w-0 flex flex-1">
         <div
           ref={paneBodyRef}
           className={[
@@ -4066,26 +4197,39 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             />
           )}
         </div>
-        {content && connectionsOpen && isActive && !zenMode && <ConnectionsPanel note={content} />}
-        {content && commentsOpen && !zenMode && (
+        {content && sidePanelShown('connections') && (
+          <ConnectionsPanel note={content} fitWidth={sidePanelFit.widths.connections} />
+        )}
+        {content && sidePanelShown('comments') && (
           <CommentsPanel
             note={content}
+            fitWidth={sidePanelFit.widths.comments}
             draft={commentDraft}
             onCaptureDraft={captureCommentDraft}
             onClearDraft={clearCommentDraft}
             onJump={jumpToComment}
           />
         )}
-        {content && outlineOpen && !zenMode && (
+        {content && sidePanelShown('outline') && (
           <OutlinePanel
             note={content}
+            fitWidth={sidePanelFit.widths.outline}
             activeLine={activeOutlineLine}
             onJump={jumpToOutlineLine}
           />
         )}
-        {content && calendarOpen && calendarAvailable && !zenMode && (
-          <CalendarPanel note={content} />
+        {content && sidePanelShown('calendar') && (
+          <CalendarPanel note={content} fitWidth={sidePanelFit.widths.calendar} />
         )}
+        <TuckedPanelsRail
+          tucked={sidePanelFit.tucked}
+          onReveal={(id) => {
+            revealSidePanel(id)
+            // The button that was clicked is gone once its panel is showing,
+            // and focus must not fall to the page body with it.
+            viewRef.current?.focus()
+          }}
+        />
       </div>
       {content &&
         showEditor &&
