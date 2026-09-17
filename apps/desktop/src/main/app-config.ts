@@ -367,7 +367,7 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
   keepPanelsAcrossNotes: {
     section: 'view',
     tomlKey: 'keep_panels_across_notes',
-    comment: 'true = Connections / Outline / Comments / Calendar stay as set while you switch notes; false = each note remembers its own panels for the session'
+    comment: 'true = Connections / Outline / Comments / Calendar stay as set while you switch notes; false = each note remembers its own panels (saved with the workspace, so they survive a restart)'
   },
   calendarWeekStart: {
     section: 'view',

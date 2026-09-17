@@ -230,8 +230,12 @@ import {
 } from './lib/pane-mode'
 import {
   panePanelsForPath,
+  panePanelsForSnapshot,
+  panePanelsFromSnapshot,
   panePanelsWithPath,
+  prunePanePanels,
   type PanePanelsByPath,
+  type PanePanelsSnapshot,
   type PanePanelsState
 } from './lib/pane-panels'
 import {
@@ -2480,6 +2484,10 @@ interface WorkspaceSnapshot {
   sidebarOpen: boolean
   noteListOpen: boolean
   selectedTags: string[]
+  /** Per-note panels, by pane id then note path, so a note comes back after a
+   *  restart with the panels it was left with. Optional: snapshots written
+   *  before 2.52 do not have it. (#794) */
+  panePanels?: PanePanelsSnapshot
   /** Epoch ms of the last write — drives newest-wins when the synced file and
    *  the local cache disagree (e.g. after working in this vault on another
    *  machine). (#292) */
@@ -3123,9 +3131,10 @@ interface Store {
    *  pane's current mode instead of its own. Ephemeral, like `paneModes`. */
   paneStickyModes: Record<string, PaneMode>
   /** Right-hand panels per pane, per note path, read only while
-   *  `keepPanelsAcrossNotes` is off. Ephemeral like `paneModes`, and in the
-   *  store for the same reasons: it survives EditorPane remounts, follows a
-   *  rename, and a split inherits it. (#794) */
+   *  `keepPanelsAcrossNotes` is off. In the store for the same reasons as
+   *  `paneModes`: it survives EditorPane remounts, follows a rename, and a
+   *  split inherits it. Unlike `paneModes` it is also written to the workspace
+   *  snapshot, so it outlives a restart. (#794) */
   panePanels: Record<string, PanePanelsByPath>
   noteListCursorIndex: number
   connectionsCursorIndex: number
@@ -5177,6 +5186,12 @@ export const useStore = create<Store>((set, get) => {
           ? snapshot.noteListOpen
           : get().noteListOpen,
       selectedTags: normalizeWorkspaceTags(snapshot.selectedTags),
+      // Replaced, not merged: whatever the store held belonged to the panes of
+      // the vault that was open before this one.
+      panePanels: panePanelsFromSnapshot(
+        snapshot.panePanels,
+        new Set(allLeaves(ensured.layout).map((leaf) => leaf.id))
+      ),
       collapsedFolders,
       workspaceRestored: true,
       ...active
@@ -5225,6 +5240,15 @@ export const useStore = create<Store>((set, get) => {
         activePaneId: ensured.activePaneId,
         ...activeFieldsFrom(ensured.layout, ensured.activePaneId, s.noteContents, s.noteDirty)
       }
+    })
+    // The same listing retires panel memory for notes that are gone (deleted on
+    // another machine, or outside the app), so the synced snapshot cannot
+    // collect dead paths forever. Same empty-listing guard as above. (#794)
+    set((s) => {
+      if (s.notes.length === 0) return {}
+      const existing = new Set(s.notes.map((note) => note.path))
+      const pruned = prunePanePanels(s.panePanels, (path) => existing.has(path))
+      return pruned === s.panePanels ? {} : { panePanels: pruned }
     })
     const s = get()
     // Folder rows did not exist while the workspace painted, so collapse the
@@ -9932,7 +9956,11 @@ export const useStore = create<Store>((set, get) => {
     // write nested in a `set` callback is clobbered when that callback returns.
     const current = get().panePanels[paneId] ?? {}
     const next = panePanelsWithPath(current, path, update(panePanelsForPath(current, path)))
-    if (next !== current) set((s) => ({ panePanels: { ...s.panePanels, [paneId]: next } }))
+    if (next === current) return
+    set((s) => ({ panePanels: { ...s.panePanels, [paneId]: next } }))
+    // Panels are part of the workspace snapshot, and nothing else about the
+    // workspace changes when one is toggled, so the save is asked for here.
+    get().persistWorkspace()
   },
 
   resizeSplit: (splitId, sizes) => {
@@ -10735,7 +10763,11 @@ export const useStore = create<Store>((set, get) => {
       view: state.view,
       sidebarOpen,
       noteListOpen,
-      selectedTags: state.selectedTags
+      selectedTags: state.selectedTags,
+      panePanels: panePanelsForSnapshot(
+        state.panePanels,
+        new Set(allLeaves(state.paneLayout).map((leaf) => leaf.id))
+      )
     })
   },
 

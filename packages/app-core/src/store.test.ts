@@ -738,6 +738,88 @@ describe('local vault shortcuts', () => {
   })
 })
 
+describe('per-note panels survive a restart (#794)', () => {
+  const vault = { root: '/Users/test/Notes', name: 'Notes' }
+  const WORKSPACE_KEY = 'zen:workspace:v1'
+
+  function installVault(paths: string[]): void {
+    installZen({
+      openLocalVault: vi.fn().mockResolvedValue(vault),
+      listNotes: vi.fn().mockResolvedValue(paths.map((path) => makeNote(path, path))),
+      readNote: vi.fn().mockImplementation((path: string) => Promise.resolve(makeNote(path, path)))
+    })
+  }
+
+  /** A fresh store module over the SAME localStorage: what a relaunch is. */
+  async function relaunch() {
+    vi.resetModules()
+    const mod = await import('./store')
+    lastLoadedStore = mod as unknown as typeof lastLoadedStore
+    return mod
+  }
+
+  function savedSnapshot(): { panePanels?: Record<string, Record<string, { outline?: boolean }>> } {
+    return JSON.parse(localStorage.getItem(WORKSPACE_KEY) ?? '{}')[vault.root] ?? {}
+  }
+
+  it('saves them with the workspace and brings them back on the next launch', async () => {
+    installVault(['inbox/A.md', 'inbox/B.md'])
+    const first = await loadStore()
+    await first.useStore.getState().openLocalVault(vault.root)
+    await first.useStore.getState().selectNote('inbox/A.md')
+    const paneId = first.useStore.getState().activePaneId
+
+    // Toggling a panel is the only thing that changed, so it has to ask for
+    // the save itself: no tab or layout change is coming to do it.
+    first.useStore
+      .getState()
+      .updatePanePanelsForPath(paneId, 'inbox/A.md', (panels) => ({ ...panels, outline: true }))
+    expect(savedSnapshot().panePanels?.[paneId]?.['inbox/A.md']?.outline).toBe(true)
+
+    const second = await relaunch()
+    await second.useStore.getState().openLocalVault(vault.root)
+    const restored = second.useStore.getState()
+    expect(restored.activePaneId).toBe(paneId)
+    expect(restored.panePanels[paneId]['inbox/A.md'].outline).toBe(true)
+    expect(restored.panePanels[paneId]['inbox/B.md']).toBeUndefined()
+  })
+
+  it('forgets a note that was deleted while the app was closed', async () => {
+    installVault(['inbox/A.md', 'inbox/B.md'])
+    const first = await loadStore()
+    await first.useStore.getState().openLocalVault(vault.root)
+    await first.useStore.getState().selectNote('inbox/A.md')
+    const paneId = first.useStore.getState().activePaneId
+    for (const path of ['inbox/A.md', 'inbox/B.md']) {
+      first.useStore
+        .getState()
+        .updatePanePanelsForPath(paneId, path, (panels) => ({ ...panels, outline: true }))
+    }
+
+    installVault(['inbox/A.md'])
+    const second = await relaunch()
+    await second.useStore.getState().openLocalVault(vault.root)
+    expect(Object.keys(second.useStore.getState().panePanels[paneId])).toEqual(['inbox/A.md'])
+  })
+
+  it('opens a snapshot written before 2.52, which has no panels in it', async () => {
+    installVault(['inbox/A.md'])
+    const first = await loadStore()
+    await first.useStore.getState().openLocalVault(vault.root)
+    await first.useStore.getState().selectNote('inbox/A.md')
+    // In the app the workspace effect asks for this save after a tab change.
+    first.useStore.getState().persistWorkspace()
+    const all = JSON.parse(localStorage.getItem(WORKSPACE_KEY) ?? '{}')
+    delete all[vault.root].panePanels
+    localStorage.setItem(WORKSPACE_KEY, JSON.stringify(all))
+
+    const second = await relaunch()
+    await second.useStore.getState().openLocalVault(vault.root)
+    expect(second.useStore.getState().panePanels).toEqual({})
+    expect(second.useStore.getState().selectedPath).toBe('inbox/A.md')
+  })
+})
+
 describe('asset undo', () => {
   it('records deleted assets and restores them on undo', async () => {
     const deleted = {

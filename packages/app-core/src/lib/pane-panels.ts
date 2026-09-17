@@ -7,10 +7,9 @@ import { CALENDAR_PANEL_CLOSED, type CalendarPanelState } from './calendar-panel
  * Panels have always been sticky per pane, Obsidian-style: open the Outline
  * and it stays while you browse. With "Keep panels when switching notes" off,
  * a pane instead remembers one of these per note, the way it already remembers
- * each note's Edit / Split / Preview mode (#794). Like those modes the memory
- * is for the session only. It never belongs in the note, which is a plain
- * file; if it should outlive a restart, the workspace snapshot that already
- * restores tabs and layout is where it goes.
+ * each note's Edit / Split / Preview mode (#794). The memory never belongs in
+ * the note, which is a plain file. It outlives a restart the way tabs and
+ * layout do, through the workspace snapshot: see `panePanelsForSnapshot`.
  */
 export interface PanePanelsState {
   connections: boolean
@@ -91,5 +90,108 @@ export function panePanelsWithPath(
     return rest
   }
   if (current && samePanePanels(current, panels)) return panelsByPath
-  return { ...panelsByPath, [path]: panels }
+  // Re-inserted rather than updated in place, so key order is "least recently
+  // set first" and the snapshot limit below knows which notes to let go of.
+  const { [path]: _previous, ...rest } = panelsByPath
+  return { ...rest, [path]: panels }
+}
+
+/** How many notes per pane the workspace snapshot remembers panels for. */
+export const PANE_PANELS_SNAPSHOT_LIMIT = 200
+
+/** One note's panels as the snapshot file spells them: only what is set. */
+export interface PanePanelsSnapshotEntry {
+  connections?: true
+  outline?: true
+  comments?: true
+  calendar?: { open: true; auto?: true }
+  calendarDismissed?: true
+}
+
+export type PanePanelsSnapshot = Record<string, Record<string, PanePanelsSnapshotEntry>>
+
+/**
+ * The per-note panels worth writing to the workspace snapshot: panes that still
+ * exist, per pane only the most recently set notes, and per note only what is
+ * open. The snapshot syncs with the vault, so it has to stay small however long
+ * the vault lives.
+ */
+export function panePanelsForSnapshot(
+  panePanels: Record<string, PanePanelsByPath>,
+  paneIds: ReadonlySet<string>,
+  limit: number = PANE_PANELS_SNAPSHOT_LIMIT
+): PanePanelsSnapshot {
+  const out: PanePanelsSnapshot = {}
+  for (const [paneId, byPath] of Object.entries(panePanels)) {
+    if (!paneIds.has(paneId)) continue
+    const entries = Object.entries(byPath)
+    if (entries.length === 0) continue
+    out[paneId] = Object.fromEntries(
+      entries.slice(-limit).map(([path, panels]): [string, PanePanelsSnapshotEntry] => [
+        path,
+        {
+          ...(panels.connections && { connections: true }),
+          ...(panels.outline && { outline: true }),
+          ...(panels.comments && { comments: true }),
+          ...(panels.calendar.open && {
+            calendar: panels.calendar.auto ? { open: true, auto: true } : { open: true }
+          }),
+          ...(panels.calendarDismissed && { calendarDismissed: true })
+        }
+      ])
+    )
+  }
+  return out
+}
+
+/**
+ * Per-note panels read back from a workspace snapshot. The snapshot is a file
+ * that travels between machines and app versions and can be edited by hand, so
+ * nothing in it is trusted: panes the layout does not have are dropped, every
+ * field is coerced to its type, and a note with nothing to remember is not kept.
+ */
+export function panePanelsFromSnapshot(
+  raw: unknown,
+  paneIds: ReadonlySet<string>
+): Record<string, PanePanelsByPath> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, PanePanelsByPath> = {}
+  for (const [paneId, rawByPath] of Object.entries(raw)) {
+    if (!paneIds.has(paneId)) continue
+    if (!rawByPath || typeof rawByPath !== 'object' || Array.isArray(rawByPath)) continue
+    let byPath: PanePanelsByPath = {}
+    for (const [path, rawPanels] of Object.entries(rawByPath)) {
+      if (!path || !rawPanels || typeof rawPanels !== 'object') continue
+      const value = rawPanels as Record<string, unknown>
+      const calendar = (value.calendar ?? {}) as Record<string, unknown>
+      byPath = panePanelsWithPath(byPath, path, {
+        connections: value.connections === true,
+        outline: value.outline === true,
+        comments: value.comments === true,
+        calendar: { open: calendar.open === true, auto: calendar.open === true && calendar.auto === true },
+        calendarDismissed: value.calendarDismissed === true
+      })
+    }
+    if (Object.keys(byPath).length > 0) out[paneId] = byPath
+  }
+  return out
+}
+
+/**
+ * The map without the notes `keep` turns down, used once the note listing is
+ * in to retire memory for notes that were deleted somewhere else. Returns the
+ * same map when nothing was dropped.
+ */
+export function prunePanePanels(
+  panePanels: Record<string, PanePanelsByPath>,
+  keep: (path: string) => boolean
+): Record<string, PanePanelsByPath> {
+  let changed = false
+  const out: Record<string, PanePanelsByPath> = {}
+  for (const [paneId, byPath] of Object.entries(panePanels)) {
+    const kept = Object.entries(byPath).filter(([path]) => keep(path))
+    if (kept.length !== Object.keys(byPath).length) changed = true
+    if (kept.length > 0) out[paneId] = Object.fromEntries(kept)
+  }
+  return changed ? out : panePanels
 }

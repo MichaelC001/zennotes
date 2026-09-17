@@ -2639,7 +2639,7 @@ export function SettingsModal(): JSX.Element {
                 />
                 <ToggleRow
                   label="Keep panels when switching notes"
-                  description="Connections, Outline, Comments and Calendar stay as you set them while you move between notes. Turn off and each note remembers its own panels until you quit, so a note you have not opened yet starts with none."
+                  description="Connections, Outline, Comments and Calendar stay as you set them while you move between notes. Turn off and each note remembers its own panels, across restarts too, so a note you have not opened yet starts with none."
                   value={keepPanelsAcrossNotes}
                   settingId="keep-panels"
                   onChange={setKeepPanelsAcrossNotes}
