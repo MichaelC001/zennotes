@@ -95,6 +95,11 @@ import {
   type DragPayload,
 } from "../lib/dnd";
 import { setSidebarDragPayload } from "../lib/sidebar-drag-preview";
+import {
+  useStableSidebarIdxBase,
+  type SidebarIdxCounter,
+  type SidebarIdxPass,
+} from "../lib/sidebar-idx-counter";
 import { manualOrderCompare, parentDirOf } from "../lib/manual-order";
 import { resolveSystemFolderLabels } from "../lib/system-folder-labels";
 import { assetTabPath } from "../lib/asset-tabs";
@@ -2788,8 +2793,11 @@ export function Sidebar(): JSX.Element {
 
   const isSidebarFocused = focusedPanel === "sidebar";
   // Mutable counter reset on each render — assigns sequential data-sidebar-idx to each item.
-  const idxCounter = useRef<{ value: number }>({ value: 0 });
+  const idxCounter = useRef<SidebarIdxCounter>({ value: 0 });
   idxCounter.current.value = 0;
+  // New on every render, so the tree components below can tell "Sidebar
+  // rendered me" from "I re-rendered alone" (see useStableSidebarIdxBase).
+  const idxPass: SidebarIdxPass = {};
   const vimCursor = isSidebarFocused ? sidebarCursorIndex : -1;
   const vaultHeaderIdx = canSwitchVaults ? idxCounter.current.value++ : -1;
   const vaultHeaderVimHighlight = vimCursor === vaultHeaderIdx;
@@ -3344,6 +3352,7 @@ export function Sidebar(): JSX.Element {
             onSelectItem={handleSidebarItemSelect}
             dragPayloadForItem={dragPayloadForItem}
             idxCounter={idxCounter.current}
+            idxPass={idxPass}
             vimCursor={vimCursor}
             sidebarFocused={isSidebarFocused}
             groupByKind={groupByKind}
@@ -3426,6 +3435,7 @@ export function Sidebar(): JSX.Element {
                 onSelectItem={handleSidebarItemSelect}
                 dragPayloadForItem={dragPayloadForItem}
                 idxCounter={idxCounter.current}
+                idxPass={idxPass}
                 vimCursor={vimCursor}
                 sidebarFocused={isSidebarFocused}
                 groupByKind={groupByKind}
@@ -3459,6 +3469,7 @@ export function Sidebar(): JSX.Element {
               onSelectItem={handleSidebarItemSelect}
               dragPayloadForItem={dragPayloadForItem}
               idxCounter={idxCounter.current}
+              idxPass={idxPass}
               vimCursor={vimCursor}
               sidebarFocused={isSidebarFocused}
               groupByKind={groupByKind}
@@ -4402,9 +4413,7 @@ function countNotesInTree(node: TreeNode): number {
 /* ---------- Tree rendering ---------- */
 
 /** Mutable counter threaded through tree rendering for sequential data-sidebar-idx attributes. */
-interface IdxCounter {
-  value: number;
-}
+type IdxCounter = SidebarIdxCounter;
 
 interface TreeRenderProps {
   folder: NoteFolder;
@@ -4440,6 +4449,7 @@ interface TreeRenderProps {
   dragPayloadForItem: (item: SidebarSelectionItem) => DragPayload;
   /** Sequential index counter for vim navigation data attributes. */
   idxCounter: IdxCounter;
+  idxPass: SidebarIdxPass;
   /** The highlighted cursor index when sidebar is vim-focused (-1 if not focused). */
   vimCursor: number;
   /** Whether the sidebar currently owns keyboard focus. */
@@ -4472,6 +4482,7 @@ function FolderTreeContents({
   onSelectItem,
   dragPayloadForItem,
   idxCounter,
+  idxPass,
   vimCursor,
   sidebarFocused,
   groupByKind,
@@ -4481,6 +4492,9 @@ function FolderTreeContents({
   tree: TreeNode;
   depth: number;
 } & TreeRenderProps): JSX.Element {
+  // This component re-renders alone whenever its entry limit resets, which a
+  // sidebar focus change does every time.
+  const childIdxPass = useStableSidebarIdxBase(idxCounter, idxPass);
   const entries = useMemo(
     () => getTreeRenderEntries(tree, showNotes, sortComparator, groupByKind),
     [tree, showNotes, sortComparator, groupByKind],
@@ -4564,6 +4578,7 @@ function FolderTreeContents({
               onSelectItem={onSelectItem}
               dragPayloadForItem={dragPayloadForItem}
               idxCounter={idxCounter}
+              idxPass={childIdxPass}
               vimCursor={vimCursor}
               sidebarFocused={sidebarFocused}
               groupByKind={groupByKind}
@@ -4644,6 +4659,7 @@ function FolderTreeRoot({
   onSelectItem,
   dragPayloadForItem,
   idxCounter,
+  idxPass,
   vimCursor,
   sidebarFocused,
   groupByKind,
@@ -4657,6 +4673,7 @@ function FolderTreeRoot({
    *  revealed on hover. Used to surface a quick "+" for Quick Notes. */
   headerAction?: JSX.Element;
 } & TreeRenderProps): JSX.Element {
+  const childIdxPass = useStableSidebarIdxBase(idxCounter, idxPass);
   const rootKey = `${folder}:`;
   const isCollapsed = collapsed.has(rootKey);
   const total = countNotesInTree(tree);
@@ -4750,6 +4767,7 @@ function FolderTreeRoot({
           onSelectItem={onSelectItem}
           dragPayloadForItem={dragPayloadForItem}
           idxCounter={idxCounter}
+          idxPass={childIdxPass}
           vimCursor={vimCursor}
           sidebarFocused={sidebarFocused}
           groupByKind={groupByKind}
@@ -4783,11 +4801,13 @@ function SubTree({
   onSelectItem,
   dragPayloadForItem,
   idxCounter,
+  idxPass,
   vimCursor,
   sidebarFocused,
   groupByKind,
   showSidebarChevrons,
 }: { node: TreeNode; depth: number } & TreeRenderProps): JSX.Element {
+  const childIdxPass = useStableSidebarIdxBase(idxCounter, idxPass);
   const key = `${folder}:${node.subpath}`;
   const isCollapsed = collapsed.has(key);
   const iconOption = resolveFolderIconOption(
@@ -4971,6 +4991,7 @@ function SubTree({
                   onSelectItem={onSelectItem}
                   dragPayloadForItem={dragPayloadForItem}
                   idxCounter={idxCounter}
+                  idxPass={childIdxPass}
                   vimCursor={vimCursor}
                   sidebarFocused={sidebarFocused}
                   groupByKind={groupByKind}
