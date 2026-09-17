@@ -560,14 +560,21 @@ async function main() {
 
     await clickExpression(client, lineExpression('Cursor marker position'))
     await press(client, 'End')
-    const cursorBefore = await evaluate(
+    // A caret that exists but has not been laid out yet reports a rect of all
+    // zeros. Both samples wait for a real box: right after Edit mode rebuilds
+    // the editor, the first poll could land in that gap and read left: 0.
+    const cursorBefore = await until(
       client,
       `(() => {
         const line = document.querySelector('.cm-activeLine')
         const cursor = document.querySelector('.cm-cursor-primary, .cm-cursor')
         if (!line || !cursor) return null
-        return { text: line.textContent, left: Math.round(cursor.getBoundingClientRect().left) }
-      })()`
+        const rect = cursor.getBoundingClientRect()
+        if (rect.height === 0) return null
+        return { text: line.textContent, left: Math.round(rect.left) }
+      })()`,
+      5000,
+      80
     )
     await pressMod(client, '6', 'Digit6')
     const previewReady = await until(
@@ -593,7 +600,9 @@ async function main() {
         const line = document.querySelector('.cm-activeLine')
         const cursor = document.querySelector('.cm-cursor-primary, .cm-cursor')
         if (!line || !cursor || !(line.textContent ?? '').includes('Cursor marker position')) return null
-        return { text: line.textContent, left: Math.round(cursor.getBoundingClientRect().left) }
+        const rect = cursor.getBoundingClientRect()
+        if (rect.height === 0) return null
+        return { text: line.textContent, left: Math.round(rect.left) }
       })()`,
       5000,
       80
