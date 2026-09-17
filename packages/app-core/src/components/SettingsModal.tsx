@@ -132,6 +132,8 @@ import { promptApp } from "../lib/prompt-requests";
 import { isImeComposing } from "../lib/ime";
 import { RemoteWorkspaceProfileModal } from "./RemoteWorkspaceProfileModal";
 import { Button } from "./ui/Button";
+import { trapDialogTab, useDialogFocus } from "./ui/Modal";
+import { isTouchPrimaryDevice } from "../lib/cm-vim-ime-guard";
 import {
   ignoredKeyTokenFromEvent,
   setIgnoredKeysRecorderActive,
@@ -1192,6 +1194,14 @@ export function SettingsModal(): JSX.Element {
   };
 
   const ref = useRef<HTMLDivElement | null>(null);
+  const navSearchRef = useRef<HTMLInputElement | null>(null);
+  // Settings draws its own backdrop and panel, so it never got the focus
+  // handling the shared Modal shell gives every other dialog: the keyboard
+  // stayed on the editor underneath and typing edited the note behind the
+  // open window. Opening lands on the settings search, the first thing a
+  // keyboard user reaches for. On a touch device a focused input would raise
+  // the on-screen keyboard over the panel, so the panel takes focus instead.
+  useDialogFocus(ref, isTouchPrimaryDevice() ? ref : navSearchRef);
   const settingsSearchHighlightTimerRef = useRef<number | null>(null);
   const [initialSettingsTarget] = useState(consumeSettingsTarget);
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(
@@ -5258,8 +5268,13 @@ export function SettingsModal(): JSX.Element {
       >
         <div
           ref={ref}
-          className="grid h-[min(92vh,980px)] w-[min(1120px,96vw)] grid-cols-[252px_minmax(0,1fr)] overflow-hidden rounded-3xl border border-paper-300/70 bg-paper-100 shadow-float"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Settings"
+          tabIndex={-1}
+          className="grid h-[min(92vh,980px)] w-[min(1120px,96vw)] grid-cols-[252px_minmax(0,1fr)] overflow-hidden rounded-3xl border border-paper-300/70 bg-paper-100 shadow-float outline-none"
           onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => trapDialogTab(e, ref.current)}
         >
           <aside className="flex min-h-0 flex-col border-r border-paper-300/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))]">
             <div className="border-b border-paper-300/55 px-4 py-4">
@@ -5269,6 +5284,7 @@ export function SettingsModal(): JSX.Element {
               <div className="mt-3">
                 <label className="relative block">
                   <input
+                    ref={navSearchRef}
                     value={navQuery}
                     onChange={(e) => setNavQuery(e.target.value)}
                     placeholder="Search settings…"
