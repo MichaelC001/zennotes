@@ -42,7 +42,6 @@ import type { AssetMeta, ImportedAsset, NoteComment, NoteFolder } from '@shared/
 import { registerNoteEditor } from '../lib/note-editor-context'
 import { noteEditorHostExtension } from '../lib/editor-host'
 import {
-  history,
   historyKeymap,
   indentWithTab,
   moveLineDown,
@@ -274,6 +273,11 @@ import { resolveCommentAnchor, selectionToCommentAnchor } from '../lib/comments'
 import { ZEN_OPEN_EDITOR_CONTEXT_MENU_EVENT } from '../lib/keyboard-context-menu'
 import { armMiddleClickPasteGuard } from '../lib/middle-click-paste-guard'
 import { isWorkspaceVirtualTabPath } from '../lib/workspace-tabs'
+import {
+  noteUndoHistoryFor,
+  noteUndoHistoryKey,
+  setAsideNoteUndoHistory
+} from '../lib/note-undo-history'
 import {
   CALENDAR_PANEL_CLOSED,
   calendarPanelOnNote,
@@ -984,6 +988,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const tabSizeCompartmentRef = useRef<Compartment | null>(null)
   // history() lives in a compartment so we can reset undo history on a note
   // switch — otherwise Cmd+Z crosses notes and overwrites the current one (#247).
+  // The outgoing note's history is set aside first and handed back when that
+  // note returns, see lib/note-undo-history. (#793)
   const historyCompartmentRef = useRef<Compartment | null>(null)
   const ignoreEditorScrollRef = useRef(false)
   const ignorePreviewScrollRef = useRef(false)
@@ -1708,6 +1714,15 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         setSelectionCommentAction(null)
         const existingView = viewRef.current
         rememberCurrentTabScroll()
+        // The editor is torn down whenever the pane shows something that is
+        // not a note (Trash, Tasks, an asset), so this is a way of leaving a
+        // note too. (#793)
+        if (existingView && viewPathRef.current) {
+          setAsideNoteUndoHistory(
+            noteUndoHistoryKey(useStore.getState().vault?.root, viewPathRef.current),
+            existingView.state
+          )
+        }
         if (
           existingView &&
           useStore.getState().editorViewRef === existingView
@@ -1764,7 +1779,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           vimImeGuard(
             () => useStore.getState().vimBlockImeInNormalMode && !isTouchPrimaryDevice()
           ),
-          historyCompartment.of(history()),
+          historyCompartment.of(
+            noteUndoHistoryFor(
+              initialPath ? noteUndoHistoryKey(s0.vault?.root, initialPath) : null,
+              initialBody
+            )
+          ),
           drawSelectionCompartment.of(
             drawSelection({ cursorBlinkRate: s0.cursorBlink ? 1200 : 0 })
           ),
@@ -2125,6 +2145,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       }
     }
     const dispatchStartedAt = performance.now()
+    const vaultRoot = useStore.getState().vault?.root
+    // While the editor still holds the outgoing note: its undo history is set
+    // aside under that note, to be handed back when it returns. (#793)
+    if (pathChanged && viewPathRef.current) {
+      setAsideNoteUndoHistory(noteUndoHistoryKey(vaultRoot, viewPathRef.current), view.state)
+    }
     viewPathRef.current = nextPath
     refreshNoteEditingLock(view)
     view.dispatch({
@@ -2144,11 +2170,17 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     if (pathChanged) {
       // Switching notes: also drop the previous note's undo history so undo
       // can't cross the boundary at all. There's no "clear history" command, so
-      // remove the history field then re-add it empty. (#247)
+      // remove the history field then re-add it (#247): empty, or holding the
+      // incoming note's own history if it was set aside and the note still
+      // reads as it did then (#793).
       const historyCompartment = historyCompartmentRef.current
       if (historyCompartment) {
         view.dispatch({ effects: historyCompartment.reconfigure([]) })
-        view.dispatch({ effects: historyCompartment.reconfigure(history()) })
+        view.dispatch({
+          effects: historyCompartment.reconfigure(
+            noteUndoHistoryFor(nextPath ? noteUndoHistoryKey(vaultRoot, nextPath) : null, nextBody)
+          )
+        })
       }
     }
     if (pathChanged && pendingJumpLocation?.path !== nextPath) {

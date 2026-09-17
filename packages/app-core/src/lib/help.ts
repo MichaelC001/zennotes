@@ -222,7 +222,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Tabs and splits are first-class',
     body:
-      'Each editor pane can hold multiple tabs. Split the current tab right or down, move between panes with pane motions, switch the active note between Edit, Split, and Preview from commands, and, if you hide tabs, use the buffer switcher shortcut or `:buffers`. The active tab also has a full keyboard context menu, so actions like Close Others, Close Tabs to the Right, Pin Tab, Pin as Reference, Open in Floating Window, and Reveal in Finder stay accessible without the mouse. If you disable Vim mode, use the command palette instead.'
+      'Each editor pane can hold multiple tabs. Split the current tab right or down, move between panes with pane motions, switch the active note between Edit, Split, and Preview from commands, and, if you hide tabs, use the buffer switcher shortcut or `:buffers`. The active tab also has a full keyboard context menu, so actions like Close Others, Close Tabs to the Right, Pin Tab, Pin as Reference, Open in Floating Window, and Reveal in Finder stay accessible without the mouse. If you disable Vim mode, use the command palette instead. Each note keeps its own undo history while the app is open: switch tabs, or close a note and open it again, and `u` / Mod+Z (and redo) still walk through the edits you made to it. If the note was changed somewhere else in the meantime (another pane, sync, an external editor), it starts a clean history, because the old undo steps would no longer fit the text.'
   },
   {
     title: 'Context menus are part of the keyboard model',
