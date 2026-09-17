@@ -130,6 +130,11 @@ import companyLogo from "../assets/lumary-labs-logo.svg";
 import { confirmApp } from "../lib/confirm-requests";
 import { promptApp } from "../lib/prompt-requests";
 import { isImeComposing } from "../lib/ime";
+import {
+  isSettingsFindKey,
+  settingsSearchFieldAction,
+  settingsSearchStep,
+} from "../lib/settings-search-keys";
 import { RemoteWorkspaceProfileModal } from "./RemoteWorkspaceProfileModal";
 import { Button } from "./ui/Button";
 import { trapDialogTab, useDialogFocus } from "./ui/Modal";
@@ -5225,6 +5230,40 @@ export function SettingsModal(): JSX.Element {
     null;
   const visibleCategory = visibleSearchResult?.category ?? null;
 
+  // What a click on a search result does, shared with the keyboard. (#108)
+  const openSearchResult = (result: (typeof searchResults)[number]): void => {
+    setActiveCategory(result.category.id);
+    setActiveSearchResultId(result.id);
+    if (result.type === "setting") {
+      // If the target lives on a sub-tab, open that sub-tab first
+      // so the element is mounted before we scroll to it.
+      const subTabId = result.category.subTabs?.find(
+        (tab) => tab.searchIds?.includes(result.targetId),
+      )?.id;
+      if (subTabId) {
+        setActiveSubTabByCategory((prev) => ({
+          ...prev,
+          [result.category.id]: subTabId,
+        }));
+      }
+      jumpToSettingsSearchTarget(result.targetId);
+    }
+  };
+  const onSearchFieldKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+  ): void => {
+    if (isImeComposing(e)) return;
+    const action = settingsSearchFieldAction(e);
+    if (!action) return;
+    const current = searchResults.findIndex(
+      (result) => result.id === visibleSearchResult?.id,
+    );
+    const target = searchResults[settingsSearchStep(action, current, searchResults.length)];
+    if (!target) return;
+    e.preventDefault();
+    openSearchResult(target);
+  };
+
   // When the visible search result is a setting that lives on a sub-tab, open
   // that sub-tab so the matched control is actually shown — not only when the
   // result is clicked, but also when search auto-selects it. Mirrors the
@@ -5246,6 +5285,14 @@ export function SettingsModal(): JSX.Element {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleSettingResultId]);
+
+  // Walking the results from the search field can pick a row the list has
+  // scrolled away from; keep the picked row on screen.
+  const selectedResultRef = useRef<HTMLButtonElement>(null);
+  const selectedResultId = visibleSearchResult?.id ?? null;
+  useEffect(() => {
+    selectedResultRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [selectedResultId]);
 
   // Header summary follows the active sub-tab so it describes what's actually on
   // screen, instead of always showing the category's first-sub-tab blurb.
@@ -5274,7 +5321,23 @@ export function SettingsModal(): JSX.Element {
           tabIndex={-1}
           className="grid h-[min(92vh,980px)] w-[min(1120px,96vw)] grid-cols-[252px_minmax(0,1fr)] overflow-hidden rounded-3xl border border-paper-300/70 bg-paper-100 shadow-float outline-none"
           onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => trapDialogTab(e, ref.current)}
+          onKeyDown={(e) => {
+            trapDialogTab(e, ref.current);
+            // Handled here, not on the window: the shortcut recorders capture
+            // keys at the window and must win while they are recording.
+            const target = e.target as HTMLElement;
+            const typing =
+              target.isContentEditable ||
+              /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
+            if (
+              !isSettingsFindKey(e, { vimMode, mac: isMacPlatform(), typing })
+            )
+              return;
+            e.preventDefault();
+            e.stopPropagation();
+            navSearchRef.current?.focus();
+            navSearchRef.current?.select();
+          }}
         >
           <aside className="flex min-h-0 flex-col border-r border-paper-300/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))]">
             <div className="border-b border-paper-300/55 px-4 py-4">
@@ -5287,6 +5350,7 @@ export function SettingsModal(): JSX.Element {
                     ref={navSearchRef}
                     value={navQuery}
                     onChange={(e) => setNavQuery(e.target.value)}
+                    onKeyDown={onSearchFieldKeyDown}
                     placeholder="Search settings…"
                     className="w-full rounded-xl border border-paper-300/70 bg-paper-50/75 px-3 py-2.5 pl-9 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent/45"
                   />
@@ -5362,25 +5426,9 @@ export function SettingsModal(): JSX.Element {
                     return (
                       <button
                         key={result.id}
+                        ref={selected ? selectedResultRef : undefined}
                         type="button"
-                        onClick={() => {
-                          setActiveCategory(result.category.id);
-                          setActiveSearchResultId(result.id);
-                          if (result.type === "setting") {
-                            // If the target lives on a sub-tab, open that sub-tab first
-                            // so the element is mounted before we scroll to it.
-                            const subTabId = result.category.subTabs?.find(
-                              (tab) => tab.searchIds?.includes(result.targetId),
-                            )?.id;
-                            if (subTabId) {
-                              setActiveSubTabByCategory((prev) => ({
-                                ...prev,
-                                [result.category.id]: subTabId,
-                              }));
-                            }
-                            jumpToSettingsSearchTarget(result.targetId);
-                          }
-                        }}
+                        onClick={() => openSearchResult(result)}
                         className={[
                           "w-full rounded-xl px-3 py-2.5 text-left transition-colors",
                           selected
