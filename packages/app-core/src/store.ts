@@ -228,6 +228,7 @@ import {
   type PaneMode,
   type PaneModesByPath
 } from './lib/pane-mode'
+import { appendPathRewrite, pathInScope, type PathRewrite } from './lib/path-rewrites'
 import {
   panePanelsForPath,
   panePanelsForSnapshot,
@@ -3136,6 +3137,10 @@ interface Store {
    *  split inherits it. Unlike `paneModes` it is also written to the workspace
    *  snapshot, so it outlives a restart. (#794) */
   panePanels: Record<string, PanePanelsByPath>
+  /** The latest renames, moves and deletes, appended in the same update that
+   *  rewrites the paths. An editor reads it to tell "my note has a new path"
+   *  from "I am being shown a different note". See lib/path-rewrites. */
+  recentPathRewrites: PathRewrite[]
   noteListCursorIndex: number
   connectionsCursorIndex: number
   /** Row cursor for the Outline panel, mirroring the connections cursor so
@@ -3845,8 +3850,7 @@ function trackNoteWrite<Args extends unknown[], Result>(
 }
 
 const folderReadVersions = new Map<string, number>()
-const mutationContains = (scope: string, path: string): boolean =>
-  scope === '' || scope.endsWith('/') ? path.startsWith(scope) : path === scope
+const mutationContains = pathInScope
 const folderReadVersion = (path: string): number =>
   [...folderReadVersions].reduce(
     (version, [prefix, value]) => (mutationContains(prefix, path) ? version + value : version),
@@ -4300,6 +4304,12 @@ function rewriteFolderWorkspace(
     ),
     panePanels: Object.fromEntries(
       Object.entries(s.panePanels).map(([pane, panels]) => [pane, remap(panels, (open) => open)])
+    ),
+    recentPathRewrites: appendPathRewrite(
+      s.recentPathRewrites,
+      s.vault?.root ?? '',
+      prefix,
+      nextPrefix
     ),
     noteRefs: Object.fromEntries(
       Object.entries(s.noteRefs).flatMap(([owner, ref]) => {
@@ -5681,6 +5691,7 @@ export const useStore = create<Store>((set, get) => {
   dateNavExpanded: [],
   paneModes: {},
   panePanels: {},
+  recentPathRewrites: [],
   paneStickyModes: {},
   noteListCursorIndex: 0,
   connectionsCursorIndex: 0,

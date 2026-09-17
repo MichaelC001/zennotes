@@ -203,6 +203,7 @@ import {
 } from '../lib/editor-hydration'
 import { recordRendererPerf } from '../lib/perf'
 import {
+  forgetTabScroll,
   rememberTabScroll,
   recallTabScroll,
   type TabScrollPosition
@@ -274,10 +275,13 @@ import { ZEN_OPEN_EDITOR_CONTEXT_MENU_EVENT } from '../lib/keyboard-context-menu
 import { armMiddleClickPasteGuard } from '../lib/middle-click-paste-guard'
 import { isWorkspaceVirtualTabPath } from '../lib/workspace-tabs'
 import {
+  followPathRewritesInNoteUndoHistories,
   noteUndoHistoryFor,
   noteUndoHistoryKey,
   setAsideNoteUndoHistory
 } from '../lib/note-undo-history'
+import { latestPathRewriteSeq, pathAfterRewrites } from '../lib/path-rewrites'
+import { minimalTextChange } from '../lib/minimal-text-change'
 import {
   CALENDAR_PANEL_CLOSED,
   calendarPanelOnNote,
@@ -1014,6 +1018,10 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
    * sync effect updates it whenever we swap the view's document.
    */
   const viewPathRef = useRef<string | null>(null)
+  /** The newest entry of the store's `recentPathRewrites` this editor has
+   *  accounted for. Only newer ones can explain a path change as a rename, so
+   *  an old rename can never make a real note switch look like one. */
+  const seenPathRewriteSeqRef = useRef(0)
 
   const updateSelectionCommentAction = useCallback((view: EditorView | null = viewRef.current): void => {
     setSelectionCommentAction(view ? getSelectionCommentAction(view) : null)
@@ -1767,6 +1775,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       richMarkdownDeferredRef.current = deferInitialRichMarkdown
       const stateStartedAt = performance.now()
       viewPathRef.current = initialPath
+      // A new editor starts on its note, so no earlier rename concerns it.
+      seenPathRewriteSeqRef.current = latestPathRewriteSeq(s0.recentPathRewrites)
+      followPathRewritesInNoteUndoHistories(s0.recentPathRewrites)
       const state = EditorState.create({
         doc: initialBody,
         extensions: [
@@ -2095,12 +2106,39 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     if (!view) return
     const nextPath = content?.path ?? null
     const nextBody = content?.body ?? ''
-    const pathChanged = viewPathRef.current !== nextPath
+    const prevPath = viewPathRef.current
+    const pathChanged = prevPath !== nextPath
+    const vaultRoot = useStore.getState().vault?.root ?? ''
+    // A new path is not always a new note. When the note on screen was renamed
+    // or moved (or its folder was), this editor is already showing the right
+    // document, and treating it as a tab switch threw the caret to the top,
+    // reset the scroll and dropped the undo history of a note nobody left.
+    // The store logs every such rewrite in the same update that changes the
+    // path, so a path change it explains is the same note.
+    const rewrites = useStore.getState().recentPathRewrites
+    const renamed =
+      pathChanged &&
+      prevPath !== null &&
+      nextPath !== null &&
+      pathAfterRewrites(rewrites, vaultRoot, prevPath, seenPathRewriteSeqRef.current) === nextPath
+    seenPathRewriteSeqRef.current = latestPathRewriteSeq(rewrites)
+    const switched = pathChanged && !renamed
     const bodyChanged =
-      pathChanged ||
+      switched ||
       view.state.doc.length !== nextBody.length ||
       view.state.doc.toString() !== nextBody
     if (!pathChanged && !bodyChanged) return
+    followPathRewritesInNoteUndoHistories(rewrites)
+    if (renamed && prevPath && nextPath) {
+      // The remembered caret and scroll follow the note. The restore effect
+      // below must not run for this path change at all: it re-applies the
+      // remembered offsets on the next frame too, by which time the rename's
+      // heading rewrite has usually shifted the text under them.
+      const remembered = recallTabScroll(prevPath)
+      if (remembered) rememberTabScroll(nextPath, remembered)
+      forgetTabScroll(prevPath)
+      lastRestoredPathRef.current = nextPath
+    }
     if (deferredLivePreviewTimerRef.current != null) {
       clearTimeout(deferredLivePreviewTimerRef.current)
       deferredLivePreviewTimerRef.current = null
@@ -2115,7 +2153,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     const livePreviewCompartment = livePreviewCompartmentRef.current
     const livePreviewEnabled = useStore.getState().livePreview
     const deferRichMarkdown =
-      pathChanged &&
+      switched &&
       nextBody.length >= LARGE_DOC_LIVE_PREVIEW_DEFER_CHARS &&
       !livePreviewEnabled &&
       !!markdownCompartment &&
@@ -2145,29 +2183,48 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       }
     }
     const dispatchStartedAt = performance.now()
-    const vaultRoot = useStore.getState().vault?.root
     // While the editor still holds the outgoing note: its undo history is set
     // aside under that note, to be handed back when it returns. (#793)
-    if (pathChanged && viewPathRef.current) {
-      setAsideNoteUndoHistory(noteUndoHistoryKey(vaultRoot, viewPathRef.current), view.state)
+    if (switched && prevPath) {
+      setAsideNoteUndoHistory(noteUndoHistoryKey(vaultRoot, prevPath), view.state)
     }
     viewPathRef.current = nextPath
     refreshNoteEditingLock(view)
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: nextBody },
-      annotations: [
-        noteEditingSync.of(true),
-        programmatic.of(true),
-        skipOrderedListRenumber.of(true),
-        // A programmatic swap (tab switch / external file sync) must never be
-        // undoable — otherwise Cmd+Z reverts the editor to the other document
-        // and the resulting change saves it over the current note (#247).
-        Transaction.addToHistory.of(false)
-      ],
-      effects: effects.length > 0 ? effects : undefined,
-      selection: pathChanged ? { anchor: 0 } : { anchor: clampedAnchor, head: clampedHead }
-    })
-    if (pathChanged) {
+    // The same note changed underneath the editor (another pane typed, a
+    // rename rewrote its title heading or a link, the file changed on disk):
+    // say only what changed. A whole-document replace makes CodeMirror map the
+    // caret and every undo step through "everything", which clamps the one and
+    // empties the other. Text with carriage returns keeps the whole replace:
+    // CodeMirror folds `\r\n` into one line break, so offsets in it are not
+    // offsets in the document.
+    const inPlaceChange =
+      !switched && bodyChanged && !nextBody.includes('\r')
+        ? minimalTextChange(view.state.doc.toString(), nextBody)
+        : null
+    if (bodyChanged || effects.length > 0) {
+      view.dispatch({
+        changes: !bodyChanged
+          ? undefined
+          : inPlaceChange ?? { from: 0, to: view.state.doc.length, insert: nextBody },
+        annotations: [
+          noteEditingSync.of(true),
+          programmatic.of(true),
+          skipOrderedListRenumber.of(true),
+          // A programmatic swap (tab switch / external file sync) must never be
+          // undoable: otherwise Cmd+Z reverts the editor to the other document
+          // and the resulting change saves it over the current note (#247).
+          Transaction.addToHistory.of(false)
+        ],
+        effects: effects.length > 0 ? effects : undefined,
+        // A small change carries the selection along by itself.
+        selection: switched
+          ? { anchor: 0 }
+          : inPlaceChange || !bodyChanged
+            ? undefined
+            : { anchor: clampedAnchor, head: clampedHead }
+      })
+    }
+    if (switched) {
       // Switching notes: also drop the previous note's undo history so undo
       // can't cross the boundary at all. There's no "clear history" command, so
       // remove the history field then re-add it (#247): empty, or holding the
@@ -2183,7 +2240,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         })
       }
     }
-    if (pathChanged && pendingJumpLocation?.path !== nextPath) {
+    if (switched && pendingJumpLocation?.path !== nextPath) {
       // Clear scroll on a genuine tab switch; the activation effect below
       // restores a remembered position afterward when there is one.
       view.scrollDOM.scrollTop = 0
@@ -2192,14 +2249,14 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     recordRendererPerf('editor.doc.sync', performance.now() - dispatchStartedAt, {
       chars: nextBody.length,
       deferred: deferRichMarkdown,
-      pathChanged
+      pathChanged: switched
     })
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         recordRendererPerf('editor.doc.paint-latency', performance.now() - dispatchStartedAt, {
           chars: nextBody.length,
           deferred: deferRichMarkdown,
-          pathChanged
+          pathChanged: switched
         })
       })
     })

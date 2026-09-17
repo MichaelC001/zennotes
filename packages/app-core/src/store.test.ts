@@ -1874,6 +1874,36 @@ describe('renameNote heading sync (#455)', () => {
     return { renameNote, writeNote, readNote }
   }
 
+  // The editor reads this to tell "my note has a new path" from "I am being
+  // shown another note", so it has to land with the path change itself.
+  it('logs the rename in the same update that rewrites the path', async () => {
+    installRename()
+    const { useStore } = await loadStore()
+    useStore.setState({ vault: { root: '/Users/test/Notes', name: 'Notes' } })
+    const seen: Array<{ tabHasNewPath: boolean; logged: boolean }> = []
+    const unsubscribe = useStore.subscribe((state) => {
+      const logged = state.recentPathRewrites.some(
+        (entry) => entry.from === 'inbox/Untitled.md' && entry.to === 'inbox/Groceries.md'
+      )
+      const tabHasNewPath = 'inbox/Groceries.md' in state.noteContents
+      if (logged || tabHasNewPath) seen.push({ tabHasNewPath, logged })
+    })
+    useStore.setState({
+      noteContents: { 'inbox/Untitled.md': { ...metaOf('inbox/Untitled.md', 'Untitled'), body: BODY } }
+    })
+
+    await useStore.getState().renameNote('inbox/Untitled.md', 'Groceries')
+    unsubscribe()
+
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every((update) => update.logged)).toBe(true)
+    expect(useStore.getState().recentPathRewrites.at(-1)).toMatchObject({
+      root: '/Users/test/Notes',
+      from: 'inbox/Untitled.md',
+      to: 'inbox/Groceries.md'
+    })
+  })
+
   it('retitles the heading of a note that is not open, straight on disk', async () => {
     const { writeNote, readNote } = installRename()
     const { useStore } = await loadStore()

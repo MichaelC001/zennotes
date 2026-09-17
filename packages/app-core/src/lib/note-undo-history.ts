@@ -1,5 +1,6 @@
 import { history, historyField, redoDepth, undoDepth } from '@codemirror/commands'
 import type { EditorState, Extension, Text } from '@codemirror/state'
+import { latestPathRewriteSeq, pathAfterRewrites, type PathRewrite } from './path-rewrites'
 
 /**
  * Undo history that outlives a tab switch. (#793)
@@ -70,7 +71,33 @@ export function noteUndoHistoryFor(key: string | null, body: string): Extension 
   return [history(), historyField.init(() => saved.history)]
 }
 
+let followedRewriteSeq = 0
+
+/**
+ * Move what was set aside along with its note: a note that is renamed or moved
+ * while it is not on screen (or whose folder is) keeps its history under the
+ * new path, and a deleted note gives its history up. `log` is the store's
+ * `recentPathRewrites`; entries already followed are skipped, so this is cheap
+ * to call before every lookup. The text check in `noteUndoHistoryFor` still
+ * has the last word, so a rename that also rewrote the note starts clean.
+ */
+export function followPathRewritesInNoteUndoHistories(log: readonly PathRewrite[]): void {
+  const latest = latestPathRewriteSeq(log)
+  if (latest <= followedRewriteSeq) return
+  for (const [key, entry] of [...setAside]) {
+    const split = key.indexOf('\n')
+    const root = key.slice(0, split)
+    const path = key.slice(split + 1)
+    const next = pathAfterRewrites(log, root, path, followedRewriteSeq)
+    if (next === path) continue
+    setAside.delete(key)
+    if (next !== null) setAside.set(noteUndoHistoryKey(root, next), entry)
+  }
+  followedRewriteSeq = latest
+}
+
 /** For tests: forget everything that was set aside. */
 export function clearNoteUndoHistories(): void {
   setAside.clear()
+  followedRewriteSeq = 0
 }

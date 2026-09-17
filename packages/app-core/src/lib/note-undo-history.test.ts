@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { redo, redoDepth, undo, undoDepth } from '@codemirror/commands'
 import { Compartment, EditorState, Transaction } from '@codemirror/state'
+import { minimalTextChange } from './minimal-text-change'
 import {
   NOTE_UNDO_HISTORY_LIMIT,
   clearNoteUndoHistories,
+  followPathRewritesInNoteUndoHistories,
   noteUndoHistoryFor,
   noteUndoHistoryKey,
   setAsideNoteUndoHistory
 } from './note-undo-history'
+import { appendPathRewrite, type PathRewrite } from './path-rewrites'
 
 const A = noteUndoHistoryKey('/vault', 'inbox/A.md')
 const B = noteUndoHistoryKey('/vault', 'inbox/B.md')
@@ -51,6 +54,25 @@ class Pane {
     this.state = this.state.update({ effects: this.compartment.reconfigure([]) }).state
     this.state = this.state.update({
       effects: this.compartment.reconfigure(noteUndoHistoryFor(key, body))
+    }).state
+  }
+
+  /**
+   * The note on screen got a new path and maybe new text (a rename that also
+   * rewrote its title heading): the editor stays on it and applies only what
+   * changed, outside the history.
+   */
+  renameTo(key: string, body: string, how: 'minimal' | 'whole document' = 'minimal'): void {
+    this.key = key
+    const before = this.state.doc.toString()
+    const changes =
+      how === 'minimal'
+        ? minimalTextChange(before, body) ?? undefined
+        : { from: 0, to: before.length, insert: body }
+    if (!changes) return
+    this.state = this.state.update({
+      changes,
+      annotations: Transaction.addToHistory.of(false)
     }).state
   }
 
@@ -184,6 +206,88 @@ describe('undo history across a tab switch (#793)', () => {
 
     // The most recently left ones are all still there.
     pane.show(noteUndoHistoryKey('/vault', 'inbox/10.md'), 'note 10 edited')
+    expect(undoDepth(pane.state)).toBe(1)
+  })
+})
+
+describe('undo history across a rename of the open note', () => {
+  const RENAMED = noteUndoHistoryKey('/vault', 'inbox/Roadmap 2027.md')
+
+  it('keeps working when the rename also rewrote the title heading', () => {
+    const pane = new Pane(A, '# Roadmap\n\nBody.')
+    pane.type(' One.')
+    pane.type(' Two.')
+    pane.renameTo(RENAMED, '# Roadmap 2027\n\nBody. One. Two.')
+
+    expect(undoDepth(pane.state)).toBe(2)
+    pane.undo()
+    expect(pane.text).toBe('# Roadmap 2027\n\nBody. One.')
+    pane.undo()
+    // The user's edits are gone; the rename's heading is not theirs to undo.
+    expect(pane.text).toBe('# Roadmap 2027\n\nBody.')
+    pane.redo()
+    expect(pane.text).toBe('# Roadmap 2027\n\nBody. One.')
+  })
+
+  // Why the change has to be minimal: replacing the whole document tells the
+  // history that every position it remembers is gone.
+  it('would lose the edits if the new text replaced the whole document', () => {
+    const pane = new Pane(A, '# Roadmap\n\nBody.')
+    pane.type(' One.')
+    pane.renameTo(RENAMED, '# Roadmap 2027\n\nBody. One.', 'whole document')
+    pane.undo()
+    expect(pane.text).not.toBe('# Roadmap 2027\n\nBody.')
+  })
+
+  it('still sets the history aside under the new name when the note is left', () => {
+    const pane = new Pane(A, '# Roadmap\n\nBody.')
+    pane.type(' One.')
+    pane.renameTo(RENAMED, '# Roadmap 2027\n\nBody. One.')
+    pane.show(B, 'beta')
+    expect(undoDepth(pane.state)).toBe(0)
+    pane.show(RENAMED, '# Roadmap 2027\n\nBody. One.')
+    pane.undo()
+    expect(pane.text).toBe('# Roadmap 2027\n\nBody.')
+  })
+})
+
+describe('set-aside histories follow notes that move while off screen', () => {
+  const rewrites = (...entries: Array<[string, string | null]>): PathRewrite[] =>
+    entries.reduce<PathRewrite[]>((log, [from, to]) => appendPathRewrite(log, '/vault', from, to), [])
+
+  it('finds the history under the new path after a move or a folder rename', () => {
+    const pane = new Pane(noteUndoHistoryKey('/vault', 'inbox/Work/Standup.md'), 'standup')
+    pane.type(' notes')
+    pane.show(B, 'beta')
+
+    followPathRewritesInNoteUndoHistories(rewrites(['inbox/Work/', 'inbox/Team/']))
+    pane.show(noteUndoHistoryKey('/vault', 'inbox/Team/Standup.md'), 'standup notes')
+    pane.undo()
+    expect(pane.text).toBe('standup')
+  })
+
+  it('drops the history of a deleted note, even if its path comes back', () => {
+    const pane = new Pane(A, 'alpha')
+    pane.type(' one')
+    pane.show(B, 'beta')
+
+    followPathRewritesInNoteUndoHistories(rewrites(['inbox/A.md', null]))
+    pane.show(A, 'alpha one')
+    expect(undoDepth(pane.state)).toBe(0)
+  })
+
+  it('applies each rewrite once, however often it is asked', () => {
+    const pane = new Pane(A, 'alpha')
+    pane.type(' one')
+    pane.show(B, 'beta')
+
+    // A -> C, and only later C -> A again: asking twice must not replay A -> C.
+    let log = rewrites(['inbox/A.md', 'inbox/C.md'])
+    followPathRewritesInNoteUndoHistories(log)
+    followPathRewritesInNoteUndoHistories(log)
+    log = appendPathRewrite(log, '/vault', 'inbox/C.md', 'inbox/A.md')
+    followPathRewritesInNoteUndoHistories(log)
+    pane.show(A, 'alpha one')
     expect(undoDepth(pane.state)).toBe(1)
   })
 })
