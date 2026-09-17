@@ -230,6 +230,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'keep_view_mode_across_notes',
     comment: 'true = stay in the current Edit / Split / Preview mode when opening another note; false = each note reopens in its own last mode'
   },
+  persistUndoHistory: {
+    section: 'editor',
+    tomlKey: 'persist_undo_history',
+    comment: "true = keep each note's undo history between launches, like Vim's undofile (stored with the app, never in the vault; holds deleted text; desktop only)"
+  },
   lineNumberMode: {
     section: 'editor',
     tomlKey: 'line_number_mode',

@@ -214,6 +214,12 @@ import type { DatabaseSidecar, DbRow } from "@shared/databases";
 import { VaultWatcher } from "./watcher";
 import { WindowVaultRegistry } from "./window-vaults";
 import { registerEphemeralRoot, isEphemeralRoot } from "./ephemeral-vaults";
+import {
+  clearUndoHistories,
+  pruneUndoHistories,
+  readUndoHistory,
+  writeUndoHistory,
+} from "./undo-history-store";
 import { renderTikz } from "./tikz";
 import { fetchLinkMetadata } from "./link-metadata";
 import { RemoteRequestError, RemoteServerClient } from "./remote/server-client";
@@ -3251,6 +3257,35 @@ function registerIpc(): void {
     await fsp.writeFile(path.join(dir, "workspace.json"), json, "utf8");
   });
 
+  // Undo history between launches (#793). It is keyed by the vault of the
+  // calling window, taken from main-process state like every other handler,
+  // and the note path only ever feeds a hash, so nothing the renderer sends
+  // can steer a read or a write outside <userData>/undo-history.
+  const undoHistoryVault = (): string => {
+    const v = requireVault();
+    return isRemoteWorkspaceActive()
+      ? `remote:${currentRemoteWorkspaceProfileId ?? ""}:${v.root}`
+      : v.root;
+  };
+  handle(
+    IPC.UNDO_HISTORY_READ,
+    async (_e, notePath: unknown): Promise<string | null> =>
+      await readUndoHistory(app.getPath("userData"), undoHistoryVault(), notePath),
+  );
+  handle(
+    IPC.UNDO_HISTORY_WRITE,
+    async (_e, notePath: unknown, json: unknown): Promise<void> =>
+      await writeUndoHistory(
+        app.getPath("userData"),
+        undoHistoryVault(),
+        notePath,
+        json,
+      ),
+  );
+  handle(IPC.UNDO_HISTORY_CLEAR, async (): Promise<void> => {
+    await clearUndoHistories(app.getPath("userData"));
+  });
+
   handle(IPC.VAULT_ROOT_CONTENT_HIDDEN, async () => {
     // Local-vault only: a remote workspace manages its own layout server-side.
     if (isRemoteWorkspaceActive()) return false;
@@ -5250,6 +5285,12 @@ app.whenReady().then(async () => {
   }
 
   await migrateLegacyRemoteWorkspaceSecrets();
+
+  // Saved undo histories (#793) expire and are capped per vault. Off the boot
+  // path: a slow or failing sweep must never delay the first window.
+  void pruneUndoHistories(app.getPath("userData")).catch((err) =>
+    console.error("[undo-history] prune failed", err),
+  );
 
   // Heal the legacy command name and upgrade existing desktop-owned shortcuts.
   // A PATH or runtime staging failure must not delay or fail app startup.

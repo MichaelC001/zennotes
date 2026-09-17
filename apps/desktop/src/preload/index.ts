@@ -115,7 +115,8 @@ const DESKTOP_CAPABILITIES: ZenCapabilities = {
   supportsCliInstall: process.platform === 'darwin' || process.platform === 'linux',
   supportsCustomTemplates: true,
   supportsCustomCodeLanguages: true,
-  supportsWorkflows: true
+  supportsWorkflows: true,
+  supportsUndoFile: true
 }
 
 const DESKTOP_APP_INFO: ZenAppInfo = {
@@ -422,6 +423,11 @@ const api: ZenBridge = {
     ipcRenderer.invoke(IPC.WORKSPACE_STATE_READ),
   writeWorkspaceState: (json: string): Promise<void> =>
     ipcRenderer.invoke(IPC.WORKSPACE_STATE_WRITE, json),
+  readNoteUndoHistory: (path: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.UNDO_HISTORY_READ, path),
+  writeNoteUndoHistory: (path: string, json: string | null): Promise<void> =>
+    ipcRenderer.invoke(IPC.UNDO_HISTORY_WRITE, path, json),
+  clearNoteUndoHistories: (): Promise<void> => ipcRenderer.invoke(IPC.UNDO_HISTORY_CLEAR),
   rootContentHiddenByInboxMode: (): Promise<boolean> =>
     ipcRenderer.invoke(IPC.VAULT_ROOT_CONTENT_HIDDEN),
 

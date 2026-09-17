@@ -1505,6 +1505,16 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       run: () => getState().setKeepPanelsAcrossNotes(!getState().keepPanelsAcrossNotes)
     },
     {
+      id: 'editor.persist-undo-history.toggle',
+      title: getState().persistUndoHistory
+        ? 'Stop Keeping Undo History After Quitting'
+        : 'Keep Undo History After Quitting',
+      category: 'Editor',
+      keywords: 'undofile undo redo history persistent restart quit vim',
+      when: () => !!window.zen?.getCapabilities?.().supportsUndoFile,
+      run: () => getState().setPersistUndoHistory(!getState().persistUndoHistory)
+    },
+    {
       id: 'editor.word-wrap.toggle',
       title: getState().wordWrap ? 'Disable Word Wrap' : 'Enable Word Wrap',
       category: 'Editor',

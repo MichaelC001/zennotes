@@ -99,6 +99,7 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   looseMathDelimiters: false,
   keepViewModeAcrossNotes: false,
   keepPanelsAcrossNotes: true,
+  persistUndoHistory: false,
   defaultPaneMode: 'edit',
   syncTitleHeadingOnRename: true,
   markdownSnippets: true,

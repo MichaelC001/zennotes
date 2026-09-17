@@ -582,6 +582,10 @@ interface Prefs {
    *  they are when switching notes. On (default) = one sticky set per pane,
    *  as always; off = each note remembers its own for the session. (#794) */
   keepPanelsAcrossNotes: boolean
+  /** Keep each note's undo history between launches (Vim's `undofile`). Off by
+   *  default: the history holds fragments of deleted text and is written to
+   *  disk, in the app's own data folder. Desktop only. (#793) */
+  persistUndoHistory: boolean
   /** The mode a note opens in before the user has picked one for it: Edit
    *  (default), Split, or Preview for read-first workflows. (#543) */
   defaultPaneMode: PaneMode
@@ -1067,6 +1071,7 @@ export const DEFAULT_PREFS: Prefs = {
   looseMathDelimiters: false,
   keepViewModeAcrossNotes: false,
   keepPanelsAcrossNotes: true,
+  persistUndoHistory: false,
   defaultPaneMode: 'edit',
   syncTitleHeadingOnRename: true,
   markdownSnippets: true,
@@ -1257,6 +1262,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.keepPanelsAcrossNotes === 'boolean'
         ? p.keepPanelsAcrossNotes
         : DEFAULT_PREFS.keepPanelsAcrossNotes,
+    persistUndoHistory:
+      typeof p.persistUndoHistory === 'boolean'
+        ? p.persistUndoHistory
+        : DEFAULT_PREFS.persistUndoHistory,
     defaultPaneMode: isPaneMode(p.defaultPaneMode) ? p.defaultPaneMode : DEFAULT_PREFS.defaultPaneMode,
     syncTitleHeadingOnRename:
       typeof p.syncTitleHeadingOnRename === 'boolean'
@@ -2284,6 +2293,7 @@ function collectPrefs(s: {
   looseMathDelimiters: boolean
   keepViewModeAcrossNotes: boolean
   keepPanelsAcrossNotes: boolean
+  persistUndoHistory: boolean
   defaultPaneMode: PaneMode
   syncTitleHeadingOnRename: boolean
   markdownSnippets: boolean
@@ -2389,6 +2399,7 @@ function collectPrefs(s: {
     looseMathDelimiters: s.looseMathDelimiters,
     keepViewModeAcrossNotes: s.keepViewModeAcrossNotes,
     keepPanelsAcrossNotes: s.keepPanelsAcrossNotes,
+    persistUndoHistory: s.persistUndoHistory,
     defaultPaneMode: s.defaultPaneMode,
     syncTitleHeadingOnRename: s.syncTitleHeadingOnRename,
     markdownSnippets: s.markdownSnippets,
@@ -2911,6 +2922,9 @@ interface Store {
   /** One sticky set of right-hand panels per pane (on, the default) or one per
    *  note (off). Persisted. (#794) */
   keepPanelsAcrossNotes: boolean
+  /** Undo history is also kept between launches (Vim's `undofile`). Off by
+   *  default, desktop only. Persisted. (#793) */
+  persistUndoHistory: boolean
   /** The mode a note opens in before it has a remembered one. Persisted. (#543) */
   defaultPaneMode: PaneMode
   /** Renaming a note rewrites its leading `# Heading` to match. Persisted. (#455) */
@@ -3453,6 +3467,7 @@ interface Store {
   setLooseMathDelimiters: (on: boolean) => void
   setKeepViewModeAcrossNotes: (on: boolean) => void
   setKeepPanelsAcrossNotes: (on: boolean) => void
+  setPersistUndoHistory: (on: boolean) => void
   setDefaultPaneMode: (mode: PaneMode) => void
   setSyncTitleHeadingOnRename: (on: boolean) => void
   setMarkdownSnippets: (on: boolean) => void
@@ -5594,6 +5609,7 @@ export const useStore = create<Store>((set, get) => {
   looseMathDelimiters: loadPrefs().looseMathDelimiters,
   keepViewModeAcrossNotes: loadPrefs().keepViewModeAcrossNotes,
   keepPanelsAcrossNotes: loadPrefs().keepPanelsAcrossNotes,
+  persistUndoHistory: loadPrefs().persistUndoHistory,
   defaultPaneMode: loadPrefs().defaultPaneMode,
   syncTitleHeadingOnRename: loadPrefs().syncTitleHeadingOnRename,
   markdownSnippets: loadPrefs().markdownSnippets,
@@ -8492,6 +8508,10 @@ export const useStore = create<Store>((set, get) => {
   },
   setKeepPanelsAcrossNotes: (on) => {
     set({ keepPanelsAcrossNotes: on })
+    savePrefs(collectPrefs(get()))
+  },
+  setPersistUndoHistory: (on) => {
+    set({ persistUndoHistory: on })
     savePrefs(collectPrefs(get()))
   },
   setDefaultPaneMode: (mode) => {

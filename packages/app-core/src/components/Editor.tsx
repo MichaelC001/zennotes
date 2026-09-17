@@ -562,6 +562,22 @@ function registerVimCommands(): void {
       setImageWidthFromInput(view, arg);
     },
   );
+  // `:set undofile` / `:set noundofile` / `:set undofile?` (alias `udf`) is
+  // the ex twin of "Keep undo history after quitting", under the name Vim
+  // users already type. Only where the host can keep the files. (#793)
+  Vim.defineOption(
+    "undofile",
+    false,
+    "boolean",
+    ["udf"],
+    (value?: boolean) => {
+      const state = useStore.getState();
+      if (value === undefined) return state.persistUndoHistory;
+      if (!window.zen?.getCapabilities?.().supportsUndoFile) return undefined;
+      if (state.persistUndoHistory !== !!value) state.setPersistUndoHistory(!!value);
+      return undefined;
+    },
+  );
   // `:harper on|off` (or bare `:harper` to toggle) is the ex twin of the
   // Settings toggle "Grammar and spelling with Harper".
   Vim.defineEx(

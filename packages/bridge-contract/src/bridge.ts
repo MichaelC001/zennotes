@@ -112,6 +112,10 @@ export interface ZenCapabilities {
    *  Harper's worker and ships it. Absent on hosts that have not verified
    *  that yet (the mobile shells), which hides the setting there. */
   supportsHarper?: boolean
+  /** The host can keep per-note undo history between launches, somewhere
+   *  machine-local that is not the vault (`readNoteUndoHistory` and friends).
+   *  Absent everywhere but the desktop app, which hides the setting. (#793) */
+  supportsUndoFile?: boolean
 }
 
 export interface ZenAppInfo {
@@ -220,6 +224,14 @@ export interface ZenBridge {
   readWorkspaceState(): Promise<string | null>
   /** Write the current vault's `.zennotes/workspace.json` (raw JSON string). (#292) */
   writeWorkspaceState(json: string): Promise<void>
+  /** Undo history saved for a note of the current vault, or null. Opaque JSON
+   *  the renderer wrote earlier; it lives with the app, not in the vault, and
+   *  never syncs. Only on hosts with `supportsUndoFile`. (#793) */
+  readNoteUndoHistory?(path: string): Promise<string | null>
+  /** Save a note's undo history, or forget it with `null`. (#793) */
+  writeNoteUndoHistory?(path: string, json: string | null): Promise<void>
+  /** Forget every saved undo history, in every vault. (#793) */
+  clearNoteUndoHistories?(): Promise<void>
   /** True when the vault is in `inbox` mode but its root holds notes that only
    *  `root` mode would surface (drives the "Switch to Vault root" banner). */
   rootContentHiddenByInboxMode(): Promise<boolean>

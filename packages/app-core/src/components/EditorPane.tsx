@@ -48,8 +48,10 @@ import {
   moveLineDown,
   moveLineUp,
   redo,
+  redoDepth,
   selectAll,
-  undo
+  undo,
+  undoDepth
 } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { isImeComposing } from '../lib/ime'
@@ -281,6 +283,7 @@ import {
   noteUndoHistoryKey,
   setAsideNoteUndoHistory
 } from '../lib/note-undo-history'
+import { noteUndoHistoryFromFile, serializeNoteUndoHistory } from '../lib/note-undo-file'
 import { latestPathRewriteSeq, pathAfterRewrites } from '../lib/path-rewrites'
 import { minimalTextChange } from '../lib/minimal-text-change'
 import {
@@ -1789,6 +1792,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             noteUndoHistoryKey(useStore.getState().vault?.root, viewPathRef.current),
             existingView.state
           )
+          saveNoteUndoFile(viewPathRef.current, existingView.state)
         }
         if (
           existingView &&
@@ -2097,6 +2101,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       })
       viewRef.current = view
       viewPathRef.current = initialPath
+      loadNoteUndoFile(
+        view,
+        historyCompartment,
+        initialPath,
+        () => viewRef.current === view && viewPathRef.current === initialPath
+      )
       registerNoteEditor(view, () => viewPathRef.current, paneId)
       if (initialContent && useStore.getState().activePaneId === paneId) {
         setEditorViewRef(view)
@@ -2135,6 +2145,18 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       updateNoteBody
     ]
   )
+
+  // The note on screen is never left, so nothing above would save its undo
+  // history when the app quits. The host finishes the write after the window
+  // is gone, the same way it finishes the note saves fired from here. (#793)
+  useEffect(() => {
+    const save = (): void => {
+      const view = viewRef.current
+      if (view) saveNoteUndoFile(viewPathRef.current, view.state)
+    }
+    window.addEventListener('beforeunload', save)
+    return () => window.removeEventListener('beforeunload', save)
+  }, [])
 
   // Register our view as the focused editor whenever our pane is active.
   useEffect(() => {
@@ -2197,6 +2219,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       if (remembered) rememberTabScroll(nextPath, remembered)
       forgetTabScroll(prevPath)
       lastRestoredPathRef.current = nextPath
+      // A history saved under the old name would never be asked for again.
+      forgetNoteUndoFile(prevPath)
     }
     if (deferredLivePreviewTimerRef.current != null) {
       clearTimeout(deferredLivePreviewTimerRef.current)
@@ -2246,6 +2270,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     // aside under that note, to be handed back when it returns. (#793)
     if (switched && prevPath) {
       setAsideNoteUndoHistory(noteUndoHistoryKey(vaultRoot, prevPath), view.state)
+      saveNoteUndoFile(prevPath, view.state)
     }
     viewPathRef.current = nextPath
     refreshNoteEditingLock(view)
@@ -2297,6 +2322,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             noteUndoHistoryFor(nextPath ? noteUndoHistoryKey(vaultRoot, nextPath) : null, nextBody)
           )
         })
+        loadNoteUndoFile(
+          view,
+          historyCompartment,
+          nextPath,
+          () => viewRef.current === view && viewPathRef.current === nextPath
+        )
       }
     }
     if (switched && pendingJumpLocation?.path !== nextPath) {
@@ -4555,6 +4586,60 @@ function EmptyPaneState({
       </div>
     </div>
   )
+}
+
+/**
+ * Undo history between launches (Vim's `undofile`, #793): only with the
+ * setting on, and only on a host that can keep it somewhere that is not the
+ * vault. Everything here is fire and forget; a note whose history cannot be
+ * saved or read simply starts a clean one next time.
+ */
+function noteUndoFileEnabled(): boolean {
+  return useStore.getState().persistUndoHistory && !!window.zen?.writeNoteUndoHistory
+}
+
+/**
+ * Save the history of the note `state` shows. With nothing to undo there is
+ * nothing to write, and nothing is erased either: the same note can be open in
+ * a second pane whose history was just saved, and a file that no longer fits
+ * the text is ignored when it is read and replaced by the next real save.
+ */
+function saveNoteUndoFile(path: string | null, state: EditorState): void {
+  if (!path || !noteUndoFileEnabled()) return
+  const saved = serializeNoteUndoHistory(state)
+  if (saved === null) return
+  void window.zen.writeNoteUndoHistory?.(path, saved)?.catch(() => undefined)
+}
+
+function forgetNoteUndoFile(path: string | null): void {
+  if (!path || !noteUndoFileEnabled()) return
+  void window.zen.writeNoteUndoHistory?.(path, null)?.catch(() => undefined)
+}
+
+/**
+ * Hand a note the history it had when the app last quit. It only applies while
+ * `view` still shows that note with nothing to undo yet: a history kept in
+ * memory, or an edit made while the file was being read, wins.
+ */
+function loadNoteUndoFile(
+  view: EditorView,
+  compartment: Compartment | null,
+  path: string | null,
+  stillShowing: () => boolean
+): void {
+  if (!path || !compartment || !noteUndoFileEnabled()) return
+  if (undoDepth(view.state) > 0 || redoDepth(view.state) > 0) return
+  void window.zen
+    .readNoteUndoHistory?.(path)
+    ?.then((saved) => {
+      if (!saved || !stillShowing()) return
+      if (undoDepth(view.state) > 0 || redoDepth(view.state) > 0) return
+      const restored = noteUndoHistoryFromFile(saved, view.state.doc.toString())
+      if (!restored) return
+      view.dispatch({ effects: compartment.reconfigure([]) })
+      view.dispatch({ effects: compartment.reconfigure(restored) })
+    })
+    .catch(() => undefined)
 }
 
 function IconBtn({

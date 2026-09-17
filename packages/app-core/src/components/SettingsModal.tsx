@@ -518,6 +518,8 @@ export function SettingsModal(): JSX.Element {
   const setDefaultPaneMode = useStore((s) => s.setDefaultPaneMode);
   const keepPanelsAcrossNotes = useStore((s) => s.keepPanelsAcrossNotes);
   const setKeepPanelsAcrossNotes = useStore((s) => s.setKeepPanelsAcrossNotes);
+  const persistUndoHistory = useStore((s) => s.persistUndoHistory);
+  const setPersistUndoHistory = useStore((s) => s.setPersistUndoHistory);
   const setKeepViewModeAcrossNotes = useStore(
     (s) => s.setKeepViewModeAcrossNotes,
   );
@@ -627,6 +629,9 @@ export function SettingsModal(): JSX.Element {
       : zenBridge.getCapabilities().supportsCustomTemplates === true;
   const supportsCustomCodeLanguages =
     !!zenBridge.getCapabilities().supportsCustomCodeLanguages;
+  // Undo history between launches needs somewhere machine-local that is not
+  // the vault, which only the desktop app has. (#793)
+  const supportsUndoFile = !!zenBridge.getCapabilities().supportsUndoFile;
   const [templateEditor, setTemplateEditor] = useState<{
     initialRaw?: string;
     sourcePath?: string;
@@ -2072,6 +2077,26 @@ export function SettingsModal(): JSX.Element {
             "switch",
           ],
         },
+        ...(supportsUndoFile
+          ? [
+              {
+                id: "persist-undo-history",
+                title: "Keep undo history after quitting",
+                description:
+                  "Undo still works on a note after you quit and reopen ZenNotes, like Vim's undofile.",
+                keywords: [
+                  "undofile",
+                  "undo",
+                  "redo",
+                  "history",
+                  "persistent",
+                  "restart",
+                  "quit",
+                  "vim",
+                ],
+              },
+            ]
+          : []),
         {
           id: "sync-title-heading-on-rename",
           title: "Sync title heading on rename",
@@ -2505,6 +2530,7 @@ export function SettingsModal(): JSX.Element {
             "harper-dialect",
             "keep-view-mode",
             "keep-panels",
+            "persist-undo-history",
             "sync-title-heading-on-rename",
             "markdown-overrides",
             "heading-level-labels",
@@ -2644,6 +2670,15 @@ export function SettingsModal(): JSX.Element {
                   settingId="keep-panels"
                   onChange={setKeepPanelsAcrossNotes}
                 />
+                {supportsUndoFile && (
+                  <ToggleRow
+                    label="Keep undo history after quitting"
+                    description="Each note already keeps its undo history while ZenNotes is open. Turn this on and it also survives quitting, like Vim's undofile: reopen a note tomorrow and u / Mod+Z still steps back through your edits, as long as the note was not changed elsewhere in the meantime. The history is stored with the app on this computer, never in your vault, and it contains text you deleted. Turning this off erases it."
+                    value={persistUndoHistory}
+                    settingId="persist-undo-history"
+                    onChange={setPersistUndoHistory}
+                  />
+                )}
                 <ToggleRow
                   label="Sync title heading on rename"
                   description="Renaming a note also rewrites its leading `# heading` to the new name, so the title line stops drifting from the filename. Only an existing top-level heading is rewritten — a note that opens with prose, a list, or a deeper heading is left alone, so deleting the `#` line opts that note out for good."

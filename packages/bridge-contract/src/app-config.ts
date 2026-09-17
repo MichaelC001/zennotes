@@ -35,6 +35,7 @@ export const PORTABLE_PREF_KEYS = [
   'looseMathDelimiters',
   'keepViewModeAcrossNotes',
   'keepPanelsAcrossNotes',
+  'persistUndoHistory',
   'defaultPaneMode',
   'syncTitleHeadingOnRename',
   'markdownSnippets',
