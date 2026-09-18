@@ -1226,6 +1226,11 @@ export const HELP_CLI: HelpCard[] = [
       'Use `zn list` to see recent notes, `zn list --tag work --limit 5` to filter, `zn read inbox/Project.md` to print a body, and `zn search "deadline"` for full-text matches with file:line previews. Quote paths with spaces, like `zn read "hellointerview/system design.md"`, or use `--path`. Add `--json` to any command to get structured output you can pipe into `jq`.'
   },
   {
+    title: 'Open notes, folders, and a second window',
+    body:
+      '`zn open inbox/Today.md` brings the ZenNotes window to the front with that note loaded, and `zn open ~/code/project/docs` opens a folder as a focused session without turning it into a vault. When a window already shows the vault or folder, `zn open` raises that window. Add `-n` (or `--new-window`) for a second window on the same notes instead, with its own tabs, leaving the first window where it was: `zn open -n ~/notes`. A markdown file outside every vault always reuses its editor window, since nothing keeps two standalone editors of one file in sync.'
+  },
+  {
     title: 'Raycast uses the same CLI',
     body:
       'On macOS, install the Raycast extension locally from Settings → CLI after `zn` is installed. ZenNotes copies the bundled extension into app data, runs the local build, and imports it into Raycast, so you do not need the Raycast Store version. The Search Notes command reads from `zn list --json`, then uses `zennotes://open` to open notes in the main app or `zennotes://open-window` to open a floating window. Cmd+K actions also archive, unarchive, move to Trash, reveal in Finder, copy the path, and copy a wikilink.'
