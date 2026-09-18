@@ -5235,9 +5235,11 @@ async function runMenuUpdateCheck(): Promise<void> {
         ? "ZenNotes is up to date."
         : state.phase === "unsupported"
           ? "Update checks are unavailable."
-          : state.phase === "error"
-            ? "Could not check for updates."
-            : "ZenNotes Updates",
+          : state.phase === "offline"
+            ? "ZenNotes can't reach GitHub right now."
+            : state.phase === "error"
+              ? "Could not check for updates."
+              : "ZenNotes Updates",
     detail: state.message,
   });
 }

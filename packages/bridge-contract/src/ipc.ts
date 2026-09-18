@@ -227,6 +227,12 @@ export type AppUpdatePhase =
   | 'downloading'
   | 'downloaded'
   | 'installing'
+  /**
+   * The last check could not reach GitHub at all (no network, DNS down,
+   * connection refused). Not an error the user has to act on: the host keeps
+   * watching and checks again on its own once the connection is back.
+   */
+  | 'offline'
   | 'error'
 
 export interface CliInstallRequest {

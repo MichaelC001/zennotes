@@ -363,6 +363,8 @@ function formatUpdatePhaseLabel(phase: AppUpdateState["phase"]): string {
       return "Ready to install";
     case "installing":
       return "Installing";
+    case "offline":
+      return "Waiting for network";
     case "error":
       return "Update error";
     case "idle":
@@ -382,6 +384,8 @@ function updatePhaseBadgeClass(phase: AppUpdateState["phase"]): string {
       return "border-paper-300/70 bg-paper-100/85 text-ink-700";
     case "error":
       return "border-red-400/25 bg-red-500/10 text-red-700";
+    case "offline":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-700";
     case "not-available":
       return "border-emerald-400/25 bg-emerald-500/10 text-emerald-700";
     case "unsupported":
@@ -808,7 +812,11 @@ export function SettingsModal(): JSX.Element {
           window.alert(state.message);
           return;
         }
-        if (state.phase === "unsupported" || state.phase === "error") {
+        if (
+          state.phase === "unsupported" ||
+          state.phase === "offline" ||
+          state.phase === "error"
+        ) {
           window.alert(state.message);
         }
       },
