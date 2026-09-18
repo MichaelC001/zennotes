@@ -38,8 +38,8 @@ import { isCalendarToggleAvailable, noteFolderSubpath } from './vault-layout'
 import { runWorkflowById } from './workflow-trigger'
 import { requestPublishNote } from './publish-note-requests'
 import {
-  hasResolvableCloudConflicts,
-  openCloudConflictReview
+  hasPendingCloudReview,
+  openPendingCloudReview
 } from './cloud-auto-sync'
 import { DEMO_TOUR_START_PATH } from '@shared/demo-tour'
 
@@ -1813,12 +1813,13 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       id: 'app.cloud.reviewConflicts',
       title: 'Review Cloud Sync Conflicts',
       category: 'Vault',
-      keywords: 'cloud sync conflict merge review resolve queue two devices differ',
+      keywords: 'cloud sync conflict merge review resolve queue two devices differ settings',
       shortcut: leaderShortcut('vim.leaderCloudConflicts'),
-      // Hidden with an empty queue: the same dialog the status bar's Review
-      // now opens, and there is nothing to review without it.
-      when: () => hasResolvableCloudConflicts(),
-      run: () => openCloudConflictReview()
+      // Hidden while nothing waits: the same dialogs the status bar's Review
+      // opens (the file queue first, then the vault settings question), and
+      // there is nothing to review without one of them.
+      when: () => hasPendingCloudReview(),
+      run: () => openPendingCloudReview()
     },
     {
       id: 'app.vault.switch',

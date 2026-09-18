@@ -3184,7 +3184,11 @@ interface Store {
   closedTabStack: ClosedTabEntry[]
 
   setVault: (v: VaultInfo | null) => void
-  setVaultSettings: (next: VaultSettings) => Promise<void>
+  /** Resolves true once the settings are on disk. A failed write is logged,
+   *  not thrown, because most callers fire and forget; the Cloud settings
+   *  prompt reads the flag so it does not discard the cloud's copy after a
+   *  save that never happened. */
+  setVaultSettings: (next: VaultSettings) => Promise<boolean>
   /**
    * Toggle a favorite (a note path or a `folder:subpath` key) and persist it.
    * Favorites pin to the top of the sidebar.
@@ -5739,11 +5743,19 @@ export const useStore = create<Store>((set, get) => {
       set({
         vaultSettings: settings
       })
+    } catch (err) {
+      console.error('setVaultSettings failed', err)
+      return false
+    }
+    // The settings are saved at this point; a failed listing refresh is not a
+    // failed save.
+    try {
       await get().refreshNotes()
       await get().refreshRootContentHidden()
     } catch (err) {
       console.error('setVaultSettings failed', err)
     }
+    return true
   },
   applyFavorites: async (nextFavorites) => {
     const isCurrent = captureFolderActionContext(get)
