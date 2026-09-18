@@ -793,6 +793,101 @@ function readOsReleaseOrNull(): string | null {
   }
 }
 
+/** How this copy was installed, in the words a bug report wants (#814). The
+ *  Linux answer reuses the detection the updater itself relies on, so what
+ *  `:version` prints is the format the updater will act on. */
+export function installLabel(input: {
+  isPackaged: boolean
+  platform: NodeJS.Platform
+  mas: boolean
+  windowsStore: boolean
+  portableExecutableDir: string | undefined
+  linuxFormat: () => LinuxPackageFormat
+}): string {
+  if (!input.isPackaged) return 'development build'
+  switch (input.platform) {
+    case 'darwin':
+      return input.mas ? 'Mac App Store' : 'macOS app bundle'
+    case 'win32':
+      if (input.windowsStore) return 'Microsoft Store'
+      return input.portableExecutableDir ? 'portable exe' : 'NSIS installer'
+    case 'linux':
+      switch (input.linuxFormat()) {
+        case 'appimage':
+          return 'AppImage'
+        case 'deb':
+          return 'deb package'
+        case 'rpm':
+          return 'rpm package'
+        case 'pacman':
+          return 'pacman package'
+        case 'managed':
+          return 'package manager or tarball (updates are reported, not installed)'
+        default:
+          return 'Linux package (format unknown)'
+      }
+    default:
+      return input.platform
+  }
+}
+
+/** PRETTY_NAME from os-release, e.g. `Ubuntu 24.04.1 LTS`, or null. */
+export function osReleasePrettyName(osRelease: string | null): string | null {
+  if (!osRelease) return null
+  for (const line of osRelease.split('\n')) {
+    const match = /^\s*PRETTY_NAME\s*=\s*(.*)$/.exec(line)
+    if (match) {
+      const value = match[1].trim().replace(/^["']|["']$/g, '')
+      if (value) return value
+    }
+  }
+  return null
+}
+
+/** Operating system and install format for the app info the preload hands
+ *  to the renderer (#814). Reads os-release once; nothing here may throw,
+ *  because the preload asks for it synchronously while the window boots. */
+export function describeInstall(): { os: string; install: string } {
+  const systemVersion = (() => {
+    try {
+      return process.getSystemVersion()
+    } catch {
+      return ''
+    }
+  })()
+  const osRelease = process.platform === 'linux' ? readOsReleaseOrNull() : null
+  const os =
+    process.platform === 'darwin'
+      ? `macOS ${systemVersion}`.trim()
+      : process.platform === 'win32'
+        ? `Windows ${systemVersion}`.trim()
+        : process.platform === 'linux'
+          ? `${osReleasePrettyName(osRelease) ?? 'Linux'} (kernel ${systemVersion || 'unknown'})`
+          : `${process.platform} ${systemVersion}`.trim()
+  let install: string
+  try {
+    install = installLabel({
+      isPackaged: app.isPackaged,
+      platform: process.platform,
+      mas: Boolean(process.mas),
+      windowsStore: Boolean(process.windowsStore),
+      portableExecutableDir: process.env.PORTABLE_EXECUTABLE_DIR,
+      linuxFormat: () =>
+        linuxUpdaterFormat({
+          isAppImage: Boolean(process.env.APPIMAGE),
+          isOfficialSystemPackage: isOfficialLinuxSystemPackage(
+            process.resourcesPath,
+            existsSync(join(process.resourcesPath, 'package-type'))
+          ),
+          osRelease
+        })
+    })
+  } catch {
+    install = 'unknown'
+  }
+  return { os, install }
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }

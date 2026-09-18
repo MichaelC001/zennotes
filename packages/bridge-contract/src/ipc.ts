@@ -180,6 +180,7 @@ export const IPC = {
   RAYCAST_GET_STATUS: 'raycast:get-status',
   RAYCAST_INSTALL: 'raycast:install',
   CONFIG_GET_SYNC: 'config:get-sync',
+  APP_INSTALL_INFO_SYNC: 'app:install-info-sync',
   CONFIG_SET: 'config:set',
   CONFIG_GET_PATH: 'config:get-path',
   CONFIG_REVEAL: 'config:reveal',

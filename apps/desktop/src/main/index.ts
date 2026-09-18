@@ -242,6 +242,7 @@ import {
 } from "./raycast-integration";
 import {
   checkForAppUpdates,
+  describeInstall,
   downloadAppUpdate,
   getAppUpdateState,
   initAppUpdater,
@@ -4604,6 +4605,16 @@ function registerIpc(): void {
     try {
       assertTrustedIpcEvent(event);
       event.returnValue = getPortableConfigSnapshot();
+    } catch {
+      event.returnValue = null;
+    }
+  });
+  // Same shape as CONFIG_GET_SYNC: the preload folds the OS and install
+  // format into getAppInfo(), which renderer code calls synchronously (#814).
+  ipcMain.on(IPC.APP_INSTALL_INFO_SYNC, (event) => {
+    try {
+      assertTrustedIpcEvent(event);
+      event.returnValue = describeInstall();
     } catch {
       event.returnValue = null;
     }

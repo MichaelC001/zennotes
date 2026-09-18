@@ -27,6 +27,7 @@ import FpmTarget from 'app-builder-lib/out/targets/FpmTarget'
 import electronUpdater from 'electron-updater'
 import {
   elevatedInstallScript,
+  installLabel,
   installedLinuxFormat,
   isNetworkUnreachableError,
   isOfficialLinuxSystemPackage,
@@ -39,10 +40,78 @@ import {
   manualInstallHint,
   mismatchedUpdateMessage,
   offlineRetryDelayMs,
+  osReleasePrettyName,
   OFFLINE_POLL_MS,
   OFFLINE_RETRY_BASE_MS,
   OFFLINE_RETRY_MAX_MS
 } from './updater'
+
+describe('installLabel (:version, issue #814)', () => {
+  const packaged = {
+    isPackaged: true,
+    mas: false,
+    windowsStore: false,
+    portableExecutableDir: undefined,
+    linuxFormat: (): 'unknown' => 'unknown'
+  }
+
+  it('calls an unpackaged checkout a development build on every platform', () => {
+    for (const platform of ['darwin', 'win32', 'linux'] as const) {
+      expect(installLabel({ ...packaged, platform, isPackaged: false })).toBe('development build')
+    }
+  })
+
+  it('tells the Mac App Store copy apart from the dmg one', () => {
+    expect(installLabel({ ...packaged, platform: 'darwin' })).toBe('macOS app bundle')
+    expect(installLabel({ ...packaged, platform: 'darwin', mas: true })).toBe('Mac App Store')
+  })
+
+  it('tells the portable exe apart from the NSIS install and the Store', () => {
+    expect(installLabel({ ...packaged, platform: 'win32' })).toBe('NSIS installer')
+    expect(
+      installLabel({ ...packaged, platform: 'win32', portableExecutableDir: 'D:\\apps' })
+    ).toBe('portable exe')
+    expect(installLabel({ ...packaged, platform: 'win32', windowsStore: true })).toBe(
+      'Microsoft Store'
+    )
+  })
+
+  it('names the Linux format the updater itself detected', () => {
+    const linux = (format: ReturnType<typeof linuxUpdaterFormat>) =>
+      installLabel({ ...packaged, platform: 'linux', linuxFormat: () => format })
+    expect(linux('appimage')).toBe('AppImage')
+    expect(linux('deb')).toBe('deb package')
+    expect(linux('rpm')).toBe('rpm package')
+    expect(linux('pacman')).toBe('pacman package')
+    expect(linux('managed')).toBe('package manager or tarball (updates are reported, not installed)')
+    expect(linux('unknown')).toBe('Linux package (format unknown)')
+  })
+
+  it('does not consult the Linux detector off Linux', () => {
+    const linuxFormat = vi.fn((): 'deb' => 'deb')
+    installLabel({ ...packaged, platform: 'darwin', linuxFormat })
+    installLabel({ ...packaged, platform: 'linux', isPackaged: false, linuxFormat })
+    expect(linuxFormat).not.toHaveBeenCalled()
+  })
+})
+
+describe('osReleasePrettyName', () => {
+  it('reads PRETTY_NAME and strips its quotes', () => {
+    expect(
+      osReleasePrettyName('NAME="Ubuntu"\nPRETTY_NAME="Ubuntu 24.04.1 LTS"\nID=ubuntu\n')
+    ).toBe('Ubuntu 24.04.1 LTS')
+    expect(osReleasePrettyName("PRETTY_NAME='Arch Linux'")).toBe('Arch Linux')
+    expect(osReleasePrettyName('PRETTY_NAME=Fedora Linux 40 (Workstation Edition)')).toBe(
+      'Fedora Linux 40 (Workstation Edition)'
+    )
+  })
+
+  it('ignores NAME and an empty PRETTY_NAME, and answers null without a file', () => {
+    expect(osReleasePrettyName('NAME="Debian GNU/Linux"\nVERSION_ID="12"')).toBeNull()
+    expect(osReleasePrettyName('PRETTY_NAME=""')).toBeNull()
+    expect(osReleasePrettyName(null)).toBeNull()
+  })
+})
 
 describe('linuxPackageFormat', () => {
   it('detects each packaged Linux format', () => {
