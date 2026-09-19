@@ -237,7 +237,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'The home view is where you land',
     body:
-      'When no note is open (outside Zen mode), ZenNotes shows a light home view instead of a blank pane: a greeting, quick-create actions (new note, database, drawing — plus daily and weekly notes when those are enabled in Settings), your most recently edited notes, and today’s open tasks with an overdue count. Click a note or task to open it, tick a checkbox to complete a task in place, and use ↑/↓ — or j/k in Vim mode — then Enter to move and open from the keyboard.'
+      'When no note is open (outside Zen mode), ZenNotes shows a light home view instead of a blank pane: a greeting, quick-create actions (new note, database, drawing, plus daily and weekly notes when those are enabled in Settings), your most recently edited notes, your Favorites, and today’s open tasks with an overdue count. The Favorites section sits right after Recent and mirrors the sidebar’s list in the same order: a favorited note opens in place, a favorited folder opens that folder in the note list (bringing the sidebar back if it was hidden), and the section stays out of the way until you favorite something. Favorite a note from the sidebar row’s context menu, `Space l s`, or the command palette’s “Add Note to Favorites” (on the phones, the same entry sits in the ••• sheet and in the long-press note menu). Click a note or task to open it, tick a checkbox to complete a task in place, and use ↑/↓ (or j/k in Vim mode) then Enter to move and open from the keyboard.'
   },
   {
     title: 'Sessions restore on relaunch',
@@ -551,7 +551,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'Space q', action: 'Quick capture window', detail: 'Open the floating, always-on-top capture window, same as the global hotkey.' },
       { keys: 'Space i', action: 'Insert template into note', detail: 'Pick a template and insert it at the cursor of the active note, instead of creating a new note from it.' },
       { keys: 'Space c', action: 'Toggle calendar', detail: 'Show or hide the calendar panel for the active pane.' },
-      { keys: 'Space l s', action: 'Toggle favorite', detail: 'Add or remove the active note from the sidebar’s Favorites section. Folders join it from their context menu.' },
+      { keys: 'Space l s', action: 'Toggle favorite', detail: 'Add or remove the active note from the Favorites section shown in the sidebar and on the home view. Folders join it from their context menu.' },
       { keys: 'Space, then pause', action: 'Show leader hints', detail: 'If enabled in Settings, open a which-key style guide for the next available leader actions. Sticky mode keeps it open until `Space` or `Esc`.' },
       { keys: 'Mod+3', action: 'Toggle outline panel', detail: 'Show or hide the persistent outline in the active pane. Once focused (Ctrl+W l or Alt+L from the editor), j / k — or the arrows — walk the headings, gg / G jump to the first and last, Enter jumps the editor to the heading under the cursor, and Esc hands focus back.' },
       { keys: 'zc / zo', action: 'Fold / unfold heading', detail: 'Collapse or expand the section below the heading at the cursor.' },
@@ -995,7 +995,7 @@ export const HELP_VIM_COMMANDS: HelpExCommand[] = [
   {
     command: '<Space> l s',
     summary: 'Leader toggle favorite',
-    detail: 'Add or remove the active note from the sidebar’s Favorites section.'
+    detail: 'Add or remove the active note from the Favorites section shown in the sidebar and on the home view.'
   },
   {
     command: '<Space> d',

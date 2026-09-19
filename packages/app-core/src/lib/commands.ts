@@ -99,6 +99,10 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
   const openExternal = (url: string): void => {
     window.open(url, '_blank')
   }
+  const isActiveNoteFavorite = (): boolean => {
+    const state = getState()
+    return !!state.activeNote && state.vaultSettings.favorites.includes(state.activeNote.path)
+  }
   const cmds: Command[] = []
 
   /* ---------------- Note actions ---------------- */
@@ -326,6 +330,21 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
         if (next && next !== active.title && isCurrent() && getState().selectedPath === active.path)
           await getState().renameActive(next)
       }
+    },
+    {
+      id: 'note.favorite',
+      // The sidebar row's context menu was the only mouse route and the
+      // leader chord the only keyboard one; the palette gives every host,
+      // phones included, a way to fill the Favorites section on Home. (#810)
+      title: isActiveNoteFavorite() ? 'Remove Note from Favorites' : 'Add Note to Favorites',
+      category: 'Note',
+      keywords: 'favourite star bookmark home sidebar',
+      shortcut: chord('vim.leaderPrefix', 'vim.leaderNoteActions', 'vim.leaderToggleFavorite'),
+      when: () => {
+        const active = getState().activeNote
+        return !!active && active.folder !== 'trash'
+      },
+      run: () => getState().toggleFavoriteActiveNote()
     },
     {
       id: 'note.archive',
