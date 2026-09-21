@@ -1959,6 +1959,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
                       pointerOverRange(view, link.from, link.to, event.clientX, event.clientY) &&
                       followLinkTarget(link.target, { createWithoutAsking: true })
                     ) {
+                      // Following the link ends its status-bar hover; a tap
+                      // never sends the mouseleave that would (#820).
+                      setHoveredLink(null)
                       event.preventDefault()
                       return true
                     }
@@ -1972,6 +1975,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
                       const sel = view.state.selection.main
                       const rendered = sel.to < link.from || sel.from > link.to
                       if (rendered && followLinkTarget(link.href)) {
+                        setHoveredLink(null)
                         event.preventDefault()
                         return true
                       }

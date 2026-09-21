@@ -478,6 +478,12 @@ export const Preview = memo(function Preview({
       }
       const anchor = target.closest("a") as HTMLAnchorElement | null;
       if (!anchor) return;
+      // Following a link ends its hover. A tap on a touch screen arrives as
+      // synthetic mouseover, mousemove and click with no mouseleave ever, so
+      // the target the mousemove put in the status bar would otherwise sit
+      // there until the next tap. A real pointer that is still over a link
+      // puts it back on its next move. (#820)
+      setHoveredLink(null);
       if (anchor.classList.contains("wikilink")) {
         e.preventDefault();
         const path = anchor.dataset.resolvedPath;
