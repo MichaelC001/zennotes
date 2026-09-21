@@ -38,6 +38,10 @@ import { isExcalidrawPath, isObsidianExcalidrawPath } from "@shared/excalidraw";
 import { resolveExcalidrawEmbedPath } from "../lib/excalidraw-preview";
 import { LazyExcalidrawPreview } from "./LazyExcalidrawPreview";
 import { enhancePreviewHeadingFolds } from "../lib/preview-heading-fold";
+import {
+  previewEditRequestForTarget,
+  type PreviewEditRequest,
+} from "../lib/preview-outline-jump";
 import { renderDiagrams } from "../lib/diagram-renderers";
 import { renderEmbeds, renderBookmarks } from "../lib/embed-renderers";
 import { renderTypstMath } from "../lib/typst-math-render";
@@ -186,7 +190,7 @@ export const Preview = memo(function Preview({
 }: {
   markdown: string;
   notePath: string;
-  onRequestEdit?: (() => void) | null;
+  onRequestEdit?: ((request?: PreviewEditRequest | null) => void) | null;
   onRendered?: (() => void) | null;
 }): JSX.Element {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -698,7 +702,22 @@ export const Preview = memo(function Preview({
 
     const onMouseLeave = (): void => setHoveredLink(null);
 
+    // Double-click on a rendered block edits it right there, the way the VS
+    // Code markdown preview does; the block's source line and screen position
+    // travel with the request so the editor opens on it at the same height.
+    // Links, controls, embeds and diagrams keep their own double-click. (#822)
+    const onDoubleClick = (e: MouseEvent): void => {
+      if (e.button !== 0) return;
+      const requestEdit = onRequestEditRef.current;
+      if (!requestEdit) return;
+      const request = previewEditRequestForTarget(e.target);
+      if (!request) return;
+      e.preventDefault();
+      requestEdit(request);
+    };
+
     root.addEventListener("click", onClick);
+    root.addEventListener("dblclick", onDoubleClick);
     root.addEventListener("mouseover", onMouseOver);
     root.addEventListener("mousemove", onMouseMove);
     root.addEventListener("mouseout", onMouseOut);
@@ -708,6 +727,7 @@ export const Preview = memo(function Preview({
 
     return () => {
       root.removeEventListener("click", onClick);
+      root.removeEventListener("dblclick", onDoubleClick);
       root.removeEventListener("mouseover", onMouseOver);
       root.removeEventListener("mousemove", onMouseMove);
       root.removeEventListener("mouseout", onMouseOut);
