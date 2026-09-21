@@ -48,8 +48,7 @@ import { registerHeadingMotion } from '../lib/cm-vim-heading-motion'
 import { registerReflowOperator } from '../lib/cm-vim-reflow'
 import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
 import { toggleWrap, wrapLink } from '../lib/cm-format'
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
-import { resolveCodeLanguage } from '../lib/cm-code-languages'
+import { noteMarkdown } from '../lib/cm-markdown-language'
 import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languages'
 import { markdownLinkExtension } from '../lib/cm-markdown-links'
 import { markdownListIndentPlugin } from '../lib/cm-markdown-list-indent'
@@ -476,7 +475,7 @@ export function QuickCaptureApp(): JSX.Element {
           editorTabSize(prefs.editorTabSize),
           highlightActiveLine(),
           EditorView.lineWrapping,
-          markdown({ base: markdownLanguage, codeLanguages: resolveCodeLanguage, addKeymap: false }),
+          noteMarkdown(),
           customCodeFenceHighlightExtension,
           markdownLinkExtension,
           vimAwareMarkdownKeymap,

@@ -53,10 +53,9 @@ import {
   undo,
   undoDepth
 } from '@codemirror/commands'
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { isImeComposing } from '../lib/ime'
 import { displayRowBoundaryKeymap } from '../lib/cm-display-row'
-import { resolveCodeLanguage } from '../lib/cm-code-languages'
+import { noteMarkdown } from '../lib/cm-markdown-language'
 import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languages'
 import { markdownLinkExtension } from '../lib/cm-markdown-links'
 import {
@@ -423,7 +422,7 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
 
 function markdownEditingExtensions(showHeadingLevelLabels = false): Extension[] {
   return [
-    markdown({ base: markdownLanguage, codeLanguages: resolveCodeLanguage, addKeymap: false }),
+    noteMarkdown(),
     customCodeFenceHighlightExtension,
     markdownLinkExtension,
     vimAwareMarkdownKeymap,
