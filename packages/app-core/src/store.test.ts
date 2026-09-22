@@ -2659,3 +2659,40 @@ describe('file-task lifecycle coordination', () => {
     expect(useStore.getState().noteContents[source.path]).toBeUndefined()
   })
 })
+
+describe('createAndOpen with tags (#826 follow-up)', () => {
+  it('writes a tag line under the heading, using the title the vault settled on', async () => {
+    const createNote = vi.fn().mockResolvedValue(makeNote('# Runbook 2\n\n', 'inbox/Runbook 2.md'))
+    const writeNote = vi.fn().mockResolvedValue(undefined)
+    installZen({
+      createNote,
+      writeNote,
+      listNotes: vi.fn().mockResolvedValue([makeNote('# Runbook 2\n\n', 'inbox/Runbook 2.md')]),
+      readNote: vi.fn().mockResolvedValue(makeNote('# Runbook 2\n\n#ops #prod\n\n', 'inbox/Runbook 2.md'))
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().createAndOpen('inbox', '', { title: 'Runbook', tags: ['ops', 'prod'] })
+
+    expect(createNote).toHaveBeenCalledWith('inbox', 'Runbook', '')
+    expect(writeNote).toHaveBeenCalledTimes(1)
+    expect(writeNote).toHaveBeenCalledWith('inbox/Runbook 2.md', '# Runbook 2\n\n#ops #prod\n\n')
+    expect(useStore.getState().selectedPath).toBe('inbox/Runbook 2.md')
+  })
+
+  it('leaves the body the vault wrote when there are no tags', async () => {
+    const writeNote = vi.fn().mockResolvedValue(undefined)
+    installZen({
+      createNote: vi.fn().mockResolvedValue(makeNote('# T\n\n', 'inbox/T.md')),
+      writeNote,
+      listNotes: vi.fn().mockResolvedValue([makeNote('# T\n\n', 'inbox/T.md')]),
+      readNote: vi.fn().mockResolvedValue(makeNote('# T\n\n', 'inbox/T.md'))
+    })
+    const { useStore } = await loadStore()
+
+    await useStore.getState().createAndOpen('inbox', '', { title: 'T', tags: [] })
+    await useStore.getState().createAndOpen('inbox', '', { title: 'T' })
+
+    expect(writeNote).not.toHaveBeenCalled()
+  })
+})

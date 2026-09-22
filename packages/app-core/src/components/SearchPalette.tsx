@@ -9,9 +9,18 @@ import {
   searchNoteIndex
 } from '../lib/note-search'
 import { focusEditorNormalMode } from '../lib/editor-focus'
-import { searchCreateTarget, type SearchCreateTarget } from '../lib/search-create'
+import {
+  destinationLabel,
+  parseDestinationText,
+  searchCreateDraft,
+  type AreaLabels,
+  type SearchCreateDraft
+} from '../lib/search-create'
+import { resolveSystemFolderLabels } from '../lib/system-folder-labels'
+import { isPrimaryNotesAtRoot } from '../lib/vault-layout'
 import { useToastStore } from '../lib/toast'
 import { Modal } from './ui/Modal'
+import { SearchCreateForm, type SearchCreateTarget } from './SearchCreateForm'
 
 export function SearchPalette(): JSX.Element {
   const notes = useStore((s) => s.notes)
@@ -19,8 +28,13 @@ export function SearchPalette(): JSX.Element {
   const selectNote = useStore((s) => s.selectNote)
   const createAndOpen = useStore((s) => s.createAndOpen)
   const trashNote = useStore((s) => s.trashNote)
+  const vault = useStore((s) => s.vault)
+  const vaultSettings = useStore((s) => s.vaultSettings)
+  const systemFolderLabels = useStore((s) => s.systemFolderLabels)
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
+  // While set, the palette shows the New note form instead of the results.
+  const [draft, setDraft] = useState<SearchCreateDraft | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
 
@@ -37,16 +51,30 @@ export function SearchPalette(): JSX.Element {
   }, [query, searchIndex])
 
   // A search that finds nothing is often the moment the note should start
-  // existing (#826). The free text names the note to create (tags only ever
-  // filter); the create row sits after the results, at index results.length,
-  // and is hidden when a note with that exact name is already there.
-  const create = useMemo(() => searchCreateTarget(freeText, notes), [freeText, notes])
-  const createRow = create && !create.existing ? create : null
+  // existing (#826). The free text drafts the note to create (its `#tags`
+  // become the note's tags); the create row sits after the results, at index
+  // results.length, and leads to a form where the name, folder and tags can
+  // still change, so it shows even when the name is taken or not yet valid.
+  const createRow = useMemo(() => searchCreateDraft(freeText, tagTokens), [freeText, tagTokens])
   const rowCount = results.length + (createRow ? 1 : 0)
+  const labels: AreaLabels = useMemo(() => {
+    const resolved = resolveSystemFolderLabels(systemFolderLabels)
+    return {
+      ...resolved,
+      inbox: isPrimaryNotesAtRoot(vaultSettings) ? (vault?.name ?? 'Vault') : resolved.inbox
+    }
+  }, [systemFolderLabels, vault?.name, vaultSettings])
+  const createRowWhere = useMemo(() => {
+    if (!createRow) return ''
+    const parsed = parseDestinationText(createRow.folderText)
+    return parsed.destination ? destinationLabel(parsed.destination, labels) : ''
+  }, [createRow, labels])
 
+  // The input unmounts while the form shows, so focus it again when the form
+  // hands back (and on open, when there is no form yet).
   useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
+    if (!draft) inputRef.current?.focus()
+  }, [draft])
 
   useEffect(() => setActive(0), [query])
 
@@ -62,19 +90,14 @@ export function SearchPalette(): JSX.Element {
   }
 
   // Same landing as `:e name` and the dead-wikilink flow: the new note opens
-  // with the editor focused, because its name is already settled.
-  const createFromQuery = async (target: SearchCreateTarget): Promise<void> => {
+  // with the editor focused, because its name was settled in the form.
+  const createFromForm = async (target: SearchCreateTarget): Promise<void> => {
     setSearchOpen(false)
-    await createAndOpen(target.folder, target.subpath, { title: target.title })
+    await createAndOpen(target.destination.folder, target.destination.subpath, {
+      title: target.title,
+      tags: target.tags
+    })
     focusEditorNormalMode()
-  }
-
-  // Shift+Enter means "get me the note with this name": create it, or when it
-  // already exists (the row is hidden for that reason), open it.
-  const createOrOpenFromQuery = (): void => {
-    if (!create) return
-    if (create.existing) void open(create.existing)
-    else void createFromQuery(create)
   }
 
   const close = (): void => {
@@ -94,6 +117,19 @@ export function SearchPalette(): JSX.Element {
     if (!moved) return
     useToastStore.getState().addToast(`Moved "${note.title}" to Trash`, 'success')
     setActive((a) => Math.max(0, Math.min(a, results.length - 2)))
+  }
+
+  if (draft) {
+    return (
+      <Modal size="md" layer="palette" onClose={close} closeOnEsc={false}>
+        <SearchCreateForm
+          draft={draft}
+          onBack={() => setDraft(null)}
+          onCreate={(target) => void createFromForm(target)}
+          onOpenExisting={(note) => void open(note)}
+        />
+      </Modal>
+    )
   }
 
   return (
@@ -118,12 +154,12 @@ export function SearchPalette(): JSX.Element {
               } else if (e.key === 'Enter' && e.shiftKey) {
                 e.preventDefault()
                 e.stopPropagation()
-                createOrOpenFromQuery()
+                if (createRow) setDraft(createRow)
               } else if (e.key === 'Enter') {
                 e.preventDefault()
                 const note = results[active]
                 if (note) void open(note)
-                else if (createRow && active === results.length) void createFromQuery(createRow)
+                else if (createRow && active === results.length) setDraft(createRow)
               } else if (
                 e.ctrlKey &&
                 !e.metaKey &&
@@ -189,7 +225,7 @@ export function SearchPalette(): JSX.Element {
             <button
               data-search-idx={results.length}
               data-search-create=""
-              onClick={() => void createFromQuery(createRow)}
+              onClick={() => setDraft(createRow)}
               onMouseMove={() => setActive(results.length)}
               className={[
                 'flex w-full min-w-0 items-center gap-3 px-4 py-2 text-left',
@@ -198,12 +234,10 @@ export function SearchPalette(): JSX.Element {
             >
               <span className="min-w-0 flex-1 truncate text-sm text-ink-900">
                 <span className="text-ink-500">Create </span>
-                <span className="font-medium">"{createRow.title}"</span>
+                <span className="font-medium">"{createRow.name}"</span>
+                <span className="text-ink-500">…</span>
               </span>
-              <span className="shrink-0 text-xs text-ink-400">
-                <span className="uppercase tracking-wide">{createRow.folder}</span>
-                {createRow.subpath ? `/${createRow.subpath}` : ''}
-              </span>
+              <span className="shrink-0 text-xs text-ink-400">{createRowWhere}</span>
             </button>
           )}
         </div>
@@ -216,7 +250,7 @@ export function SearchPalette(): JSX.Element {
             <kbd className="rounded bg-paper-200 px-1">↵</kbd> open
           </span>
           <span>
-            <kbd className="rounded bg-paper-200 px-1">Shift+↵</kbd> create
+            <kbd className="rounded bg-paper-200 px-1">Shift+↵</kbd> new note
           </span>
           <span>
             <kbd className="rounded bg-paper-200 px-1">Ctrl+D</kbd> trash

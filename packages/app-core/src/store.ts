@@ -131,6 +131,7 @@ import {
   buildTemplateDestinationPrompt,
   parseTemplateDestination
 } from './lib/move-note'
+import { composeNewNoteBody } from './lib/search-create'
 import type { KeymapId, KeymapOverrides } from './lib/keymaps'
 import { normalizeKeymapOverrides } from './lib/keymaps'
 import {
@@ -3395,10 +3396,12 @@ interface Store {
   formatActiveNote: () => Promise<void>
   renameNote: (oldPath: string, nextTitle: string, hostIsCurrent?: () => boolean) => Promise<void>
   renameActive: (nextTitle: string) => Promise<void>
+  /** Create a note and open it. `tags` seeds the body with one line of
+   *  `#tags` under the heading, the way `zn capture --tag` does. */
   createAndOpen: (
     folder: NoteFolder,
     subpath?: string,
-    options?: { focusTitle?: boolean; title?: string }
+    options?: { focusTitle?: boolean; title?: string; tags?: readonly string[] }
   ) => Promise<void>
   createDrawingAndOpen: (folder: NoteFolder, subpath?: string) => Promise<void>
   /** Quick-add a whole-note task file (`#task`-tagged, TaskNotes-style). Prompts
@@ -7940,6 +7943,11 @@ export const useStore = create<Store>((set, get) => {
     try {
       const meta = await window.zen.createNote(folder, options?.title, subpath)
       rememberEditModeForCreatedNote(meta.path)
+      // The heading uses the title the vault settled on, which may carry a
+      // " 2" suffix the requested one did not.
+      if (options?.tags && options.tags.length > 0) {
+        await window.zen.writeNote(meta.path, composeNewNoteBody(meta.title, options.tags))
+      }
       await get().refreshNotes()
       set({
         view: { kind: 'folder', folder, subpath },
