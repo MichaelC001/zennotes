@@ -420,6 +420,11 @@ describe('#585 — dirty buffers survive watcher change events', () => {
     await flush()
 
     expect(useStore.getState().noteContents[target]?.body).toBe('INDEX_BODY with unsaved edits')
+    // The edit above armed a real debounced save. Settle it here: a timer that
+    // outlives its test fires into whichever test is running 350 ms later and
+    // shows up there as a write nobody asked for.
+    await useStore.getState().persistNote(target)
+    expect(vault.get(target)).toBe('INDEX_BODY with unsaved edits')
   })
 })
 
@@ -525,6 +530,9 @@ describe('#828: a buffer back on its saved bytes is not rewritten', () => {
 
   it('typing ahead of a write and then returning to the written body is clean', async () => {
     const { useStore, target } = await openIndex()
+    // Installed before the first edit so every debounce timer this test arms
+    // is a fake one that the fake clearTimeout can actually cancel.
+    vi.useFakeTimers()
     let release!: () => void
     const gate = new Promise<void>((r) => {
       release = r
@@ -545,7 +553,6 @@ describe('#828: a buffer back on its saved bytes is not rewritten', () => {
     await persisting
     expect(useStore.getState().noteDirty[target]).toBe(true)
 
-    vi.useFakeTimers()
     useStore.getState().updateNoteBody(target, 'FIRST')
     await vi.advanceTimersByTimeAsync(1000)
 
