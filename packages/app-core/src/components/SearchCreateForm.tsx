@@ -397,6 +397,9 @@ export function SearchCreateForm({
                 variant="ghost"
                 size="sm"
                 className="text-xs"
+                // Same reason as the footer: a blur here commits the typed tag
+                // as a chip, and a chips row that wraps moves this button.
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onOpenExisting(collision.note)}
               >
                 Open it <kbd className="rounded bg-paper-200 px-1 text-ink-500">Shift+↵</kbd>
@@ -484,7 +487,15 @@ export function SearchCreateForm({
             <kbd className="rounded bg-paper-200 px-1">esc</kbd> back
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div
+          className="flex items-center gap-2"
+          // The buttons act on click and never need focus. Taking it on
+          // mousedown would blur the field, unmount the folder or tag list
+          // under the fields and move this footer before mouseup, so the
+          // click never fired: the first Create with a tag still typed was
+          // lost. `create()` counts that text, the way Enter does.
+          onMouseDown={(e) => e.preventDefault()}
+        >
           <Button variant="secondary" size="sm" onClick={onBack}>
             Back
           </Button>

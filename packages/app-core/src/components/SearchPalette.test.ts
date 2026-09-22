@@ -456,6 +456,62 @@ describe('SearchPalette: the create row opens a New note form', () => {
     expect(createAndOpen).toHaveBeenCalledWith('inbox', '', { title: 'Runbook', tags: ['oncall'] })
   })
 
+  // A browser moves focus to a pressed button as mousedown's default action,
+  // unless the event is cancelled; jsdom leaves that step to the test. The
+  // blur used to unmount the list under the fields and move the footer
+  // before mouseup, so the click never fired and the first Create was lost.
+  const press = async (button: HTMLElement, focusedField: HTMLInputElement): Promise<void> => {
+    await act(async () => {
+      const uncancelled = button.dispatchEvent(
+        new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+      )
+      if (uncancelled) focusedField.blur()
+      await Promise.resolve()
+    })
+  }
+
+  it('pressing the mouse on Create keeps the Tags field focused, so the click lands and the typed tag counts', async () => {
+    type(search(), 'Runbook')
+    await key(search(), 'Enter', { shiftKey: true })
+    focus(field('tags'))
+    type(field('tags'), 'oncall')
+    expect(formRows('tag')).toEqual(['oncall'])
+
+    await press(createButton(), field('tags'))
+    expect(document.activeElement).toBe(field('tags'))
+    expect(formRows('tag')).toEqual(['oncall'])
+    expect(chipTags()).toEqual([])
+
+    await act(async () => {
+      createButton().click()
+      await Promise.resolve()
+    })
+    expect(createAndOpen).toHaveBeenCalledWith('inbox', '', { title: 'Runbook', tags: ['oncall'] })
+  })
+
+  it('pressing the mouse on Back keeps the folder list until the click', async () => {
+    type(search(), 'Runbook')
+    await key(search(), 'Enter', { shiftKey: true })
+    focus(field('folder'))
+    expect(formRows('folder')).toEqual(['', 'projects', 'projects/ideas', 'quick', 'archive', 'archive/old'])
+
+    const back = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent === 'Back'
+    )
+    if (!back) throw new Error('Back button not rendered')
+    await press(back, field('folder'))
+    expect(document.activeElement).toBe(field('folder'))
+    expect(formRows('folder')).toHaveLength(6)
+
+    await act(async () => {
+      back.click()
+      await Promise.resolve()
+    })
+    expect(form()).toBeNull()
+    expect(search().value).toBe('Runbook')
+    expect(createAndOpen).not.toHaveBeenCalled()
+  })
+
   it('Ctrl+Enter or Cmd+Enter creates from any field', async () => {
     type(search(), 'Runbook')
     await key(search(), 'Enter', { shiftKey: true })
