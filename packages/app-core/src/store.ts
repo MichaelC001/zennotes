@@ -3791,6 +3791,15 @@ const pathSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
  *  older one to the final rename. */
 const pathSaveQueues = new Map<string, Promise<void>>()
 const PATH_SAVE_DEBOUNCE_MS = 350
+/** The on-disk body of every dirty note, taken from the buffer the moment it
+ *  first drifted from disk (a clean buffer equals disk) and moved forward by
+ *  each completed write. An edit that brings the buffer back to these bytes
+ *  is not a change: a custom Vim insert-mode escape such as `jk` types and
+ *  removes its `j`, and saving the identical text only moved the file's mtime
+ *  and the {{modified_*}} tokens with it (#828). Entries are consulted only
+ *  while `noteDirty[path]` is true and are replaced by the note's next edit
+ *  once it is clean again, so a leftover for a clean note is never read. */
+const savedBodies = new Map<string, string>()
 // Only the latest watcher read may apply, and a newer local save invalidates
 // older reads even if it finishes or returns to the same starting body.
 const noteContentVersions = new Map<string, number>()
@@ -7671,12 +7680,18 @@ export const useStore = create<Store>((set, get) => {
 
   updateNoteBody: (path, body) => {
     if (isNoteEditingLocked(get().vault, path)) return
+    let backOnDisk = false
     set((s) => {
       const existing = s.noteContents[path]
       if (existing) body = rewriteRenamingBody(path, body, existing.folder)
       if (!existing || existing.body === body) return s
+      if (!s.noteDirty[path]) savedBodies.set(path, existing.body)
+      // While a write is in flight the bytes on disk are changing under us,
+      // so only a settled note can be declared back on them; the completion
+      // below records what actually landed for the next comparison.
+      backOnDisk = !pathSaveQueues.has(path) && savedBodies.get(path) === body
       const contents = { ...s.noteContents, [path]: { ...existing, body } }
-      const dirty = { ...s.noteDirty, [path]: true }
+      const dirty = { ...s.noteDirty, [path]: !backOnDisk }
       // Editing a preview tab promotes it to a permanent tab (VS Code
       // behavior) so the edit can't be displaced by the next preview.
       // Cheap guard first: this runs on every keystroke.
@@ -7691,6 +7706,15 @@ export const useStore = create<Store>((set, get) => {
         ...activeFieldsFrom(layout, s.activePaneId, contents, dirty)
       }
     })
+    if (backOnDisk) {
+      savedBodies.delete(path)
+      const pending = pathSaveTimers.get(path)
+      if (pending) {
+        clearTimeout(pending)
+        pathSaveTimers.delete(path)
+      }
+      return
+    }
     if (folderMutationBlocks(path)) return
     // Debounced disk write.
     const existing = pathSaveTimers.get(path)
@@ -7743,8 +7767,11 @@ export const useStore = create<Store>((set, get) => {
         }
         set((cur) => {
           // Keystrokes that landed while the write was in flight leave the
-          // buffer ahead of disk. The queued caller will persist them next.
+          // buffer ahead of disk. The queued caller will persist them next,
+          // unless they take the buffer back to the bytes just written.
           const stillCurrent = cur.noteContents[path]?.body === writtenBody
+          if (stillCurrent || !cur.noteContents[path]) savedBodies.delete(path)
+          else savedBodies.set(path, writtenBody)
           const dirty = stillCurrent ? { ...cur.noteDirty, [path]: false } : cur.noteDirty
           return {
             noteDirty: dirty,
