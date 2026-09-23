@@ -151,8 +151,16 @@ export async function moveWithCreationMetadata(
       },
     )
   const hasMetadata = await exists(source)
-  if (await exists(target))
-    throw new Error(`Destination metadata already exists: ${target}`)
+  if (await exists(target)) {
+    // A note's creation date waiting where no note is belongs to nobody (its
+    // note was moved or deleted outside ZenNotes). Creating a note there
+    // already discards it, and a rename or move onto the name must not be
+    // refused for good because of it (#839). A folder's metadata tree still
+    // refuses: dropping a whole tree of dates is a bigger call than one.
+    if (directory || (await exists(to)))
+      throw new Error(`Destination metadata already exists: ${target}`)
+    await fs.rm(target, { force: true })
+  }
   if (hasMetadata) {
     await fs.mkdir(path.dirname(target), { recursive: true })
     await fs.rename(source, target)

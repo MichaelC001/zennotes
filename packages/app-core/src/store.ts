@@ -7930,6 +7930,16 @@ export const useStore = create<Store>((set, get) => {
     } catch (err) {
       if (hostIsCurrent) throw err
       console.error('renameNote failed', err)
+      // Every rename in the UI (title field, sidebar, note list, :rename)
+      // lands here, and a refusal used to leave the old name in place with
+      // nothing said about why (#839).
+      const title =
+        get().notes.find((note) => note.path === oldPath)?.title ??
+        oldPath.split('/').pop()?.replace(/\.(md|excalidraw)$/i, '') ??
+        oldPath
+      useToastStore
+        .getState()
+        .addToast(`Could not rename “${title}”: ${humanIpcError(err, 'the rename failed.')}`, 'error')
     }
   },
 

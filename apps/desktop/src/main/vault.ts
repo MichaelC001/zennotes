@@ -3547,15 +3547,26 @@ export async function renameNote(
   const ext = isExcalidrawPath(abs) ? '.excalidraw' : '.md'
   const target = path.join(dir, `${trimmed}${ext}`)
   const willRename = target !== abs
+  if (willRename) {
+    // Said plainly, since the app shows this reason to whoever is renaming. A
+    // case-only rename finds the note itself on a case-insensitive disk.
+    const [source, taken] = await Promise.all([
+      fs.stat(abs),
+      fs.stat(target).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return null
+        throw error
+      })
+    ])
+    if (taken && (taken.ino !== source.ino || taken.dev !== source.dev))
+      throw new Error(`A note named “${trimmed}” already exists in this folder`)
+  }
   // Snapshot the vault before the rename so inbound [[wikilinks]] still
   // resolve to this note under its current name; we rewrite them afterwards.
   const notesBefore = willRename ? await listNotes(root) : []
-  const nextRel = toPosix(path.relative(root, target))
   let meta!: NoteMeta
-  await relocateFolderTrees(
-    [[abs, target], [noteCommentsPath(root, rel), noteCommentsPath(root, nextRel)], [await noteMetadataPath(root, rel), await noteMetadataPath(root, nextRel)]],
-    async () => { meta = await readMeta(root, target, folder) }
-  )
+  await relocateNote(root, rel, target, async () => {
+    meta = await readMeta(root, target, folder)
+  })
   invalidateNoteMetaCache(root, rel)
   invalidateNoteMetaCache(root, meta.path)
   invalidateVaultTextSearchCache(root)
@@ -3628,12 +3639,10 @@ async function moveBetweenFolders(
   const destDir = subpath ? resolveSafe(targetRoot, subpath) : targetRoot
   await fs.mkdir(destDir, { recursive: true })
   const destAbs = path.join(destDir, await uniqueFilename(destDir, filename))
-  const nextRel = toPosix(path.relative(root, destAbs))
   let meta!: NoteMeta
-  await relocateFolderTrees(
-    [[abs, destAbs], [noteCommentsPath(root, rel), noteCommentsPath(root, nextRel)], [await noteMetadataPath(root, rel), await noteMetadataPath(root, nextRel)]],
-    async () => { meta = await readMeta(root, destAbs, target) }
-  )
+  await relocateNote(root, rel, destAbs, async () => {
+    meta = await readMeta(root, destAbs, target)
+  })
   invalidateNoteMetaCache(root, rel)
   invalidateNoteMetaCache(root, meta.path)
   invalidateVaultTextSearchCache(root)
@@ -3986,6 +3995,51 @@ async function renameDirectory(from: string, to: string): Promise<void> {
     }
     throw error
   }
+}
+
+async function pathExists(abs: string): Promise<boolean> {
+  return fs.lstat(abs).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return false
+      throw error
+    }
+  )
+}
+
+/**
+ * Move one note with its comments and its creation date. A creation date
+ * already waiting at the destination with no note beside it belongs to
+ * nobody: the note that owned it was moved or deleted outside ZenNotes (a
+ * file manager, git, sync, a workflow run). It is discarded, the way
+ * `createNote` already discards it, or every rename and move onto that name
+ * was refused for good, silently (#839). Leftover comments still refuse:
+ * taking over another note's discussion and deleting it are both wrong, so
+ * the error names the file to move aside.
+ */
+async function relocateNote(
+  root: string,
+  fromRel: string,
+  toAbs: string,
+  persistSettings: () => Promise<unknown>
+): Promise<void> {
+  const toRel = toPosix(path.relative(root, toAbs))
+  const toComments = noteCommentsPath(root, toRel)
+  if (!(await pathExists(toAbs))) {
+    if (await pathExists(toComments))
+      throw new Error(
+        `Comments from an earlier note named “${path.parse(toAbs).name}” are still in ${toPosix(path.relative(root, toComments))}. Move or delete that file to use this name.`
+      )
+    await removeNoteCreation(root, toRel)
+  }
+  await relocateFolderTrees(
+    [
+      [resolveSafe(root, fromRel), toAbs],
+      [noteCommentsPath(root, fromRel), toComments],
+      [await noteMetadataPath(root, fromRel), await noteMetadataPath(root, toRel)]
+    ],
+    persistSettings
+  )
 }
 
 /** Move content and its parallel comments together, retaining the originals on failure. */
@@ -4367,12 +4421,10 @@ export async function moveNote(
   await fs.mkdir(destDir, { recursive: true })
   const finalName = await uniqueFilename(destDir, filename)
   const destAbs = path.join(destDir, finalName)
-  const nextRel = toPosix(path.relative(root, destAbs))
   let meta!: NoteMeta
-  await relocateFolderTrees(
-    [[oldAbs, destAbs], [noteCommentsPath(root, oldRel), noteCommentsPath(root, nextRel)], [await noteMetadataPath(root, oldRel), await noteMetadataPath(root, nextRel)]],
-    async () => { meta = await readMeta(root, destAbs, targetFolder) }
-  )
+  await relocateNote(root, oldRel, destAbs, async () => {
+    meta = await readMeta(root, destAbs, targetFolder)
+  })
   invalidateNoteMetaCache(root, oldRel)
   invalidateNoteMetaCache(root, meta.path)
   invalidateVaultTextSearchCache(root)
