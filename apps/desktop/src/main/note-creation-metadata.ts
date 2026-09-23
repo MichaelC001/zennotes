@@ -5,12 +5,16 @@ import { randomInt } from 'node:crypto'
 const metadataDirectory = '.zennotes/note-metadata'
 const metadataSuffix = '.metadata.json'
 
+export function noteMetadataRoot(root: string): string {
+  return path.resolve(root, metadataDirectory)
+}
+
 export async function noteMetadataPath(
   root: string,
   rel: string,
   directory = false,
 ): Promise<string> {
-  const base = path.resolve(root, metadataDirectory)
+  const base = noteMetadataRoot(root)
   const target = path.resolve(base, rel + (directory ? '' : metadataSuffix))
   if (target === base || !target.startsWith(base + path.sep))
     throw new Error('Path escapes note metadata')
@@ -123,61 +127,4 @@ export async function removeNoteCreation(
     force: true,
     recursive: directory,
   })
-}
-
-export async function moveWithCreationMetadata(
-  root: string,
-  from: string,
-  to: string,
-  directory = false,
-): Promise<void> {
-  if (from === to) return
-  const source = await noteMetadataPath(
-    root,
-    path.relative(root, from),
-    directory,
-  )
-  const target = await noteMetadataPath(
-    root,
-    path.relative(root, to),
-    directory,
-  )
-  const exists = async (abs: string): Promise<boolean> =>
-    fs.lstat(abs).then(
-      () => true,
-      (error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return false
-        throw error
-      },
-    )
-  const hasMetadata = await exists(source)
-  if (await exists(target)) {
-    // A note's creation date waiting where no note is belongs to nobody (its
-    // note was moved or deleted outside ZenNotes). Creating a note there
-    // already discards it, and a rename or move onto the name must not be
-    // refused for good because of it (#839). A folder's metadata tree still
-    // refuses: dropping a whole tree of dates is a bigger call than one.
-    if (directory || (await exists(to)))
-      throw new Error(`Destination metadata already exists: ${target}`)
-    await fs.rm(target, { force: true })
-  }
-  if (hasMetadata) {
-    await fs.mkdir(path.dirname(target), { recursive: true })
-    await fs.rename(source, target)
-  }
-  try {
-    await fs.rename(from, to)
-  } catch (error) {
-    if (hasMetadata) {
-      try {
-        await fs.rename(target, source)
-      } catch (rollback) {
-        throw new AggregateError(
-          [error, rollback],
-          'Note move and metadata rollback failed; reload before editing',
-        )
-      }
-    }
-    throw error
-  }
 }

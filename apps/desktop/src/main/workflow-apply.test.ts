@@ -7,7 +7,8 @@
 // promise a rollback makes and a content comparison is the only thing that
 // checks it.
 import { createHash } from 'node:crypto'
-import { lstat, mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { promises as fsPromises } from 'node:fs'
+import { lstat, mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -25,6 +26,8 @@ import {
   undoWorkflowRun,
   type WorkflowRunLedger
 } from './workflow-apply'
+import { registerEphemeralRoot, unregisterEphemeralRoot } from './ephemeral-vaults'
+import { readNoteCreatedAt } from './note-creation-metadata'
 
 /**
  * Paths whose atomic write should fail, so the "the rollback itself failed"
@@ -515,6 +518,445 @@ describe('path operations', () => {
 
     await undoWorkflowRun(root, receipt.runId)
     expect(await snapshot(root)).toEqual(before)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/*  A note's sidecars                                                         */
+/* -------------------------------------------------------------------------- */
+
+/** Where `.zennotes` keeps a note's comments and its creation date. */
+function commentsRel(note: string): string {
+  return `.zennotes/comments/${note}.comments.json`
+}
+
+function metadataRel(note: string): string {
+  return `.zennotes/note-metadata/${note}.metadata.json`
+}
+
+/**
+ * Make every way of putting a file at `abs` fail: an atomic write, and the
+ * rename undo uses to move an untouched sidecar back. Only renames TO it, so
+ * the run can still move the file away.
+ */
+function failEveryWriteTo(abs: string): void {
+  injected.failingWrites.add(abs)
+  const rename = fsPromises.rename.bind(fsPromises)
+  vi.spyOn(fsPromises, 'rename').mockImplementation(async (from, to) => {
+    if (String(to) === abs) throw new Error('simulated disk failure')
+    return rename(from, to)
+  })
+}
+
+// The applier moves these as bytes and never parses them; realistic content
+// only keeps the assertions readable.
+const COMMENTS = '[{"id":"c1","body":"Keep this discussion"}]\n'
+const CREATED = '{"version":1,"createdAt":1700000000000}\n'
+
+/** A note with both sidecars, the way the app leaves one it has saved. */
+async function seedWithSidecars(root: string, note: string): Promise<void> {
+  await seed(root, note, 'body\n')
+  await seed(root, commentsRel(note), COMMENTS)
+  await seed(root, metadataRel(note), CREATED)
+}
+
+async function pathExists(abs: string): Promise<boolean> {
+  return lstat(abs).then(
+    () => true,
+    () => false
+  )
+}
+
+// Before, a path op moved the Markdown alone: the comments stayed behind at the
+// old name, detached from the note, and the leftover files blocked or polluted
+// the next note given that name (#839).
+describe("a note's sidecars travel with it", () => {
+  it('moves its comments and creation date with it, journalled beside the note', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+
+    const receipt = await apply(root, [{ kind: 'move', path: 'inbox/Note.md', to: 'archive' }])
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(receipt.paths).toEqual(['inbox/Note.md', 'archive/Note.md'])
+    expect(await readOrNull(root, commentsRel('archive/Note.md'))).toBe(COMMENTS)
+    expect(await readOrNull(root, metadataRel('archive/Note.md'))).toBe(CREATED)
+    expect(await readOrNull(root, commentsRel('inbox/Note.md'))).toBeNull()
+    expect(await readOrNull(root, metadataRel('inbox/Note.md'))).toBeNull()
+    // The notes' journal is exactly what it always was, so an older ZenNotes or
+    // the Go server reading this ledger still undoes the notes.
+    expect(ledger.journal).toEqual([
+      { path: 'inbox/Note.md', before: 'body\n' },
+      { path: 'archive/Note.md', before: null }
+    ])
+    expect(ledger.sidecars).toEqual([
+      { note: 'inbox/Note.md', sidecar: 'comments', before: COMMENTS, after: null },
+      { note: 'archive/Note.md', sidecar: 'comments', before: null, after: sha256(COMMENTS) },
+      { note: 'inbox/Note.md', sidecar: 'metadata', before: CREATED, after: null },
+      { note: 'archive/Note.md', sidecar: 'metadata', before: null, after: sha256(CREATED) }
+    ])
+  })
+
+  const pathOps: Array<[string, WorkflowOp, string]> = [
+    ['rename', { kind: 'rename', path: 'inbox/demo/Note.md', to: 'Renamed' }, 'inbox/demo/Renamed.md'],
+    ['archive', { kind: 'archive', path: 'inbox/demo/Note.md' }, 'archive/demo/Note.md'],
+    ['trash', { kind: 'trash', path: 'inbox/demo/Note.md' }, 'trash/demo/Note.md']
+  ]
+
+  it.each(pathOps)('%s carries them too', async (_kind, op, landed) => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/demo/Note.md')
+
+    await apply(root, [op])
+
+    expect(await readOrNull(root, landed)).toBe('body\n')
+    expect(await readOrNull(root, commentsRel(landed))).toBe(COMMENTS)
+    expect(await readOrNull(root, metadataRel(landed))).toBe(CREATED)
+    expect(await readOrNull(root, commentsRel('inbox/demo/Note.md'))).toBeNull()
+    expect(await readOrNull(root, metadataRel('inbox/demo/Note.md'))).toBeNull()
+  })
+
+  it('undo puts them back and leaves no empty sidecar folders behind', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/demo/Note.md')
+
+    const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/demo/Note.md' }])
+    expect(await readOrNull(root, commentsRel('archive/demo/Note.md'))).toBe(COMMENTS)
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    // Notes only: the toast says "files restored", and these are two.
+    expect(undo.restored).toBe(2)
+    expect(undo.driftedPaths).toEqual([])
+    expect(await readOrNull(root, 'inbox/demo/Note.md')).toBe('body\n')
+    expect(await readOrNull(root, commentsRel('inbox/demo/Note.md'))).toBe(COMMENTS)
+    expect(await readOrNull(root, metadataRel('inbox/demo/Note.md'))).toBe(CREATED)
+    // A folder rename refuses a destination whose sidecar folder exists, so an
+    // empty one left here would block `archive/demo` with nothing to show why.
+    expect(await pathExists(path.join(root, '.zennotes', 'comments', 'archive'))).toBe(false)
+    expect(await pathExists(path.join(root, '.zennotes', 'note-metadata', 'archive'))).toBe(false)
+  })
+
+  it('undo moves an untouched sidecar back instead of rewriting it', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+    const { ino } = await stat(path.join(root, commentsRel('inbox/Note.md')))
+
+    const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+    expect((await stat(path.join(root, commentsRel('archive/Note.md')))).ino).toBe(ino)
+    await undoWorkflowRun(root, receipt.runId)
+
+    // The same file, not a copy: a sync client sees it move back, and undoing a
+    // bulk move costs a rename per sidecar instead of a synced rewrite.
+    expect((await stat(path.join(root, commentsRel('inbox/Note.md')))).ino).toBe(ino)
+    expect(await readOrNull(root, commentsRel('inbox/Note.md'))).toBe(COMMENTS)
+    expect(await readOrNull(root, commentsRel('archive/Note.md'))).toBeNull()
+  })
+
+  it('a rollback puts them back too', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+    // The end state alone cannot tell "moved and put back" from "never moved".
+    const moved: string[] = []
+    const rename = fsPromises.rename.bind(fsPromises)
+    vi.spyOn(fsPromises, 'rename').mockImplementation(async (from, to) => {
+      moved.push(path.relative(root, String(to)).split(path.sep).join('/'))
+      return rename(from, to)
+    })
+
+    const receipt = await apply(root, [
+      { kind: 'archive', path: 'inbox/Note.md' },
+      { kind: 'trash', path: 'inbox/Missing.md' }
+    ])
+
+    expect(moved).toContain(commentsRel('archive/Note.md'))
+    expect(moved).toContain(metadataRel('archive/Note.md'))
+    expect(receipt.rolledBack?.reason).toMatch(/vault is unchanged/)
+    expect(await readOrNull(root, commentsRel('inbox/Note.md'))).toBe(COMMENTS)
+    expect(await readOrNull(root, metadataRel('inbox/Note.md'))).toBe(CREATED)
+    expect(await readOrNull(root, commentsRel('archive/Note.md'))).toBeNull()
+    expect(await readOrNull(root, metadataRel('archive/Note.md'))).toBeNull()
+  })
+
+  it('a note moved twice in one run comes back with only the comments it had', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+
+    const receipt = await apply(root, [
+      { kind: 'move', path: 'inbox/Note.md', to: 'inbox/Work' },
+      { kind: 'rename', path: 'inbox/Work/Note.md', to: 'Final' }
+    ])
+    expect(await readOrNull(root, commentsRel('inbox/Work/Final.md'))).toBe(COMMENTS)
+    expect(await readOrNull(root, commentsRel('inbox/Work/Note.md'))).toBeNull()
+
+    await undoWorkflowRun(root, receipt.runId)
+
+    expect(await readOrNull(root, commentsRel('inbox/Note.md'))).toBe(COMMENTS)
+    expect(await readOrNull(root, commentsRel('inbox/Work/Note.md'))).toBeNull()
+    expect(await readOrNull(root, commentsRel('inbox/Work/Final.md'))).toBeNull()
+  })
+
+  it('replaces a leftover creation date at the destination, and undo brings it back', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+    const leftover = '{"version":1,"createdAt":1600000000000}\n'
+    await seed(root, metadataRel('archive/Note.md'), leftover)
+
+    const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+
+    expect(receipt.rolledBack).toBeUndefined()
+    // A date alone does not take the name, so there is no `Note 2.md`.
+    expect(await readOrNull(root, 'archive/Note.md')).toBe('body\n')
+    expect(await readOrNull(root, metadataRel('archive/Note.md'))).toBe(CREATED)
+
+    await undoWorkflowRun(root, receipt.runId)
+
+    expect(await readOrNull(root, metadataRel('archive/Note.md'))).toBe(leftover)
+    expect(await readOrNull(root, metadataRel('inbox/Note.md'))).toBe(CREATED)
+  })
+
+  it('refuses a destination holding an earlier note’s comments, names the file, and rolls back', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await seedWithSidecars(root, 'inbox/Note.md')
+    await seed(root, commentsRel('archive/Note.md'), 'an earlier discussion\n')
+    const before = await snapshot(root)
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'edit' },
+      { kind: 'archive', path: 'inbox/Note.md' }
+    ])
+
+    // One sentence ending, not two: the shared message brings its own.
+    expect(receipt.rolledBack?.reason).toBe(
+      'Comments from an earlier note named “Note” are still in .zennotes/comments/archive/Note.md.comments.json. ' +
+        'Move or delete that file to use this name. The run was rolled back; your vault is unchanged.'
+    )
+    expect(await snapshot(root)).toEqual(before)
+    expect(await readOrNull(root, commentsRel('inbox/Note.md'))).toBe(COMMENTS)
+    expect(await readOrNull(root, commentsRel('archive/Note.md'))).toBe('an earlier discussion\n')
+  })
+
+  it('writes down the date of a note ZenNotes never saved, so undo can bring it back', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/Note.md', 'body\n')
+    const born = await stat(path.join(root, 'inbox', 'Note.md'))
+    const createdAt = Math.trunc(born.birthtimeMs || born.ctimeMs)
+
+    const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+    expect(JSON.parse((await readOrNull(root, metadataRel('archive/Note.md'))) ?? 'null')).toEqual({
+      version: 1,
+      createdAt
+    })
+
+    await undoWorkflowRun(root, receipt.runId)
+
+    // Undo writes the note back as a new file, born at the undo. The date the
+    // app shows comes from the sidecar the run wrote down; with no sidecar it
+    // would be this fallback.
+    expect(await readNoteCreatedAt(root, 'inbox/Note.md', -1)).toBe(createdAt)
+    expect(await readOrNull(root, metadataRel('archive/Note.md'))).toBeNull()
+  })
+
+  it('writes no date in a temporary folder session, and still clears a leftover one', async () => {
+    const root = await makeVault()
+    registerEphemeralRoot(root)
+    try {
+      await seed(root, 'inbox/Note.md', 'body\n')
+      await seed(root, metadataRel('archive/Note.md'), CREATED)
+
+      const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+
+      expect(await readOrNull(root, 'archive/Note.md')).toBe('body\n')
+      expect(await readOrNull(root, metadataRel('archive/Note.md'))).toBeNull()
+      expect(await readOrNull(root, metadataRel('inbox/Note.md'))).toBeNull()
+
+      await undoWorkflowRun(root, receipt.runId)
+
+      expect(await readOrNull(root, metadataRel('archive/Note.md'))).toBe(CREATED)
+    } finally {
+      unregisterEphemeralRoot(root)
+    }
+  })
+
+  it('names a note whose comments changed since the run as drifted, and restores them anyway', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+
+    const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+    await seed(root, commentsRel('archive/Note.md'), 'a reply added since\n')
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo.driftedPaths).toEqual(['archive/Note.md'])
+    expect(await readOrNull(root, commentsRel('inbox/Note.md'))).toBe(COMMENTS)
+  })
+
+  it('an undo that cannot put the comments back names the note and stays undoable', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+    const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+
+    failEveryWriteTo(path.join(root, commentsRel('inbox/Note.md')))
+    await expect(undoWorkflowRun(root, receipt.runId)).rejects.toThrow(
+      /inbox\/Note\.md \(its comments: simulated disk failure\)/
+    )
+
+    injected.failingWrites.clear()
+    vi.restoreAllMocks()
+    await undoWorkflowRun(root, receipt.runId)
+    expect(await readOrNull(root, commentsRel('inbox/Note.md'))).toBe(COMMENTS)
+  })
+
+  it('a rollback that cannot put the comments back says so, and undo can retry', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+    failEveryWriteTo(path.join(root, commentsRel('inbox/Note.md')))
+
+    const receipt = await apply(root, [
+      { kind: 'archive', path: 'inbox/Note.md' },
+      { kind: 'trash', path: 'inbox/Missing.md' }
+    ])
+
+    expect(receipt.rolledBack?.reason).toMatch(/ROLLBACK INCOMPLETE/)
+    expect(receipt.rolledBack?.reason).toContain('inbox/Note.md (its comments: simulated disk failure)')
+    expect(receipt.paths).toEqual(['inbox/Note.md'])
+
+    injected.failingWrites.clear()
+    vi.restoreAllMocks()
+    const [run] = await listWorkflowRuns(root)
+    expect(run?.undoable).toBe(true)
+    await undoWorkflowRun(root, receipt.runId)
+    expect(await readOrNull(root, commentsRel('inbox/Note.md'))).toBe(COMMENTS)
+  })
+
+  it('are in the crash journal before the note moves', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+    const noteAbs = path.join(root, 'inbox', 'Note.md')
+    const rename = fsPromises.rename.bind(fsPromises)
+    let midRun: Record<string, unknown>[] = []
+    vi.spyOn(fsPromises, 'rename').mockImplementation(async (from, to) => {
+      if (from === noteAbs && midRun.length === 0) {
+        const [name] = await journalNames(root)
+        if (name) midRun = journalLines(await readFile(path.join(runsDirOf(root), name), 'utf8'))
+      }
+      return rename(from, to)
+    })
+
+    await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+
+    // No `path` on a sidecar line: an older ZenNotes recovering this journal
+    // skips those lines rather than failing the undo on a `.zennotes` path.
+    expect(midRun.slice(1)).toEqual([
+      { path: 'inbox/Note.md', before: 'body\n' },
+      { path: 'archive/Note.md', before: null },
+      { note: 'inbox/Note.md', sidecar: 'comments', before: COMMENTS },
+      { note: 'archive/Note.md', sidecar: 'comments', before: null },
+      { note: 'inbox/Note.md', sidecar: 'metadata', before: CREATED },
+      { note: 'archive/Note.md', sidecar: 'metadata', before: null }
+    ])
+  })
+
+  it('share one sync with the note, however many files the move journals', async () => {
+    // A sync per journal line made a 400-note move with comments and dates about
+    // three times slower than before sidecars moved at all, for no extra safety.
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+    let syncs = 0
+    const open = fsPromises.open.bind(fsPromises)
+    vi.spyOn(fsPromises, 'open').mockImplementation(async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args)
+      if (String(args[0]).endsWith('.journal.jsonl')) {
+        const sync = handle.sync.bind(handle)
+        handle.sync = async () => {
+          syncs += 1
+          return sync()
+        }
+      }
+      return handle
+    })
+
+    await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+
+    // The header when the journal opens, then all six entries at once.
+    expect(syncs).toBe(2)
+  })
+
+  it('come back from the journal a dead process left', async () => {
+    const root = await makeVault()
+    // A run killed after its last rename: note and comments already at the
+    // destination, the journal on disk, no ledger.
+    await seed(root, 'archive/Note.md', 'body\n')
+    await seed(root, commentsRel('archive/Note.md'), COMMENTS)
+    const orphan = '1700000000000-001-aaaaaaaa'
+    await mkdir(runsDirOf(root), { recursive: true })
+    await writeFile(
+      journalPath(root, orphan),
+      [
+        { version: 1, runId: orphan, workflowId: 'dead', startedAt: 1700000000000 },
+        { path: 'inbox/Note.md', before: 'body\n' },
+        { path: 'archive/Note.md', before: null },
+        { note: 'inbox/Note.md', sidecar: 'comments', before: COMMENTS },
+        { note: 'archive/Note.md', sidecar: 'comments', before: null }
+      ]
+        .map((line) => `${JSON.stringify(line)}\n`)
+        .join(''),
+      'utf8'
+    )
+
+    const [run] = await listWorkflowRuns(root)
+    expect(run?.interrupted).toBe(true)
+    expect(run?.paths).toEqual(['inbox/Note.md', 'archive/Note.md'])
+    expect((await readLedger(root, orphan)).sidecars).toEqual([
+      { note: 'inbox/Note.md', sidecar: 'comments', before: COMMENTS },
+      { note: 'archive/Note.md', sidecar: 'comments', before: null }
+    ])
+
+    const undo = await undoWorkflowRun(root, orphan)
+
+    expect(undo.driftedPaths).toEqual([])
+    expect(await readOrNull(root, 'inbox/Note.md')).toBe('body\n')
+    expect(await readOrNull(root, commentsRel('inbox/Note.md'))).toBe(COMMENTS)
+    expect(await readOrNull(root, commentsRel('archive/Note.md'))).toBeNull()
+  })
+
+  it('a ledger written before sidecars were journalled still undoes its notes', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+    const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+    const ledgerPath = path.join(runsDirOf(root), `${receipt.runId}.json`)
+    const ledger = JSON.parse(await readFile(ledgerPath, 'utf8')) as WorkflowRunLedger
+    delete ledger.sidecars
+    await writeFile(ledgerPath, JSON.stringify(ledger), 'utf8')
+
+    const undo = await undoWorkflowRun(root, receipt.runId)
+
+    expect(undo.restored).toBe(2)
+    expect(await readOrNull(root, 'inbox/Note.md')).toBe('body\n')
+    expect(await readOrNull(root, 'archive/Note.md')).toBeNull()
+  })
+
+  it('refuses a ledger sidecar entry that does not name a note', async () => {
+    const root = await makeVault()
+    await seedWithSidecars(root, 'inbox/Note.md')
+    const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+
+    // Sidecar files are derived from a note's path, so an edited or synced
+    // ledger cannot turn one into a write anywhere else, inside `.zennotes`
+    // included.
+    const ledgerPath = path.join(runsDirOf(root), `${receipt.runId}.json`)
+    const ledger = JSON.parse(await readFile(ledgerPath, 'utf8')) as WorkflowRunLedger
+    ledger.sidecars = [
+      { note: '../escaped.md', sidecar: 'comments', before: 'owned' },
+      { note: '.zennotes/workflows/flow.md', sidecar: 'metadata', before: 'owned' }
+    ]
+    await writeFile(ledgerPath, JSON.stringify(ledger), 'utf8')
+
+    await expect(undoWorkflowRun(root, receipt.runId)).rejects.toThrow(/incomplete/)
+    expect(await readOrNull(root, '../escaped.md.comments.json')).toBeNull()
+    expect(await readOrNull(root, '.zennotes/escaped.md.comments.json')).toBeNull()
+    expect(
+      await readOrNull(root, '.zennotes/note-metadata/.zennotes/workflows/flow.md.metadata.json')
+    ).toBeNull()
   })
 })
 

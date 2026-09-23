@@ -1,4 +1,10 @@
 import { noteMetadataPath, readNoteCreatedAt, prepareNoteCreation, removeNoteCreation } from './note-creation-metadata'
+import {
+  noteCommentsPath,
+  noteCommentsRoot,
+  relocateFolderTrees,
+  relocateNote
+} from './note-sidecars'
 import { promises as fs, type Dirent } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -111,8 +117,6 @@ const DELETED_ASSET_META = '.zn-deleted.json'
 const VAULT_SETTINGS_FILE = 'vault.json'
 const NOTE_META_CACHE_FILE = 'note-meta-cache-v1.json'
 const NOTE_META_CACHE_VERSION = 3
-const NOTE_COMMENTS_DIR = 'comments'
-const NOTE_COMMENTS_SUFFIX = '.comments.json'
 const RESERVED_ROOT_NAMES = new Set<string>([...FOLDERS, ...ATTACHMENTS_DIRS, INTERNAL_VAULT_DIR])
 // The subset that stays reserved however the system folders are remapped:
 // asset dirs and our own internal dir are never user note folders, while
@@ -776,14 +780,6 @@ function vaultSettingsPath(root: string): string {
 
 function noteMetaCachePath(root: string): string {
   return path.join(root, INTERNAL_VAULT_DIR, NOTE_META_CACHE_FILE)
-}
-
-function noteCommentsRoot(root: string): string {
-  return path.join(root, INTERNAL_VAULT_DIR, NOTE_COMMENTS_DIR)
-}
-
-function noteCommentsPath(root: string, rel: string): string {
-  return resolveSafe(noteCommentsRoot(root), `${toPosix(rel)}${NOTE_COMMENTS_SUFFIX}`)
 }
 
 /** Absolute path of a database's `.csv` data file (a normal vault file). */
@@ -3975,119 +3971,6 @@ export async function createFolder(
   if (!trimmed) throw new Error('Folder name is required')
   const abs = resolveSafe(await folderRoot(root, topFolder), trimmed)
   await fs.mkdir(abs, { recursive: true })
-}
-
-async function renameDirectory(from: string, to: string): Promise<void> {
-  if (from === to) return
-  if (from.toLowerCase() !== to.toLowerCase()) return fs.rename(from, to)
-  const temporary = `${from}_rename_tmp_${randomUUID()}`
-  await fs.rename(from, temporary)
-  try {
-    await fs.rename(temporary, to)
-  } catch (error) {
-    try {
-      await fs.rename(temporary, from)
-    } catch (rollbackError) {
-      throw new AggregateError(
-        [error, rollbackError],
-        'FOLDER_STATE_UNCERTAIN: Folder change could not be rolled back; reload the vault before editing'
-      )
-    }
-    throw error
-  }
-}
-
-async function pathExists(abs: string): Promise<boolean> {
-  return fs.lstat(abs).then(
-    () => true,
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return false
-      throw error
-    }
-  )
-}
-
-/**
- * Move one note with its comments and its creation date. A creation date
- * already waiting at the destination with no note beside it belongs to
- * nobody: the note that owned it was moved or deleted outside ZenNotes (a
- * file manager, git, sync, a workflow run). It is discarded, the way
- * `createNote` already discards it, or every rename and move onto that name
- * was refused for good, silently (#839). Leftover comments still refuse:
- * taking over another note's discussion and deleting it are both wrong, so
- * the error names the file to move aside.
- */
-async function relocateNote(
-  root: string,
-  fromRel: string,
-  toAbs: string,
-  persistSettings: () => Promise<unknown>
-): Promise<void> {
-  const toRel = toPosix(path.relative(root, toAbs))
-  const toComments = noteCommentsPath(root, toRel)
-  if (!(await pathExists(toAbs))) {
-    if (await pathExists(toComments))
-      throw new Error(
-        `Comments from an earlier note named “${path.parse(toAbs).name}” are still in ${toPosix(path.relative(root, toComments))}. Move or delete that file to use this name.`
-      )
-    await removeNoteCreation(root, toRel)
-  }
-  await relocateFolderTrees(
-    [
-      [resolveSafe(root, fromRel), toAbs],
-      [noteCommentsPath(root, fromRel), toComments],
-      [await noteMetadataPath(root, fromRel), await noteMetadataPath(root, toRel)]
-    ],
-    persistSettings
-  )
-}
-
-/** Move content and its parallel comments together, retaining the originals on failure. */
-async function relocateFolderTrees(
-  moves: Array<[string, string]>,
-  persistSettings: () => Promise<unknown>
-): Promise<void> {
-  const present: Array<[string, string]> = []
-  for (const [from, to] of moves) {
-    let source
-    try {
-      source = await fs.stat(from)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-    try {
-      const target = await fs.stat(to)
-      if (!source || source.ino !== target.ino || source.dev !== target.dev)
-        throw new Error('The destination folder or its comments already exist')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-    if (source) present.push([from, to])
-  }
-  const moved: Array<[string, string]> = []
-  try {
-    for (const [from, to] of present) {
-      await fs.mkdir(path.dirname(to), { recursive: true })
-      await renameDirectory(from, to)
-      moved.push([from, to])
-    }
-    await persistSettings()
-  } catch (error) {
-    const failures: unknown[] = [error]
-    for (const [from, to] of moved.reverse()) {
-      try {
-        await renameDirectory(to, from)
-      } catch (rollbackError) {
-        failures.push(rollbackError)
-      }
-    }
-    if (failures.length > 1)
-      throw new AggregateError(
-        failures,
-        'FOLDER_STATE_UNCERTAIN: Folder change could not be rolled back; reload the vault before editing'
-      )
-    throw error
-  }
 }
 
 /** Shared local folder move for ordinary folders and database containers. */
