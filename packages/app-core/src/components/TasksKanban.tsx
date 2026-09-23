@@ -47,6 +47,7 @@ import { InlineMarkdown } from '../lib/inline-markdown'
 import { CloudTaskConflictIndicator } from './CloudTaskConflictIndicator'
 import { TaskStateBox } from './TaskStateBox'
 import { isImeComposing } from '../lib/ime'
+import { createDragAutoScroller } from '../lib/drag-autoscroll'
 import {
   getSequenceTokens,
   sequenceTokenFromEvent,
@@ -600,6 +601,9 @@ interface ActiveColumnDrag {
   pointerId: number
   startX: number
   startY: number
+  /** Latest pointer position, to re-aim when the board scrolls under a still pointer. */
+  pointerX: number
+  pointerY: number
   dragging: boolean
   /** Column the pointer is currently over, and which side to insert on. */
   targetId: string | null
@@ -612,6 +616,9 @@ interface ActivePointerDrag {
   sourceColumnId: string | null
   startX: number
   startY: number
+  /** Latest pointer position, to re-aim when the board scrolls under a still pointer. */
+  pointerX: number
+  pointerY: number
   offsetX: number
   offsetY: number
   width: number
@@ -703,6 +710,23 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
   // #573: a pressed `g` waiting out the gt/gT window before cycling group-by.
   const groupByPendingRef = useRef(false)
   const groupByTimerRef = useRef<number | null>(null)
+  // Edge auto-scroll for both drags (#838): near the board's left or right edge
+  // the board scrolls sideways, and a card held near the top or bottom of a
+  // long column scrolls that column.
+  const [cardAutoScroll] = useState(() =>
+    createDragAutoScroller({
+      horizontal: () => boardRef.current,
+      vertical: (clientX, clientY) => {
+        const body = (
+          document.elementFromPoint(clientX, clientY) as HTMLElement | null
+        )?.closest<HTMLElement>('[data-kanban-column-body]')
+        return body && boardRef.current?.contains(body) ? body : null
+      }
+    })
+  )
+  const [columnAutoScroll] = useState(() =>
+    createDragAutoScroller({ horizontal: () => boardRef.current })
+  )
 
   const openTaskMenu = useCallback(
     (e: React.MouseEvent, task: VaultTask): void => {
@@ -910,6 +934,8 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
+        pointerX: e.clientX,
+        pointerY: e.clientY,
         dragging: false,
         targetId: null,
         insertAfter: false
@@ -928,12 +954,36 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
       const targetIdx = ids.indexOf(drag.targetId)
       if (targetIdx < 0) return
       ids.splice(drag.insertAfter ? targetIdx + 1 : targetIdx, 0, drag.columnId)
+      // The cursor moves with the dropped column, as it does for `<` / `>`, so
+      // the focus-follow scroll stays on the column that was just placed
+      // instead of chasing whichever column slid under the old cursor (#838).
+      setColIdx(ids.indexOf(drag.columnId))
       setKanbanColumnOrder(groupBy, ids)
     },
     [groupBy, setKanbanColumnOrder]
   )
 
   useEffect(() => {
+    const aimColumnDrag = (drag: ActiveColumnDrag): void => {
+      const columnEl = (
+        document.elementFromPoint(drag.pointerX, drag.pointerY) as HTMLElement | null
+      )?.closest<HTMLElement>('[data-kanban-column-id]')
+      const targetId = columnEl?.dataset.kanbanColumnId ?? null
+      if (!columnEl || !targetId || targetId === NO_VALUE_COLUMN_ID || targetId === drag.columnId) {
+        drag.targetId = null
+        setColumnDropTarget(null)
+        return
+      }
+      const rect = columnEl.getBoundingClientRect()
+      const after = drag.pointerX > rect.left + rect.width / 2
+      drag.targetId = targetId
+      drag.insertAfter = after
+      // Kept referentially stable while the aim holds: a scrolling board
+      // re-aims every frame, and a fresh object would re-render every frame.
+      setColumnDropTarget((current) =>
+        current?.id === targetId && current.after === after ? current : { id: targetId, after }
+      )
+    }
     const handleMove = (e: PointerEvent): void => {
       const drag = columnDragRef.current
       if (!drag || drag.pointerId !== e.pointerId) return
@@ -950,25 +1000,22 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
         document.body.style.userSelect = 'none'
       }
       e.preventDefault()
-      const columnEl = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>(
-        '[data-kanban-column-id]'
-      )
-      const targetId = columnEl?.dataset.kanbanColumnId ?? null
-      if (!targetId || targetId === NO_VALUE_COLUMN_ID || targetId === drag.columnId) {
-        drag.targetId = null
-        setColumnDropTarget(null)
-        return
-      }
-      const rect = columnEl!.getBoundingClientRect()
-      const after = e.clientX > rect.left + rect.width / 2
-      drag.targetId = targetId
-      drag.insertAfter = after
-      setColumnDropTarget({ id: targetId, after })
+      drag.pointerX = e.clientX
+      drag.pointerY = e.clientY
+      aimColumnDrag(drag)
+      columnAutoScroll.update(e.clientX, e.clientY)
+    }
+    // The board scrolling under a still pointer (the edge auto-scroll, a
+    // wheel) moves a different column beneath it without any pointermove.
+    const handleScroll = (): void => {
+      const drag = columnDragRef.current
+      if (drag?.dragging) aimColumnDrag(drag)
     }
     const handleUp = (e: PointerEvent): void => {
       const drag = columnDragRef.current
       if (!drag || drag.pointerId !== e.pointerId) return
       columnDragRef.current = null
+      columnAutoScroll.stop()
       if (drag.dragging) {
         e.preventDefault()
         finishColumnDrag(drag)
@@ -982,19 +1029,24 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
       const drag = columnDragRef.current
       if (!drag || drag.pointerId !== e.pointerId) return
       columnDragRef.current = null
+      columnAutoScroll.stop()
       setDraggingColumnId(null)
       setColumnDropTarget(null)
       document.body.style.userSelect = ''
     }
+    const board = boardRef.current
     window.addEventListener('pointermove', handleMove, { passive: false })
     window.addEventListener('pointerup', handleUp, { passive: false })
     window.addEventListener('pointercancel', handleCancel)
+    board?.addEventListener('scroll', handleScroll, { capture: true, passive: true })
     return () => {
       window.removeEventListener('pointermove', handleMove)
       window.removeEventListener('pointerup', handleUp)
       window.removeEventListener('pointercancel', handleCancel)
+      board?.removeEventListener('scroll', handleScroll, { capture: true })
+      columnAutoScroll.stop()
     }
-  }, [finishColumnDrag])
+  }, [columnAutoScroll, finishColumnDrag])
 
   useEffect(() => {
     if (!editingColumnId) return
@@ -1347,8 +1399,28 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
         columnId === drag.sourceColumnId
           ? []
           : dropMutationsFor(groupBy, columnId, drag.task, today)
-      if (mutations) {
-        moveTaskOnBoard(drag.task, mutations, columnId, insertionIndex)
+      if (!mutations) return
+      // The cursor lands on the dropped card, the way a click, a right-click
+      // and Shift+H/L already put it on theirs. It moves BEFORE the card does:
+      // the move flushes the board rebuild synchronously, and a rebuild under
+      // the old cursor scrolls the board back to it, a whole board away once
+      // an edge auto-scroll carried the card there (#838). The insertion index
+      // is exact for the visible column; a drop without one resolves below.
+      const movedKey = taskIdentityKey(drag.task)
+      const targetColIdx = columnsRef.current.findIndex((column) => column.id === columnId)
+      if (targetColIdx >= 0) {
+        const currentIdx = columnsRef.current[targetColIdx].tasks.findIndex(
+          (task) => taskIdentityKey(task) === movedKey
+        )
+        setColIdx(targetColIdx)
+        setCardIdx(insertionIndex ?? Math.max(0, currentIdx))
+      }
+      moveTaskOnBoard(drag.task, mutations, columnId, insertionIndex)
+      if (mutations.length > 0) {
+        // That flushed rebuild already ran, so the board knows where the card landed.
+        const next = cursorAfterCardMove(columnsRef.current, columnId, movedKey)
+        setColIdx(next.colIdx)
+        setCardIdx(next.cardIdx)
       }
     },
     [columnAtPoint, dndEnabled, groupBy, moveTaskOnBoard, today]
@@ -1368,6 +1440,8 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
         sourceColumnId,
         startX: e.clientX,
         startY: e.clientY,
+        pointerX: e.clientX,
+        pointerY: e.clientY,
         offsetX: e.clientX - rect.left,
         offsetY: e.clientY - rect.top,
         width: rect.width,
@@ -1381,6 +1455,20 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
   )
 
   useEffect(() => {
+    const aimPointerDrag = (drag: ActivePointerDrag): void => {
+      const target = columnAtPoint(drag.pointerX, drag.pointerY)
+      if (target?.id && dndEnabled) {
+        drag.lastColumnId = target.id
+        markDropTarget(target.id, target.element)
+        drag.lastInsertionIndex = updateDropIndicator(drag, target, drag.pointerY)
+      } else {
+        drag.lastColumnId = null
+        drag.lastInsertionIndex = null
+        clearDropTarget()
+        hideDropIndicator()
+      }
+    }
+
     const handlePointerMove = (e: PointerEvent): void => {
       const drag = pointerDragRef.current
       if (!drag || drag.pointerId !== e.pointerId) return
@@ -1406,17 +1494,18 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
 
       e.preventDefault()
       scheduleDragPreviewPosition(drag, e)
-      const target = columnAtPoint(e.clientX, e.clientY)
-      if (target?.id && dndEnabled) {
-        drag.lastColumnId = target.id
-        markDropTarget(target.id, target.element)
-        drag.lastInsertionIndex = updateDropIndicator(drag, target, e.clientY)
-      } else {
-        drag.lastColumnId = null
-        drag.lastInsertionIndex = null
-        clearDropTarget()
-        hideDropIndicator()
-      }
+      drag.pointerX = e.clientX
+      drag.pointerY = e.clientY
+      aimPointerDrag(drag)
+      cardAutoScroll.update(e.clientX, e.clientY)
+    }
+
+    // The board or a column scrolling under a still pointer (the edge
+    // auto-scroll, a wheel) slides other cards and columns beneath it with no
+    // pointermove, so the highlight and the insertion line would go stale.
+    const handleScroll = (): void => {
+      const drag = pointerDragRef.current
+      if (drag?.dragging) aimPointerDrag(drag)
     }
 
     const handlePointerUp = (e: PointerEvent): void => {
@@ -1424,6 +1513,7 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
       if (!drag || drag.pointerId !== e.pointerId) return
 
       pointerDragRef.current = null
+      cardAutoScroll.stop()
       if (drag.dragging) {
         e.preventDefault()
         setDraggingId(null)
@@ -1442,6 +1532,7 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
       const drag = pointerDragRef.current
       if (!drag || drag.pointerId !== e.pointerId) return
       pointerDragRef.current = null
+      cardAutoScroll.stop()
       setDraggingId(null)
       document.body.style.userSelect = ''
       clearDropTarget()
@@ -1449,18 +1540,23 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
       clearDragPreview()
     }
 
+    const board = boardRef.current
     window.addEventListener('pointermove', handlePointerMove, { passive: false })
     window.addEventListener('pointerup', handlePointerUp, { passive: false })
     window.addEventListener('pointercancel', handlePointerCancel, { passive: false })
+    board?.addEventListener('scroll', handleScroll, { capture: true, passive: true })
     return () => {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
       window.removeEventListener('pointercancel', handlePointerCancel)
+      board?.removeEventListener('scroll', handleScroll, { capture: true })
+      cardAutoScroll.stop()
       document.body.style.userSelect = ''
       hideDropIndicator()
       clearDragPreview()
     }
   }, [
+    cardAutoScroll,
     clearDragPreview,
     clearDropTarget,
     columnAtPoint,
