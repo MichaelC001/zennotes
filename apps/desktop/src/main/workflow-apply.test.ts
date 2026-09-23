@@ -168,6 +168,16 @@ async function isSymlink(abs: string): Promise<boolean> {
 }
 
 /**
+ * A link's text with forward slashes, whatever the platform stored. Windows
+ * keeps a symlink's target with backslashes even when it was created from
+ * `../sources/Real.md`, so a test that compares the text a run put back has
+ * to read past that spelling; the run itself wrote the recorded text as is.
+ */
+async function linkText(abs: string): Promise<string> {
+  return (await readlink(abs)).split(path.sep).join('/')
+}
+
+/**
  * Whether two paths differing only in case are one file here. macOS and Windows
  * say yes, which is the whole reason the journal folds its keys; on Linux those
  * are two files and the behaviour under test does not exist.
@@ -1800,7 +1810,7 @@ describe('symlinked notes', () => {
       const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Rel.md' }])
       await undoWorkflowRun(root, receipt.runId)
 
-      expect(await readlink(path.join(root, 'inbox', 'Rel.md'))).toBe('../sources/Real.md')
+      expect(await linkText(path.join(root, 'inbox', 'Rel.md'))).toBe('../sources/Real.md')
       expect(await readOrNull(root, 'sources/Real.md')).toBe('real\n')
       expect(await pathExists(path.join(root, 'archive', 'Rel.md'))).toBe(false)
     })
@@ -1819,7 +1829,7 @@ describe('symlinked notes', () => {
       const undo = await undoWorkflowRun(root, receipt.runId)
 
       expect(undo.driftedPaths).toEqual([])
-      expect(await readlink(path.join(root, 'inbox', 'Rel.md'))).toBe('../sources/Real.md')
+      expect(await linkText(path.join(root, 'inbox', 'Rel.md'))).toBe('../sources/Real.md')
       expect(await readOrNull(root, 'inbox/Rel.md')).toBe('real\n')
       expect(await readOrNull(root, 'sources/Real.md')).toBe('real\n')
       expect(await pathExists(path.join(root, 'inbox', 'Topics', 'Rel.md'))).toBe(false)
@@ -1836,7 +1846,7 @@ describe('symlinked notes', () => {
       expect(await readOrNull(root, 'inbox/Topics/Rel.md')).toBe('real\n')
       await undoWorkflowRun(root, receipt.runId)
 
-      expect(await readlink(path.join(root, 'inbox', 'Rel.md'))).toBe('./../sources/Real.md')
+      expect(await linkText(path.join(root, 'inbox', 'Rel.md'))).toBe('./../sources/Real.md')
       expect(await readOrNull(root, 'inbox/Rel.md')).toBe('real\n')
     })
 
