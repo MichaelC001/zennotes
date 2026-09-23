@@ -133,6 +133,7 @@ import {
   irreversibleNote,
   opsExcludingPaths,
   planWritePaths,
+  promisedMoves,
   receiptHeadline,
   resolveTemplateOps,
   runConfirmDescription,
@@ -144,8 +145,8 @@ import {
   undoneHeadline,
   unknownTemplateDiagnostics,
   unsavedCollisionDescription,
-  unsavedCollisionTitle,
   unsavedCollisions,
+  unsavedCollisionTitle,
   unsavedSkipDescription,
   unsavedSkipTitle
 } from '../lib/workflow-run'
@@ -212,7 +213,7 @@ const MODEL_RULES: readonly string[] = [
 const HEADER_KEY_HELP: Record<string, string> = {
   name: 'What it is called, and the filename it saves under.',
   description: 'One line, shown in the list on the left.',
-  trigger: `manual, "on <event>", or "schedule <cron>". Events: ${WORKFLOW_EVENTS.join(', ')}.`,
+  trigger: `manual, "on <event>", or "schedule <cron>". Events: ${WORKFLOW_EVENTS.join(', ')}. An event fires for the change you make in this app, on this device, and the run sees only the note that changed; "on <event> where <field> <op> <value>" fires only when that note matches. Schedules parse but do not fire yet.`,
   // Stated here as well as shown as a badge, because the file is the state:
   // someone reading the `.md` has to be able to tell whether it can act.
   status: 'draft or active. A draft is saved but cannot run. Missing means active.',
@@ -3638,11 +3639,25 @@ export function WorkflowsView(): JSX.Element {
         // on disk, so the edits have to be on disk before the run reads them.
         await Promise.all(unsaved.paths.map((path) => persistNote(path)))
       }
-      const receipt = await window.zen.applyWorkflow({
-        workflowId: item.workflow.id,
-        ops: withTemplates.ops
-      })
-      setRecord({ workflowId: item.workflow.id, receipt, undone: null, undoError: null })
+      // An editor open on a note the run moves follows it (see the store's
+      // `followWorkflowMoves`): shielded from the unlink echo during the run,
+      // carried to the new path after it.
+      const moves = promisedMoves(
+        withTemplates.ops,
+        useStore.getState().vaultSettings.systemFolderPaths
+      )
+      const settle = useStore.getState().followWorkflowMoves(moves)
+      const receipt = await (async () => {
+        try {
+          return await window.zen.applyWorkflow({
+            workflowId: item.workflow.id,
+            ops: withTemplates.ops
+          })
+        } finally {
+          await settle()
+        }
+      })()
+      setRecord({ workflowId: item.workflow.id, receipt, undone: null, undoError: null, moves })
       // The two op kinds the main process cannot perform (a toast and the
       // clipboard live here, not there) happen now, and only for a run that
       // stood: a rolled-back run announcing itself, or writing its output to
@@ -3711,8 +3726,20 @@ export function WorkflowsView(): JSX.Element {
     }
 
     setUndoing(true)
+    // The notes the run moved go back, and an editor open on one goes back
+    // with it, the way it followed the run forward.
+    const settle = useStore.getState().followWorkflowMoves(
+      (current.moves ?? []).map(({ from, to }) => ({ from: to, to: from })),
+      { reverting: true }
+    )
     try {
-      const result = await window.zen.undoWorkflowRun(current.receipt.runId)
+      const result = await (async () => {
+        try {
+          return await window.zen.undoWorkflowRun(current.receipt.runId)
+        } finally {
+          await settle()
+        }
+      })()
       setRecord((latest) =>
         latest && latest.receipt.runId === current.receipt.runId
           ? { ...latest, undone: result, undoError: null }
