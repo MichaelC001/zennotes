@@ -1621,6 +1621,12 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
       }
 
       if (e.metaKey || e.ctrlKey || e.altKey) return
+      // With Vim off the single-character keys stay with the page, the rule
+      // every list in the app follows: arrows, Enter, Space and Escape are
+      // universal, the letters (and < > H L) are Vim's. The board kept them
+      // live for a while after the lists were gated; its hint line named
+      // h/l, j/k and x to people who never asked for them.
+      if (!vimMode && e.key.length === 1 && e.key !== ' ') return
 
       const consume = (): void => {
         e.preventDefault()
@@ -1770,9 +1776,13 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
           )}
         </div>
         <div className="text-xs text-current/40">
-          {dndEnabled
-            ? 'Drag or Shift+H·L move card · drag header or </> reorder columns · h/l · j/k · g group-by · x · Enter · right-click actions'
-            : 'Drag header or </> reorder columns · h/l column · j/k card · g group-by · x · Enter · right-click actions'}
+          {vimMode
+            ? dndEnabled
+              ? 'Drag or Shift+H·L move card · drag header or </> reorder columns · h/l · j/k · g group-by · x · Enter · right-click actions'
+              : 'Drag header or </> reorder columns · h/l column · j/k card · g group-by · x · Enter · right-click actions'
+            : dndEnabled
+              ? 'Drag to move a card · drag a header to reorder columns · ←/→ · ↑/↓ · Space · Enter · right-click actions'
+              : 'Drag a header to reorder columns · ←/→ column · ↑/↓ card · Space · Enter · right-click actions'}
         </div>
       </div>
 
@@ -1927,6 +1937,7 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
                           onToggle={() => onToggleTask(task)}
                           onPointerDown={(e) => beginPointerDrag(task, e)}
                           onContextMenu={openTaskMenu}
+                          toggleKey={vimMode ? 'x' : null}
                         />
                       )
                     })}
@@ -1997,6 +2008,8 @@ interface CardProps {
   onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void
   /** Right-click actions. Omitted on the drag preview, which is not a real card. */
   onContextMenu?: (e: React.MouseEvent, task: VaultTask) => void
+  /** The key the checkbox tooltip names; none with Vim mode off. */
+  toggleKey?: string | null
 }
 
 function formatDue(iso: string | undefined): string {
@@ -2019,7 +2032,8 @@ function TaskCard({
   shouldSuppressClick,
   onToggle,
   onPointerDown,
-  onContextMenu
+  onContextMenu,
+  toggleKey = null
 }: CardProps): JSX.Element {
   return (
     <div
@@ -2061,6 +2075,7 @@ function TaskCard({
           onToggle={onToggle}
           idleClassName="border border-paper-400/70 hover:bg-paper-200/80"
           stopPointerEvents
+          toggleKey={toggleKey}
         />
         {/* The card body stays focusable so clicks open the note and drags move it. */}
         <div

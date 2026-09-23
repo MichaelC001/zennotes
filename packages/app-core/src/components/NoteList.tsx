@@ -95,6 +95,7 @@ export function NoteList(): JSX.Element {
   const openDatabase = useStore((s) => s.openDatabase)
   const prefetchNotes = useStore((s) => s.prefetchNotes)
   const focusedPanel = useStore((s) => s.focusedPanel)
+  const vimMode = useStore((s) => s.vimMode)
   const noteListCursorIndex = useStore((s) => s.noteListCursorIndex)
   const setFocusedPanel = useStore((s) => s.setFocusedPanel)
   const systemFolderLabels = useStore((s) => s.systemFolderLabels)
@@ -716,7 +717,9 @@ export function NoteList(): JSX.Element {
 
   return (
     <section
-      className={`glass-column relative flex shrink-0 flex-col${isNoteListFocused ? ' panel-focused' : ''}`}
+      // The pane ring is Vim pane navigation's (see the sidebar): not drawn
+      // for a click with Vim off.
+      className={`glass-column relative flex shrink-0 flex-col${isNoteListFocused && vimMode ? ' panel-focused' : ''}`}
       style={{ width: noteListWidth }}
       onMouseDownCapture={() => setFocusedPanel('notelist')}
       onFocusCapture={() => setFocusedPanel('notelist')}

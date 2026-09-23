@@ -4929,6 +4929,8 @@ function Breadcrumb({
   const createAndOpen = useStore((s) => s.createAndOpen)
   const createDrawingAndOpen = useStore((s) => s.createDrawingAndOpen)
   const createFolder = useStore((s) => s.createFolder)
+  // `m` on a focused crumb is VimNav's, so the tooltip names it only in Vim mode.
+  const vimMode = useStore((s) => s.vimMode)
   const [crumbMenu, setCrumbMenu] = useState<{ x: number; y: number; subpath: string } | null>(
     null
   )
@@ -5019,7 +5021,7 @@ function Breadcrumb({
               setCrumbMenu({ x: e.clientX, y: e.clientY, subpath: c.subpath })
             }}
             className="truncate rounded px-1 hover:bg-paper-200/70 hover:text-ink-800"
-            title={`Go to ${c.label} — right-click (or m) to create here`}
+            title={`Go to ${c.label}, right-click${vimMode ? ' (or m)' : ''} to create here`}
           >
             {c.label}
           </button>
