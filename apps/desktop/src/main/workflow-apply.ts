@@ -48,6 +48,13 @@
 // from the note's path at restore time rather than stored, so a ledger can
 // never name an arbitrary file inside `.zennotes`.
 //
+// A symlinked note is the one path its bytes do not describe: a move renames
+// the LINK, so the file it points at, which may live outside the vault, never
+// moves at all. The journal records the link's text beside its bytes, and undo
+// moves that same link back from wherever the run left it, found by its text
+// and never made from what a ledger says, and removes what the run put down as
+// itself, never through a link. See `restoreEntries`.
+//
 // `notify` and `clipboard` are not applied here (the main process is not where
 // the user's clipboard and toasts live) and are not journalled. They are
 // counted into `receipt.irreversible` so the promise the UI makes about undo
@@ -158,7 +165,7 @@ export interface WorkflowRunLedger {
   irreversible: number
   paths: string[]
   ops: WorkflowOp[]
-  journal: WorkflowJournalEntry[]
+  journal: NoteJournalEntry[]
   hashes: Record<string, string | null>
   /**
    * The sidecars the run moved with its notes. Beside `journal` rather than in
@@ -181,6 +188,17 @@ export interface WorkflowRunLedger {
    * what it does carry is the journal, which is all undo needs.
    */
   interrupted?: { reason: string }
+}
+
+/**
+ * A note's journal entry. `link` is the text of the symlink the path was
+ * before the run, when it was one: its bytes cannot say that, and a move
+ * renames the link itself, so undo needs the text to find that link again
+ * (see `restoreEntries`). Absent in ledgers from before it was recorded, which
+ * still undo, just without putting links back.
+ */
+interface NoteJournalEntry extends WorkflowJournalEntry {
+  link?: string
 }
 
 /** The two files `.zennotes` keeps for a note. */
@@ -348,6 +366,32 @@ async function exists(abs: string): Promise<boolean> {
 }
 
 /**
+ * Whether anything at all sits at `abs`, a symlink that points at nothing
+ * included. `exists` follows links, so it calls such a link free, and a rename
+ * onto it replaces the link without a trace.
+ */
+async function pathTaken(abs: string): Promise<boolean> {
+  try {
+    await fs.lstat(abs)
+    return true
+  } catch (err) {
+    if (isMissing(err)) return false
+    throw err
+  }
+}
+
+/** The text of the symlink at `abs`, or undefined when `abs` is not one. */
+async function linkTextOf(abs: string): Promise<string | undefined> {
+  try {
+    if (!(await fs.lstat(abs)).isSymbolicLink()) return undefined
+  } catch (err) {
+    if (isMissing(err)) return undefined
+    throw err
+  }
+  return await fs.readlink(abs)
+}
+
+/**
  * The path a symlink finally names, or null when `abs` is not a symlink.
  *
  * A dangling link answers with the path its text names rather than failing:
@@ -382,8 +426,9 @@ async function linkTargetOf(abs: string): Promise<string | null> {
  * Resolving the link and doing the atomic dance at the target keeps both
  * properties: the link survives and no reader ever sees a half-written file.
  * `writeFileAtomic` resolves links itself now, so this is belt and braces; the
- * resolved path is still wanted here, because undo removes the file the run
- * created and that file is the target, never the link.
+ * resolved path is still wanted here, because through a link that points at
+ * nothing the file a write creates is the one the link's text names, and that
+ * is the file undo removes again, never the link.
  *
  * The target may sit outside the vault. That is what following a link means,
  * and it is the same reach every other save in the app has; see
@@ -400,6 +445,8 @@ async function writeNoteThroughLinks(abs: string, data: string): Promise<void> {
  * A move that clobbered an existing note would still be undoable, but a second
  * run without an undo would silently merge two notes into one, and nothing in
  * the dry run warned about it. Suffixing is what the rest of the app does.
+ * "Taken" includes a symlink that points at nothing: the rename would replace
+ * it, and nothing could put it back.
  */
 async function uniqueRel(root: string, rel: string): Promise<string> {
   const ext = noteExtensionOf(rel)
@@ -409,7 +456,7 @@ async function uniqueRel(root: string, rel: string): Promise<string> {
   // everything (a permissions oddity, a broken network mount) must fail loudly
   // instead of spinning forever inside a run that holds a half-written journal.
   for (let n = 2; n < 1000; n += 1) {
-    if (!(await exists(path.resolve(root, candidate)))) return candidate
+    if (!(await pathTaken(path.resolve(root, candidate)))) return candidate
     candidate = `${stem} ${n}${ext}`
   }
   throw new Error(`Cannot find a free destination for ${rel}`)
@@ -595,7 +642,7 @@ function resolveLedgerPath(root: string, runId: string): string {
  * at most its last line, while rewriting a whole document per entry would put
  * every earlier entry at risk on every op. The first line is the run's header
  * (what the finished ledger would call `runId`, `workflowId`, `startedAt`,
- * `irreversible` and `ops`); every line after it is one `WorkflowJournalEntry`
+ * `irreversible` and `ops`); every line after it is one `NoteJournalEntry`
  * or, for a sidecar a path op carries, one `SidecarJournalEntry`, in the order
  * the run touched them.
  */
@@ -650,7 +697,7 @@ async function writeJournalLine(handle: FileHandle, line: string): Promise<void>
  */
 async function appendJournalEntries(
   file: RunJournalFile,
-  entries: ReadonlyArray<WorkflowJournalEntry | SidecarJournalEntry>
+  entries: ReadonlyArray<NoteJournalEntry | SidecarJournalEntry>
 ): Promise<void> {
   if (entries.length === 0) return
   try {
@@ -704,7 +751,7 @@ interface ParsedRunJournal {
   startedAt: number
   irreversible: number
   ops: WorkflowOp[]
-  journal: WorkflowJournalEntry[]
+  journal: NoteJournalEntry[]
   sidecars: SidecarJournalEntry[]
 }
 
@@ -720,7 +767,7 @@ async function readRunJournalFile(abs: string): Promise<ParsedRunJournal | null>
   const raw = await fs.readFile(abs, 'utf8')
   const lines = raw.split('\n').filter((line) => line.trim().length > 0)
   let header: Record<string, unknown> | null = null
-  const journal: WorkflowJournalEntry[] = []
+  const journal: NoteJournalEntry[] = []
   const sidecars: SidecarJournalEntry[] = []
   for (const line of lines) {
     let parsed: unknown
@@ -740,11 +787,8 @@ async function readRunJournalFile(abs: string): Promise<ParsedRunJournal | null>
       sidecars.push({ note: sidecar.note, sidecar: sidecar.sidecar, before: sidecar.before })
       continue
     }
-    const entryPath = parsed.path
-    const before = parsed.before
-    if (typeof entryPath !== 'string') continue
-    if (typeof before !== 'string' && before !== null) continue
-    journal.push({ path: entryPath, before })
+    const entry = parseNoteEntry(parsed)
+    if (entry) journal.push(entry)
   }
   if (!header) return null
   const ops = Array.isArray(header.ops)
@@ -856,7 +900,7 @@ interface RunState {
    * first-touch-wins rule: the entry must describe the state before the run,
    * not before the latest op.
    */
-  journal: Map<string, WorkflowJournalEntry>
+  journal: Map<string, NoteJournalEntry>
   /** The same entries on disk, so a killed process leaves them behind. */
   journalFile: RunJournalFile
   /**
@@ -909,9 +953,18 @@ function journalKey(rel: string): string {
 async function journalTouch(state: RunState, rel: string, before: string | null): Promise<void> {
   const key = journalKey(rel)
   if (state.journal.has(key)) return
-  const entry: WorkflowJournalEntry = { path: rel, before }
+  const entry = await withLinkText(state.root, { path: rel, before })
   await appendJournalEntries(state.journalFile, [entry])
   state.journal.set(key, entry)
+}
+
+/**
+ * The entry, plus the text of the symlink its path is, when it is one. Read at
+ * the first touch, like the bytes, so it describes the path before the run.
+ */
+async function withLinkText(root: string, entry: WorkflowJournalEntry): Promise<NoteJournalEntry> {
+  const link = await linkTextOf(resolveVaultPath(root, entry.path))
+  return link === undefined ? entry : { ...entry, link }
 }
 
 /** Note what the run left at a path. The spelling of the first touch wins, so
@@ -940,10 +993,12 @@ async function journalPathOp(
   notes: WorkflowJournalEntry[],
   sidecars: SidecarJournalEntry[]
 ): Promise<void> {
-  const newNotes = new Map<string, WorkflowJournalEntry>()
+  const newNotes = new Map<string, NoteJournalEntry>()
   for (const entry of notes) {
     const key = journalKey(entry.path)
-    if (!state.journal.has(key) && !newNotes.has(key)) newNotes.set(key, entry)
+    if (!state.journal.has(key) && !newNotes.has(key)) {
+      newNotes.set(key, await withLinkText(state.root, entry))
+    }
   }
   const newSidecars = new Map<string, SidecarJournalEntry>()
   for (const entry of sidecars) {
@@ -1222,19 +1277,74 @@ async function applyOp(state: RunState, op: WorkflowOp): Promise<void> {
  * caller is already handling a failure and needs the full list to report: a
  * rollback that stops at the first problem leaves more of the vault wrong than
  * one that carries on.
+ *
+ * A symlinked note needs more than its bytes. A move renames the link itself,
+ * so the destination holds the link while the file it points at, which may
+ * live outside the vault, never moved. Putting the vault back means moving
+ * that same link back, and a path the run filled is emptied by removing what
+ * sits there as itself, never through a link: the file a link points at is not
+ * the run's to delete. The one exception is a link that pointed at nothing
+ * before the run, whose target the run created by writing through it. Its
+ * entry records the link's text, and only while that same link is there is
+ * its target removed.
+ *
+ * A link is only ever moved back, never made: it is found by its recorded text
+ * among the paths the run filled. Creating one from what a ledger says would
+ * let an edited or synced ledger plant a link to anywhere and then write
+ * through it, the very thing `resolveVaultPath` is here to rule out. With no
+ * link to move back (a ledger from before the text was recorded, or a link
+ * removed since), the bytes come back as a plain file, as they always did.
  */
 async function restoreEntries(
   root: string,
-  entries: Iterable<WorkflowJournalEntry>
+  entries: Iterable<NoteJournalEntry>
 ): Promise<{ restored: number; failures: RestoreFailure[] }> {
   const failures: RestoreFailure[] = []
   let restored = 0
-  for (const { path: rel, before } of entries) {
+  const list = [...entries]
+  // Where the run left the links it moved, by their text: a path it found
+  // empty that now holds a link it did not have before.
+  const movedLinks = new Map<string, string[]>()
+  for (const entry of list) {
+    if (entry.before !== null) continue
+    try {
+      const abs = resolveVaultPath(root, entry.path)
+      const text = await linkTextOf(abs)
+      if (text === undefined || text === entry.link) continue
+      const same = movedLinks.get(text)
+      if (same) same.push(abs)
+      else movedLinks.set(text, [abs])
+    } catch {
+      // The loop below meets the same entry and reports it.
+    }
+  }
+  for (const { path: rel, before, link } of list) {
     try {
       // Re-validated on the way back out. At rollback time these paths came
       // from this run, but undo replays the same code over a file read off
       // disk, and that file must never be able to point a write anywhere.
       const abs = resolveVaultPath(root, rel)
+      if (link !== undefined && !(await pathTaken(abs))) {
+        const moved = movedLinks.get(link)?.pop()
+        if (moved !== undefined && (await linkTextOf(moved)) === link) {
+          await fs.mkdir(path.dirname(abs), { recursive: true })
+          await fs.rename(moved, abs)
+          await pruneEmptyDirs(root, path.dirname(moved))
+        }
+      }
+      if (before === null) {
+        // Empty before the run, so whatever sits there now goes, as itself.
+        // Behind the link the path had before the run, pointing at nothing
+        // then, it is the file the run created by writing through that link.
+        const text = await linkTextOf(abs)
+        const gone = (text !== undefined && text === link ? await linkTargetOf(abs) : null) ?? abs
+        if (await pathTaken(gone)) {
+          await fs.rm(gone, { force: true })
+          await pruneEmptyDirs(root, path.dirname(gone))
+        }
+        restored += 1
+        continue
+      }
       // A path is journalled BEFORE its write is attempted, so a run that failed
       // mid-way has journalled paths it never actually changed. Restoring those
       // is pointless at best, and actively harmful here: whatever failed the
@@ -1247,16 +1357,7 @@ async function restoreEntries(
         restored += 1
         continue
       }
-      if (before === null) {
-        // Through a symlink, what the run created is the TARGET file: the link
-        // itself was there before the run and putting the vault back means
-        // leaving it there, pointing at nothing again.
-        const target = (await linkTargetOf(abs)) ?? abs
-        await fs.rm(target, { force: true })
-        await pruneEmptyDirs(root, path.dirname(target))
-      } else {
-        await writeNoteThroughLinks(abs, before)
-      }
+      await writeNoteThroughLinks(abs, before)
       restored += 1
     } catch (err) {
       failures.push({ path: rel, message: messageOf(err) })
@@ -1344,7 +1445,7 @@ async function restoreSidecars(
  */
 async function restoreRun(
   root: string,
-  journal: Iterable<WorkflowJournalEntry>,
+  journal: Iterable<NoteJournalEntry>,
   sidecars: Iterable<SidecarJournalEntry>
 ): Promise<{ restored: number; failures: RestoreFailure[] }> {
   const notes = await restoreEntries(root, journal)
@@ -1708,7 +1809,7 @@ async function rollBackRun(
   return { ...base, paths: unrestored, rolledBack: { reason } }
 }
 
-function journalEntries(state: RunState): WorkflowJournalEntry[] {
+function journalEntries(state: RunState): NoteJournalEntry[] {
   return [...state.journal.values()]
 }
 
@@ -1720,18 +1821,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
-function parseJournal(value: unknown): WorkflowJournalEntry[] {
+/** One note entry, from a ledger or a crash journal line, or null. */
+function parseNoteEntry(value: unknown): NoteJournalEntry | null {
+  if (!isRecord(value)) return null
+  const { path: entryPath, before, link } = value
+  if (typeof entryPath !== 'string') return null
+  if (typeof before !== 'string' && before !== null) return null
+  return typeof link === 'string' ? { path: entryPath, before, link } : { path: entryPath, before }
+}
+
+function parseJournal(value: unknown): NoteJournalEntry[] {
   if (!Array.isArray(value)) return []
-  const entries: WorkflowJournalEntry[] = []
-  for (const item of value) {
-    if (!isRecord(item)) continue
-    const entryPath = item.path
-    const before = item.before
-    if (typeof entryPath !== 'string') continue
-    if (typeof before !== 'string' && before !== null) continue
-    entries.push({ path: entryPath, before })
-  }
-  return entries
+  return value
+    .map((item) => parseNoteEntry(item))
+    .filter((entry): entry is NoteJournalEntry => entry !== null)
 }
 
 /** One sidecar entry, from a ledger or a crash journal line, or null. A kind

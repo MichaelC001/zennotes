@@ -8,7 +8,18 @@
 // checks it.
 import { createHash } from 'node:crypto'
 import { promises as fsPromises } from 'node:fs'
-import { lstat, mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import {
+  lstat,
+  mkdtemp,
+  mkdir,
+  readdir,
+  readFile,
+  readlink,
+  rm,
+  stat,
+  symlink,
+  writeFile
+} from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -1592,6 +1603,178 @@ describe('symlinked notes', () => {
     const root = await makeVault()
     await apply(root, [{ kind: 'create-note', path: 'inbox/New.md', body: 'hello' }])
     expect(await isSymlink(path.join(root, 'inbox', 'New.md'))).toBe(false)
+  })
+
+  // A move renames the link itself, so the destination holds the link and the
+  // file it points at never moves. Undo used to take that destination for a
+  // file the run had created and delete what the link pointed at, which can
+  // live outside the vault, then write a plain copy where the link had been.
+  describe('moved', () => {
+    /** A note that is a link to a file outside the vault. */
+    async function linkedVault(): Promise<{ root: string; real: string }> {
+      const root = await makeVault()
+      const outside = await mkdtemp(path.join(os.tmpdir(), 'zennotes-outside-'))
+      tempDirs.push(outside)
+      const real = path.join(outside, 'real.md')
+      await writeFile(real, 'real\n', 'utf8')
+      await symlink(real, path.join(root, 'inbox', 'Link.md'))
+      return { root, real }
+    }
+
+    it('undo puts the link itself back and leaves the file it points at alone', async () => {
+      const { root, real } = await linkedVault()
+
+      const receipt = await apply(root, [{ kind: 'move', path: 'inbox/Link.md', to: 'archive' }])
+      expect(await isSymlink(path.join(root, 'archive', 'Link.md'))).toBe(true)
+      const undo = await undoWorkflowRun(root, receipt.runId)
+
+      expect(undo.restored).toBe(2)
+      expect(undo.driftedPaths).toEqual([])
+      expect(await readFile(real, 'utf8')).toBe('real\n')
+      expect(await isSymlink(path.join(root, 'inbox', 'Link.md'))).toBe(true)
+      expect(await readlink(path.join(root, 'inbox', 'Link.md'))).toBe(real)
+      expect(await pathExists(path.join(root, 'archive', 'Link.md'))).toBe(false)
+    })
+
+    it('a rollback puts it back the same way', async () => {
+      const { root, real } = await linkedVault()
+
+      const receipt = await apply(root, [
+        { kind: 'archive', path: 'inbox/Link.md' },
+        { kind: 'trash', path: 'inbox/Missing.md' }
+      ])
+
+      expect(receipt.rolledBack?.reason).toMatch(/vault is unchanged/)
+      expect(await readFile(real, 'utf8')).toBe('real\n')
+      expect(await readlink(path.join(root, 'inbox', 'Link.md'))).toBe(real)
+      expect(await pathExists(path.join(root, 'archive', 'Link.md'))).toBe(false)
+    })
+
+    it('undo after an edit through it restores the link and the bytes behind it', async () => {
+      const { root, real } = await linkedVault()
+
+      const receipt = await apply(root, [
+        { kind: 'append', path: 'inbox/Link.md', text: 'edited' },
+        { kind: 'archive', path: 'inbox/Link.md' }
+      ])
+      expect(await readFile(real, 'utf8')).toBe('real\nedited\n')
+      await undoWorkflowRun(root, receipt.runId)
+
+      expect(await readlink(path.join(root, 'inbox', 'Link.md'))).toBe(real)
+      expect(await readFile(real, 'utf8')).toBe('real\n')
+      expect(await pathExists(path.join(root, 'archive', 'Link.md'))).toBe(false)
+    })
+
+    it('moved twice in one run, it comes back from the last place it went', async () => {
+      const { root, real } = await linkedVault()
+
+      const receipt = await apply(root, [
+        { kind: 'move', path: 'inbox/Link.md', to: 'inbox/Work' },
+        { kind: 'rename', path: 'inbox/Work/Link.md', to: 'Renamed' }
+      ])
+      expect(await isSymlink(path.join(root, 'inbox', 'Work', 'Renamed.md'))).toBe(true)
+      await undoWorkflowRun(root, receipt.runId)
+
+      expect(await readlink(path.join(root, 'inbox', 'Link.md'))).toBe(real)
+      expect(await readFile(real, 'utf8')).toBe('real\n')
+      expect(await pathExists(path.join(root, 'inbox', 'Work', 'Renamed.md'))).toBe(false)
+      expect(await pathExists(path.join(root, 'inbox', 'Work', 'Link.md'))).toBe(false)
+    })
+
+    it('a relative link comes back with the same text', async () => {
+      const root = await makeVault()
+      await seed(root, 'sources/Real.md', 'real\n')
+      await symlink('../sources/Real.md', path.join(root, 'inbox', 'Rel.md'))
+
+      const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Rel.md' }])
+      await undoWorkflowRun(root, receipt.runId)
+
+      expect(await readlink(path.join(root, 'inbox', 'Rel.md'))).toBe('../sources/Real.md')
+      expect(await readOrNull(root, 'sources/Real.md')).toBe('real\n')
+      expect(await pathExists(path.join(root, 'archive', 'Rel.md'))).toBe(false)
+    })
+
+    it('the crash journal records the link, and a recovered run puts it back', async () => {
+      const { root, real } = await linkedVault()
+      const noteAbs = path.join(root, 'inbox', 'Link.md')
+      let crashRaw = ''
+      let crashName = ''
+      const rename = fsPromises.rename.bind(fsPromises)
+      vi.spyOn(fsPromises, 'rename').mockImplementation(async (from, to) => {
+        if (from === noteAbs && !crashName) {
+          const [name] = await journalNames(root)
+          if (name) {
+            crashName = name
+            crashRaw = await readFile(path.join(runsDirOf(root), name), 'utf8')
+          }
+        }
+        return rename(from, to)
+      })
+      const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Link.md' }])
+      vi.restoreAllMocks()
+      expect(journalLines(crashRaw)[1]).toEqual({ path: 'inbox/Link.md', before: 'real\n', link: real })
+      // The process died after the move: the journal is all that is left.
+      await rm(path.join(runsDirOf(root), `${receipt.runId}.json`))
+      await writeFile(path.join(runsDirOf(root), crashName), crashRaw, 'utf8')
+
+      const [run] = await listWorkflowRuns(root)
+      expect(run?.interrupted).toBe(true)
+      await undoWorkflowRun(root, receipt.runId)
+
+      expect(await readlink(noteAbs)).toBe(real)
+      expect(await readFile(real, 'utf8')).toBe('real\n')
+      expect(await pathExists(path.join(root, 'archive', 'Link.md'))).toBe(false)
+    })
+
+    it('a ledger from before links were recorded never deletes what the link points at', async () => {
+      const { root, real } = await linkedVault()
+      const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Link.md' }])
+      const ledgerPath = path.join(runsDirOf(root), `${receipt.runId}.json`)
+      const ledger = JSON.parse(await readFile(ledgerPath, 'utf8')) as WorkflowRunLedger
+      ledger.journal = ledger.journal.map(({ path: entryPath, before }) => ({ path: entryPath, before }))
+      await writeFile(ledgerPath, JSON.stringify(ledger), 'utf8')
+
+      await undoWorkflowRun(root, receipt.runId)
+
+      // Without the link's text there is no link to put back, so the note comes
+      // back as a copy; what matters is that the file behind it survives.
+      expect(await readFile(real, 'utf8')).toBe('real\n')
+      expect(await readOrNull(root, 'inbox/Link.md')).toBe('real\n')
+      expect(await pathExists(path.join(root, 'archive', 'Link.md'))).toBe(false)
+    })
+
+    it('an edited ledger cannot plant a link', async () => {
+      const root = await makeVault()
+      await seed(root, 'inbox/A.md', 'a\n')
+      const outside = await mkdtemp(path.join(os.tmpdir(), 'zennotes-outside-'))
+      tempDirs.push(outside)
+      const victim = path.join(outside, 'victim.md')
+      await writeFile(victim, 'victim\n', 'utf8')
+      const receipt = await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'edit' }])
+      const ledgerPath = path.join(runsDirOf(root), `${receipt.runId}.json`)
+      const ledger = JSON.parse(await readFile(ledgerPath, 'utf8')) as WorkflowRunLedger
+      ledger.journal = [...ledger.journal, { path: 'inbox/Planted.md', before: 'owned\n', link: victim }]
+      await writeFile(ledgerPath, JSON.stringify(ledger), 'utf8')
+
+      await undoWorkflowRun(root, receipt.runId)
+
+      // Links are only ever moved back, never made from what a ledger says.
+      expect(await isSymlink(path.join(root, 'inbox', 'Planted.md'))).toBe(false)
+      expect(await readFile(victim, 'utf8')).toBe('victim\n')
+    })
+
+    it('a move never replaces a link at the destination that points at nothing', async () => {
+      const root = await makeVault()
+      await seed(root, 'inbox/Note.md', 'note\n')
+      await mkdir(path.join(root, 'archive'), { recursive: true })
+      await symlink(path.join(root, 'sources', 'Gone.md'), path.join(root, 'archive', 'Note.md'))
+
+      const receipt = await apply(root, [{ kind: 'archive', path: 'inbox/Note.md' }])
+
+      expect(receipt.paths).toEqual(['inbox/Note.md', 'archive/Note 2.md'])
+      expect(await isSymlink(path.join(root, 'archive', 'Note.md'))).toBe(true)
+      expect(await readOrNull(root, 'archive/Note 2.md')).toBe('note\n')
+    })
   })
 })
 
