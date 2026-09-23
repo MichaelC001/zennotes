@@ -15,7 +15,7 @@ import {
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { ResizeHandle } from './ResizeHandle'
 import { Button, IconButton } from './ui/Button'
-import { buildMoveNotePrompt, parseMoveNoteTarget } from '../lib/move-note'
+import { buildMoveNotePrompt, moveNoteVocabulary, parseMoveNoteTarget } from '../lib/move-note'
 import { naturalCompare } from '../lib/natural-sort'
 import { extractTags } from '../lib/tags'
 import { setDragPayload } from '../lib/dnd'
@@ -186,9 +186,12 @@ export function NoteList(): JSX.Element {
       await runNoteLifecycleAction(n.path, 'trash')
     }
     const onMove = async (): Promise<void> => {
-      const target = await promptApp(buildMoveNotePrompt(n, folders))
-      if (!target) return
-      const dest = parseMoveNoteTarget(target)
+      const state = useStore.getState()
+      const vocabulary = moveNoteVocabulary(state.vaultSettings, state.systemFolderLabels, folders)
+      const target = await promptApp(buildMoveNotePrompt(n, folders, vocabulary))
+      // Empty is an answer (the notes root); only null is the Cancel.
+      if (target === null) return
+      const dest = parseMoveNoteTarget(target, vocabulary)
       await moveNote(n.path, dest.folder, dest.subpath)
     }
     const onRestore = async (): Promise<void> => {

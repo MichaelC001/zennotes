@@ -24,7 +24,7 @@ import {
   useStore,
 } from "../store";
 import { Button } from "./ui/Button";
-import { buildMoveNotePrompt, parseMoveNoteTarget } from "../lib/move-note";
+import { buildMoveNotePrompt, moveNoteVocabulary, parseMoveNoteTarget } from "../lib/move-note";
 import { buildTagTree, extractTags, flattenTagTree } from "../lib/tags";
 import { isTypstPreamblePath, resolveTypstPreambleFolder } from "../lib/typst-preamble";
 import { focusEditorNormalMode } from "../lib/editor-focus";
@@ -2213,9 +2213,12 @@ export function Sidebar(): JSX.Element {
       items.push({
         label: "Move…",
         onSelect: async () => {
-          const target = await promptApp(buildMoveNotePrompt(n, allFolders));
-          if (!target) return;
-          const dest = parseMoveNoteTarget(target);
+          const state = useStore.getState();
+          const vocabulary = moveNoteVocabulary(state.vaultSettings, state.systemFolderLabels, allFolders);
+          const target = await promptApp(buildMoveNotePrompt(n, allFolders, vocabulary));
+          // Empty is an answer (the notes root); only null is the Cancel.
+          if (target === null) return;
+          const dest = parseMoveNoteTarget(target, vocabulary);
           await moveNoteAction(n.path, dest.folder, dest.subpath);
         },
       });

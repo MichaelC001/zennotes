@@ -129,7 +129,7 @@ export const HELP_HOW_TO_GUIDES: HelpCard[] = [
   {
     title: 'Move a note without dragging',
     body:
-      'Use the note context menu, search for `move` or `mv` in the command palette, or run `:move` or `:mv`. With no argument, ZenNotes opens a folder picker; with a target like `archive/Reference` or `inbox/Work`, it moves the note directly.'
+      'Use the note context menu, search for `move` or `mv` in the command palette, or run `:move` or `:mv`. With no argument, ZenNotes opens a folder picker that speaks the sidebar\'s language: folders of your notes area as you see them there (`Work/Research`, no `inbox/` in front, and empty for the notes root, which is Inbox or the vault root depending on your Primary notes location), plus `archive/…` for the Archive. With a target like `:mv Work/Research` or `:mv archive/Reference`, it moves the note directly; `inbox/Work` still works on an Inbox vault.'
   },
   {
     title: 'Act on multiple sidebar items',
@@ -327,7 +327,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Moving notes is path-first',
     body:
-      'Use the note context menu, search `move` or `mv` in the command palette, or run `:move` / `:mv` from the ex line to move the active note into Inbox or Archive. With no argument, the command opens the folder picker; with a target like `:mv archive/Reference` or `:move inbox/Work`, it moves the note directly. The move prompt autocompletes folder paths, so you can type and Tab through existing destinations instead of dragging. “Duplicate” (palette or context menu) copies a note in place, appending “ (copy)” to the name.'
+      'Use the note context menu, search `move` or `mv` in the command palette, or run `:move` / `:mv` from the ex line to move the active note into a folder of your notes area or the Archive. With no argument, the command opens the folder picker; with a target like `:mv Work/Research` or `:mv archive/Reference`, it moves the note directly (`:move inbox/Work` still works on an Inbox vault). The picker spells destinations the way the sidebar does: no `inbox/` in front, empty for the notes root (Inbox, or the vault root when your notes live there), `archive/…` for the Archive, and it autocompletes folder paths, so you can type and Tab through existing destinations instead of dragging. “Duplicate” (palette or context menu) copies a note in place, appending “ (copy)” to the name.'
   },
   {
     title: 'Renaming a note fixes its links',
@@ -856,7 +856,7 @@ export const HELP_VIM_COMMANDS: HelpExCommand[] = [
   {
     command: ':move [folder] / :mv [folder]',
     summary: 'Move the active note',
-    detail: 'Both names are supported explicitly. Without an argument they open the move prompt; with a path like `archive/Reference` or `inbox/Work` they move the active note there directly.'
+    detail: 'Both names are supported explicitly. Without an argument they open the move prompt; with a path like `Work/Research` (a folder of your notes area, as the sidebar shows it) or `archive/Reference` they move the active note there directly. `inbox/Work` still works on an Inbox vault.'
   },
   {
     command: ':bn / :bp',
