@@ -944,21 +944,6 @@ function journalKey(rel: string): string {
 }
 
 /**
- * Record a path's pre-run bytes, on disk before it is recorded in memory.
- *
- * The order is the durability guarantee: every caller awaits this before the
- * write it describes, so a process killed at any point leaves a journal that
- * covers at least every file it had begun to change.
- */
-async function journalTouch(state: RunState, rel: string, before: string | null): Promise<void> {
-  const key = journalKey(rel)
-  if (state.journal.has(key)) return
-  const entry = await withLinkText(state.root, { path: rel, before })
-  await appendJournalEntries(state.journalFile, [entry])
-  state.journal.set(key, entry)
-}
-
-/**
  * The entry, plus the text of the symlink its path is, when it is one. Read at
  * the first touch, like the bytes, so it describes the path before the run.
  */
@@ -982,13 +967,18 @@ function sidecarKey(note: string, sidecar: SidecarKind): string {
 }
 
 /**
- * `journalTouch` for everything one path op is about to change: both ends of
- * the note and of each sidecar it carries, first touch still winning, on disk
- * in ONE append and ONE sync. A sync per line made a bulk move several times
- * slower for no extra safety, since the op writes none of these files until
- * all of them are durable either way.
+ * Record the pre-run state of everything one op is about to change, on disk
+ * before it is recorded in memory: the note (both ends of it, for a path op)
+ * and each sidecar the op touches, first touch winning throughout.
+ *
+ * The order is the durability guarantee: every caller awaits this before the
+ * write it describes, so a process killed at any point leaves a journal that
+ * covers at least every file it had begun to change. It is ONE append and ONE
+ * sync for all of them: a sync per line made a bulk move several times slower
+ * for no extra safety, since the op writes none of these files until all of
+ * them are durable either way.
  */
-async function journalPathOp(
+async function journalOp(
   state: RunState,
   notes: WorkflowJournalEntry[],
   sidecars: SidecarJournalEntry[]
@@ -1081,9 +1071,45 @@ async function applyTextOpToVault(state: RunState, op: TextOp): Promise<void> {
   // for a change that did not happen. Only for a file that already exists;
   // creating an empty note is a real change even though '' equals ''.
   if (live !== null && next === live) return
-  await journalTouch(state, rel, live)
+  const metadata = await sidecarPathOf(state.root, rel, 'metadata')
+  // Creating a note where a date file waits with no note beside it: that date
+  // belongs to nobody (#839), and `createNote` discards it too. Journalled,
+  // so undo puts it back; the new note's date is its own birth time.
+  const leftover = live === null ? await readIfExists(metadata) : null
+  if (live !== null) await keepCreationDate(state, rel)
+  await journalOp(
+    state,
+    [{ path: rel, before: live }],
+    leftover === null ? [] : [{ note: rel, sidecar: 'metadata', before: leftover }]
+  )
+  if (leftover !== null) {
+    await fs.rm(metadata, { force: true })
+    state.sidecarsWritten.set(sidecarKey(rel, 'metadata'), null)
+  }
   await writeNoteThroughLinks(abs, next)
   recordWritten(state, rel, hashText(next))
+}
+
+/**
+ * Write a note's creation date down before its file is replaced.
+ *
+ * A note ZenNotes has never saved (one from before 2.51, or from git, sync or
+ * a file manager) has no date file: its date is the file's own birth time,
+ * and an atomic write, temp file plus rename, replaces that file with one
+ * born now. Saving from the editor writes the date down first (`writeNote`),
+ * and so must every write here, and every move: the rename keeps the file,
+ * but undo writes it back as a new one. A date file already there is left
+ * alone, valid or not, so a corrupt one cannot fail a run the way it fails a
+ * save. This is the one write that is not journalled first, safely: it
+ * records a date the note already had, where the app already looks for it, so
+ * nothing anyone can see changes, even if the run dies right after it. Not in
+ * a temporary folder session, which `writeNote` never writes app state into
+ * either.
+ */
+async function keepCreationDate(state: RunState, rel: string): Promise<void> {
+  if (isEphemeralRoot(state.root)) return
+  if ((await readIfExists(await sidecarPathOf(state.root, rel, 'metadata'))) !== null) return
+  await prepareNoteCreation(state.root, rel)
 }
 
 /** A sidecar a path op is about to carry. */
@@ -1117,29 +1143,20 @@ async function sidecarsToCarry(
   toAbs: string
 ): Promise<SidecarMove[]> {
   const moves: SidecarMove[] = []
+  // Refused before anything is written down, so a refusal leaves no trace.
+  const toComments = await sidecarPathOf(state.root, to, 'comments')
+  if ((await readIfExists(toComments)) !== null) {
+    throw new Error(leftoverCommentsMessage(state.root, toAbs))
+  }
+  // The rename keeps the file's birth time, but undo cannot: it writes the
+  // note back as a new file. Written down now, the date travels and comes back
+  // like any other sidecar.
+  await keepCreationDate(state, from)
   for (const kind of SIDECAR_KINDS) {
     const fromAbs = await sidecarPathOf(state.root, from, kind)
     const toSidecar = await sidecarPathOf(state.root, to, kind)
     const toBytes = await readIfExists(toSidecar)
-    if (kind === 'comments' && toBytes !== null) {
-      throw new Error(leftoverCommentsMessage(state.root, toAbs))
-    }
-    let fromBytes = await readIfExists(fromAbs)
-    // Not in a temporary folder session, which `writeNote` never writes app
-    // state into either.
-    if (kind === 'metadata' && fromBytes === null && !isEphemeralRoot(state.root)) {
-      // A note ZenNotes has never saved (one from before 2.51, or from git, sync
-      // or a file manager) has no date file: its date is the file's own birth
-      // time. The rename below keeps that, but undo cannot, because it writes
-      // the bytes back as a new file, born at the moment of the undo. So the
-      // date is written down first, as the editor's first save does, and then
-      // travels and comes back like any other. This is the one write that is
-      // not journalled first, safely: it records a date the note already had,
-      // where the app already looks for it, so nothing anyone can see changes,
-      // even if the run dies right after it.
-      await prepareNoteCreation(state.root, from)
-      fromBytes = await readIfExists(fromAbs)
-    }
+    const fromBytes = await readIfExists(fromAbs)
     if (fromBytes === null && toBytes === null) continue
     moves.push({ kind, fromAbs, toAbs: toSidecar, fromBytes, toBytes })
   }
@@ -1171,7 +1188,7 @@ async function movePathInVault(
   // Before the first journal line, so an op refused over its sidecars leaves
   // nothing of itself to take back.
   const sidecars = await sidecarsToCarry(state, from, to, toAbs)
-  await journalPathOp(
+  await journalOp(
     state,
     [
       { path: from, before: live },

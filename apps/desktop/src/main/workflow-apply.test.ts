@@ -972,6 +972,117 @@ describe("a note's sidecars travel with it", () => {
 })
 
 /* -------------------------------------------------------------------------- */
+/*  A note's creation date                                                    */
+/* -------------------------------------------------------------------------- */
+
+// A saved note keeps its creation date in a date file; one ZenNotes never saved
+// shows its file's birth time, and an atomic write replaces that file with one
+// born now. The editor's save writes the date down first. The applier did not,
+// so every text op gave a note the run's time as its creation date.
+describe('a note keeps its creation date', () => {
+  /** What the app would be left with and no date file: the fallback. */
+  const NO_DATE_FILE = -1
+
+  const textOps: Array<[string, WorkflowOp]> = [
+    ['append', { kind: 'append', path: 'inbox/A.md', text: 'more' }],
+    ['prepend', { kind: 'prepend', path: 'inbox/A.md', text: 'first' }],
+    ['add-tag', { kind: 'add-tag', path: 'inbox/A.md', tag: 'filed' }],
+    ['set-frontmatter', { kind: 'set-frontmatter', path: 'inbox/A.md', field: 'status', value: 'done' }],
+    ['write-section', { kind: 'write-section', path: 'inbox/A.md', heading: 'Log', text: 'entry' }],
+    ['write-note', { kind: 'write-note', path: 'inbox/A.md', text: 'replaced\n' }]
+  ]
+
+  it.each(textOps)('through %s with no date file yet, and through the undo', async (_kind, op) => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    const born = await stat(path.join(root, 'inbox', 'A.md'))
+    const createdAt = Math.trunc(born.birthtimeMs || born.ctimeMs)
+
+    const receipt = await apply(root, [op])
+    expect(receipt.rolledBack).toBeUndefined()
+    expect(await readOrNull(root, 'inbox/A.md')).not.toBe('a\n')
+    expect(await readNoteCreatedAt(root, 'inbox/A.md', NO_DATE_FILE)).toBe(createdAt)
+
+    await undoWorkflowRun(root, receipt.runId)
+
+    expect(await readOrNull(root, 'inbox/A.md')).toBe('a\n')
+    expect(await readNoteCreatedAt(root, 'inbox/A.md', NO_DATE_FILE)).toBe(createdAt)
+  })
+
+  it('has the date written down before the note is', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    let dateFileAtWrite: string | null = null
+    injected.beforeWrite = async (abs) => {
+      if (abs.endsWith(path.join('inbox', 'A.md')) && dateFileAtWrite === null) {
+        dateFileAtWrite = await readOrNull(root, metadataRel('inbox/A.md'))
+      }
+    }
+
+    await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'more' }])
+
+    expect(dateFileAtWrite).not.toBeNull()
+  })
+
+  it('leaves a date file that is already there alone, one it cannot read included', async () => {
+    const root = await makeVault()
+    await seed(root, 'inbox/A.md', 'a\n')
+    await seed(root, 'inbox/B.md', 'b\n')
+    await seed(root, metadataRel('inbox/A.md'), CREATED)
+    await seed(root, metadataRel('inbox/B.md'), 'not a date\n')
+
+    const receipt = await apply(root, [
+      { kind: 'append', path: 'inbox/A.md', text: 'more' },
+      { kind: 'append', path: 'inbox/B.md', text: 'more' }
+    ])
+
+    // A save refuses a date file it cannot read; a run does not fail over one.
+    expect(receipt.rolledBack).toBeUndefined()
+    expect(await readOrNull(root, metadataRel('inbox/A.md'))).toBe(CREATED)
+    expect(await readOrNull(root, metadataRel('inbox/B.md'))).toBe('not a date\n')
+  })
+
+  it('writes no date file in a temporary folder session', async () => {
+    const root = await makeVault()
+    registerEphemeralRoot(root)
+    try {
+      await seed(root, 'inbox/A.md', 'a\n')
+      await apply(root, [{ kind: 'append', path: 'inbox/A.md', text: 'more' }])
+      expect(await readOrNull(root, metadataRel('inbox/A.md'))).toBeNull()
+    } finally {
+      unregisterEphemeralRoot(root)
+    }
+  })
+
+  it('a created note has its own birth time, not a date left behind, and undo brings that back', async () => {
+    const root = await makeVault()
+    const leftover = '{"version":1,"createdAt":1600000000000}\n'
+    await seed(root, metadataRel('inbox/New.md'), leftover)
+
+    const receipt = await apply(root, [{ kind: 'create-note', path: 'inbox/New.md', body: 'new' }])
+    const ledger = await readLedger(root, receipt.runId)
+
+    expect(await readOrNull(root, metadataRel('inbox/New.md'))).toBeNull()
+    expect(await readNoteCreatedAt(root, 'inbox/New.md', NO_DATE_FILE)).toBe(NO_DATE_FILE)
+    expect(ledger.sidecars).toEqual([
+      { note: 'inbox/New.md', sidecar: 'metadata', before: leftover, after: null }
+    ])
+
+    await undoWorkflowRun(root, receipt.runId)
+
+    expect(await readOrNull(root, 'inbox/New.md')).toBeNull()
+    expect(await readOrNull(root, metadataRel('inbox/New.md'))).toBe(leftover)
+  })
+
+  it('a created note gets no date file of its own', async () => {
+    const root = await makeVault()
+    await apply(root, [{ kind: 'create-note', path: 'inbox/New.md', body: 'new' }])
+    expect(await readOrNull(root, 'inbox/New.md')).not.toBeNull()
+    expect(await readOrNull(root, metadataRel('inbox/New.md'))).toBeNull()
+  })
+})
+
+/* -------------------------------------------------------------------------- */
 /*  Rollback                                                                  */
 /* -------------------------------------------------------------------------- */
 
