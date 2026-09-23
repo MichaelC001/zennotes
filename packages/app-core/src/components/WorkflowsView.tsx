@@ -86,6 +86,7 @@ import type {
 } from '@shared/workflows/types'
 import { useStore } from '../store'
 import type { WorkflowRunRecord } from '../store'
+import { getSystemFolderLabel } from '../lib/system-folder-labels'
 import { useToastStore } from '../lib/toast'
 import { createVaultReader } from '../lib/workflow-vault-reader'
 import { canManageWorkflows } from '../lib/workflow-workspace'
@@ -161,7 +162,7 @@ import { ContextMenu } from './ContextMenu'
 import type { ContextMenuItem } from './ContextMenu'
 import { CloseIcon, PencilIcon, PlusIcon, TrashIcon, ZapIcon } from './icons'
 import { NodeInspector } from './workflows/NodeInspector'
-import type { InspectorVocabulary } from './workflows/NodeInspector'
+import type { ComboboxOption, InspectorVocabulary } from './workflows/NodeInspector'
 import { ImportReviewDialog } from './workflows/ImportReviewDialog'
 import { TutorialPanel } from './workflows/TutorialPanel'
 import { WorkflowListPane } from './workflows/WorkflowListPane'
@@ -1122,6 +1123,8 @@ const CARET_KEYS: ReadonlySet<string> = new Set([
  */
 export function WorkflowsView(): JSX.Element {
   const notes = useStore((s) => s.notes)
+  const primaryNotesAtRoot = useStore((s) => s.vaultSettings.primaryNotesLocation === 'root')
+  const systemFolderLabels = useStore((s) => s.systemFolderLabels)
   const selectedPath = useStore((s) => s.selectedPath)
   const vimMode = useStore((s) => s.vimMode)
   const keymapOverrides = useStore((s) => s.keymapOverrides)
@@ -1749,27 +1752,43 @@ export function WorkflowsView(): JSX.Element {
   }, [plan])
 
   /**
-   * Every folder a note lives in, ancestors included.
+   * The four system names, then every folder a note lives in, ancestors
+   * included.
    *
-   * Derived from the note paths rather than from the store's folder tree
-   * because that is exactly what the engine sees: `WorkflowNote.folder` is the
-   * vault-relative DIRECTORY, while `NoteMeta.folder` is the system bucket. A
-   * combobox offering the bucket would suggest folders that match nothing.
+   * Directories are derived from the note paths rather than from the store's
+   * folder tree because that is exactly what the engine sees:
+   * `WorkflowNote.folder` is the vault-relative DIRECTORY, while
+   * `NoteMeta.folder` is the system bucket. The system names lead because the
+   * engine reads them as the system folders wherever the vault keeps them, and
+   * each carries the name the sidebar shows for it. On a vault whose notes
+   * live at the root, `inbox` is the root itself: the one folder no directory
+   * name could offer, and the one a list of directories sent someone looking
+   * for in vain (#840).
    */
-  const vaultFolders = useMemo(() => {
-    const seen = new Set<string>()
+  const vaultFolders = useMemo<ComboboxOption[]>(() => {
+    const buckets = (['inbox', 'quick', 'archive', 'trash'] as const).map((bucket) => ({
+      value: bucket,
+      hint:
+        bucket === 'inbox' && primaryNotesAtRoot
+          ? 'Vault root'
+          : getSystemFolderLabel(bucket, systemFolderLabels)
+    }))
+    const seen = new Set<string>(buckets.map((bucket) => bucket.value))
+    const directories: string[] = []
     for (const note of notes) {
       const cut = note.path.lastIndexOf('/')
       if (cut === -1) continue
       let directory = note.path.slice(0, cut)
       while (directory !== '' && !seen.has(directory)) {
         seen.add(directory)
+        directories.push(directory)
         const up = directory.lastIndexOf('/')
         directory = up === -1 ? '' : directory.slice(0, up)
       }
     }
-    return [...seen].sort((a, b) => a.localeCompare(b))
-  }, [notes])
+    directories.sort((a, b) => a.localeCompare(b))
+    return [...buckets, ...directories.map((value) => ({ value }))]
+  }, [notes, primaryNotesAtRoot, systemFolderLabels])
 
   // A diagnostic carries a line, and a whole pipeline lives on one line, so a
   // bad step marks every step of its statement. Line is the finest grain the
