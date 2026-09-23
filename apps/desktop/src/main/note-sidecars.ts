@@ -41,9 +41,53 @@ export function leftoverCommentsMessage(root: string, noteAbs: string): string {
   return `Comments from an earlier note named “${path.parse(noteAbs).name}” are still in ${toPosix(path.relative(root, comments))}. Move or delete that file to use this name.`
 }
 
+/**
+ * After a rename from `from` to `to`, keep a symlink pointing where it did.
+ *
+ * A link's relative text is read from the link's own folder, so a link moved
+ * verbatim to another depth names a different file, or none: `../sources/X.md`
+ * from `inbox/` becomes `inbox/sources/X.md` from `inbox/Topics/`. That is what
+ * `mv` and Finder do, and it is wrong for a note, which the user expects to
+ * keep reading the same file wherever it is filed. The text is re-based on the
+ * target it named from the old folder, which is also what makes a rename back
+ * (a rollback, an undo) land on the original text again. An absolute text
+ * needs nothing; links inside a moved folder move with their folder and keep
+ * resolving unless they pointed out of it, which this does not follow.
+ */
+export async function rebaseMovedLink(from: string, to: string): Promise<void> {
+  let stats
+  try {
+    stats = await fs.lstat(to)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  if (!stats.isSymbolicLink()) return
+  const text = await fs.readlink(to)
+  if (path.isAbsolute(text)) return
+  const fromDir = path.dirname(from)
+  const toDir = path.dirname(to)
+  if (fromDir === toDir) return
+  const next = path.relative(toDir, path.resolve(fromDir, text))
+  if (next === text) return
+  // A new link beside it, renamed over: no moment without a link at `to`.
+  const temporary = `${to}_relink_tmp_${randomUUID()}`
+  await fs.symlink(next, temporary)
+  try {
+    await fs.rename(temporary, to)
+  } catch (error) {
+    await fs.rm(temporary, { force: true }).catch(() => undefined)
+    throw error
+  }
+}
+
 async function renameDirectory(from: string, to: string): Promise<void> {
   if (from === to) return
-  if (from.toLowerCase() !== to.toLowerCase()) return fs.rename(from, to)
+  if (from.toLowerCase() !== to.toLowerCase()) {
+    await fs.rename(from, to)
+    await rebaseMovedLink(from, to)
+    return
+  }
   const temporary = `${from}_rename_tmp_${randomUUID()}`
   await fs.rename(from, temporary)
   try {

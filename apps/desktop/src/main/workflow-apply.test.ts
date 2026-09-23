@@ -1805,6 +1805,41 @@ describe('symlinked notes', () => {
       expect(await pathExists(path.join(root, 'archive', 'Rel.md'))).toBe(false)
     })
 
+    it('a relative link moved to another depth keeps pointing at its file, and undo spells it as before', async () => {
+      const root = await makeVault()
+      await seed(root, 'sources/Real.md', 'real\n')
+      await symlink('../sources/Real.md', path.join(root, 'inbox', 'Rel.md'))
+
+      const receipt = await apply(root, [{ kind: 'move', path: 'inbox/Rel.md', to: 'inbox/Topics' }])
+
+      // Moved verbatim, `../sources/Real.md` from inbox/Topics would name
+      // inbox/sources/Real.md, which does not exist.
+      expect(await readlink(path.join(root, 'inbox', 'Topics', 'Rel.md'))).toBe(path.join('..', '..', 'sources', 'Real.md'))
+      expect(await readOrNull(root, 'inbox/Topics/Rel.md')).toBe('real\n')
+      const undo = await undoWorkflowRun(root, receipt.runId)
+
+      expect(undo.driftedPaths).toEqual([])
+      expect(await readlink(path.join(root, 'inbox', 'Rel.md'))).toBe('../sources/Real.md')
+      expect(await readOrNull(root, 'inbox/Rel.md')).toBe('real\n')
+      expect(await readOrNull(root, 'sources/Real.md')).toBe('real\n')
+      expect(await pathExists(path.join(root, 'inbox', 'Topics', 'Rel.md'))).toBe(false)
+    })
+
+    it('a text the move need not re-spell is kept as it was', async () => {
+      const root = await makeVault()
+      await seed(root, 'sources/Real.md', 'real\n')
+      // Not how `path.relative` would spell it, so putting it back by spelling
+      // alone would change it.
+      await symlink('./../sources/Real.md', path.join(root, 'inbox', 'Rel.md'))
+
+      const receipt = await apply(root, [{ kind: 'move', path: 'inbox/Rel.md', to: 'inbox/Topics' }])
+      expect(await readOrNull(root, 'inbox/Topics/Rel.md')).toBe('real\n')
+      await undoWorkflowRun(root, receipt.runId)
+
+      expect(await readlink(path.join(root, 'inbox', 'Rel.md'))).toBe('./../sources/Real.md')
+      expect(await readOrNull(root, 'inbox/Rel.md')).toBe('real\n')
+    })
+
     it('the crash journal records the link, and a recovered run puts it back', async () => {
       const { root, real } = await linkedVault()
       const noteAbs = path.join(root, 'inbox', 'Link.md')

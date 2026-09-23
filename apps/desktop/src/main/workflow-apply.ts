@@ -99,7 +99,12 @@ import {
 import { WORKFLOWS_REL_DIR } from '@shared/workflows-view'
 import { isEphemeralRoot } from './ephemeral-vaults'
 import { noteMetadataPath, noteMetadataRoot, prepareNoteCreation } from './note-creation-metadata'
-import { leftoverCommentsMessage, noteCommentsPath, noteCommentsRoot } from './note-sidecars'
+import {
+  leftoverCommentsMessage,
+  noteCommentsPath,
+  noteCommentsRoot,
+  rebaseMovedLink
+} from './note-sidecars'
 import { getVaultSettings, writeFileAtomic } from './vault'
 
 /* -------------------------------------------------------------------------- */
@@ -376,6 +381,21 @@ async function pathTaken(abs: string): Promise<boolean> {
     return true
   } catch (err) {
     if (isMissing(err)) return false
+    throw err
+  }
+}
+
+/**
+ * Give the symlink at `abs` the text `text`, which the caller has checked
+ * names the same file the link already names: a spelling, not a new target.
+ */
+async function respellLink(abs: string, text: string): Promise<void> {
+  const temporary = `${abs}_relink_tmp_${process.pid}_${Date.now()}`
+  await fs.symlink(text, temporary)
+  try {
+    await fs.rename(temporary, abs)
+  } catch (err) {
+    await fs.rm(temporary, { force: true }).catch(() => undefined)
     throw err
   }
 }
@@ -1207,6 +1227,9 @@ async function movePathInVault(
   )
   await fs.mkdir(path.dirname(toAbs), { recursive: true })
   await fs.rename(fromAbs, toAbs)
+  // A symlinked note keeps pointing where it did, as the app's own move keeps
+  // it (see `rebaseMovedLink`).
+  await rebaseMovedLink(fromAbs, toAbs)
   recordWritten(state, from, null)
   recordWritten(state, to, hashText(live))
   for (const sidecar of sidecars) {
@@ -1319,8 +1342,10 @@ async function restoreEntries(
   const failures: RestoreFailure[] = []
   let restored = 0
   const list = [...entries]
-  // Where the run left the links it moved, by their text: a path it found
-  // empty that now holds a link it did not have before.
+  // Where the run left the links it moved, by the file each names: a path
+  // the run found empty that now holds a link it did not have before. By the
+  // file rather than the text, because a relative text was re-based when the
+  // link moved (`rebaseMovedLink`), and is again on the way back.
   const movedLinks = new Map<string, string[]>()
   for (const entry of list) {
     if (entry.before !== null) continue
@@ -1328,9 +1353,10 @@ async function restoreEntries(
       const abs = resolveVaultPath(root, entry.path)
       const text = await linkTextOf(abs)
       if (text === undefined || text === entry.link) continue
-      const same = movedLinks.get(text)
+      const names = path.resolve(path.dirname(abs), text)
+      const same = movedLinks.get(names)
       if (same) same.push(abs)
-      else movedLinks.set(text, [abs])
+      else movedLinks.set(names, [abs])
     } catch {
       // The loop below meets the same entry and reports it.
     }
@@ -1342,11 +1368,17 @@ async function restoreEntries(
       // disk, and that file must never be able to point a write anywhere.
       const abs = resolveVaultPath(root, rel)
       if (link !== undefined && !(await pathTaken(abs))) {
-        const moved = movedLinks.get(link)?.pop()
-        if (moved !== undefined && (await linkTextOf(moved)) === link) {
+        const names = path.resolve(path.dirname(abs), link)
+        const moved = movedLinks.get(names)?.pop()
+        const text = moved === undefined ? undefined : await linkTextOf(moved)
+        if (moved !== undefined && text !== undefined && path.resolve(path.dirname(moved), text) === names) {
           await fs.mkdir(path.dirname(abs), { recursive: true })
           await fs.rename(moved, abs)
+          await rebaseMovedLink(moved, abs)
           await pruneEmptyDirs(root, path.dirname(moved))
+          // The recorded text, when it names the very file the link now names
+          // from here: the same reach, spelled the way it was.
+          if ((await linkTextOf(abs)) !== link) await respellLink(abs, link)
         }
       }
       if (before === null) {

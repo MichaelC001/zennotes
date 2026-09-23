@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -147,6 +147,21 @@ describe.each(clients)('%s: a note keeps its comments', (_name, client) => {
     await client.emptyTrash(root)
 
     expect(await missing(commentsFile(root, trashed.path))).toBe(true)
+  })
+
+  it('a note that is a relative link keeps pointing at its file when moved deeper', async () => {
+    const root = await makeVault()
+    // Inside inbox, so the vault stays in its default layout.
+    await mkdir(path.join(root, 'inbox', 'sources'), { recursive: true })
+    await writeFile(path.join(root, 'inbox', 'sources', 'Real.md'), '# Real\n\nElsewhere.\n')
+    await symlink('sources/Real.md', path.join(root, 'inbox', 'Rel.md'))
+
+    const moved = await client.moveNote(root, 'inbox/Rel.md', 'inbox', 'Topics')
+
+    // Moved verbatim, `sources/Real.md` from inbox/Topics would name nothing.
+    expect(moved.path).toBe('inbox/Topics/Rel.md')
+    expect(await readlink(path.join(root, 'inbox', 'Topics', 'Rel.md'))).toBe(path.join('..', 'sources', 'Real.md'))
+    expect(await readFile(path.join(root, 'inbox', 'Topics', 'Rel.md'), 'utf8')).toBe('# Real\n\nElsewhere.\n')
   })
 
   it('deleting a folder takes its notes’ comments', async () => {
