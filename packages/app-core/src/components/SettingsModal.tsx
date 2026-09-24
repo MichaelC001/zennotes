@@ -28,6 +28,7 @@ import type {
   RaycastExtensionStatus,
   RemoteWorkspaceProfile,
   RemoteWorkspaceProfileInput,
+  VaultSettings,
   VaultTextSearchBackendPreference,
   VaultTextSearchCapabilities,
   VaultTextSearchToolPaths,
@@ -115,6 +116,7 @@ import {
   normalizeMonthlyNoteLocale,
   normalizeMonthlyNoteTitlePattern,
   normalizeMonthlyNotesDirectory,
+  specificFolderDestination,
 } from "../lib/vault-layout";
 import { BUILTIN_TEMPLATES } from "@shared/builtin-templates";
 import { composeTemplateFile, mergeTemplates } from "@shared/template-files";
@@ -327,6 +329,15 @@ function clearSettingsSearchHighlights(root: HTMLElement): void {
     .forEach((element) => {
       delete element.dataset.settingsSearchHighlight;
     });
+}
+
+/** Where a `Specific folder` row's files really land, for its description. */
+function specificFolderDestinationLabel(
+  folder: string | undefined,
+  settings: VaultSettings,
+): string {
+  const dir = specificFolderDestination(folder, settings);
+  return dir ? `\`${dir}/\`` : "the vault root";
 }
 
 function resolveVaultTextSearchBackend(
@@ -3476,6 +3487,47 @@ export function SettingsModal(): JSX.Element {
           keywords: ["primary notes", "inbox", "vault root"],
         },
         {
+          id: "drawings-location",
+          title: "Default drawings location",
+          description:
+            "Where new Excalidraw drawings are created: your primary notes area, the active note's folder, or a folder you name.",
+          keywords: [
+            "drawings",
+            "drawing folder",
+            "drawings folder",
+            "excalidraw",
+            "new drawing",
+          ],
+        },
+        {
+          id: "databases-location",
+          title: "Default databases location",
+          description:
+            "Where new databases are created: your primary notes area, the active note's folder, or a folder you name.",
+          keywords: [
+            "databases",
+            "database folder",
+            "databases folder",
+            "database location",
+            "new database",
+          ],
+        },
+        {
+          id: "tasks-location",
+          title: "Default tasks location",
+          description:
+            "Where new task files are created: your primary notes area, the active note's folder, or a folder you name.",
+          keywords: [
+            "tasks",
+            "task folder",
+            "tasks folder",
+            "task location",
+            "task files",
+            "new task",
+            "todos",
+          ],
+        },
+        {
           id: "view-settings-scope",
           title: "View settings",
           description:
@@ -3955,8 +4007,14 @@ export function SettingsModal(): JSX.Element {
           id: "notes",
           title: "Notes",
           description:
-            "How primary notes, new drawings and databases, and view preferences are organized.",
-          searchIds: ["primary-notes-location", "view-settings-scope"],
+            "Where primary notes live, where new drawings, databases, and tasks are created, and how view preferences apply.",
+          searchIds: [
+            "primary-notes-location",
+            "drawings-location",
+            "databases-location",
+            "tasks-location",
+            "view-settings-scope",
+          ],
           content: (
             <div className="space-y-6">
               <Section
@@ -3986,7 +4044,7 @@ export function SettingsModal(): JSX.Element {
               >
                 <SegmentedRow
                   label="Default drawings location"
-                  description="`Primary location` uses your primary notes area, `Active note's folder` puts it beside the note you're viewing, `Specific folder` uses a subfolder you choose."
+                  description="`Primary location` uses your primary notes area, `Active note's folder` puts it beside the note you're viewing, `Specific folder` uses a folder you name inside your primary notes area."
                   value={vaultSettings.drawingsLocation?.mode ?? "primary"}
                   settingId="drawings-location"
                   options={[
@@ -4007,7 +4065,7 @@ export function SettingsModal(): JSX.Element {
                 {vaultSettings.drawingsLocation?.mode === "folder" && (
                   <TextInputRow
                     label="Drawings folder"
-                    description="Vault-relative subfolder for new drawings, e.g. `assets/drawings`."
+                    description={`A folder inside your primary notes area, e.g. \`assets/drawings\`. New drawings go to ${specificFolderDestinationLabel(vaultSettings.drawingsLocation?.folder, vaultSettings)}.`}
                     value={vaultSettings.drawingsLocation?.folder ?? ""}
                     placeholder="assets/drawings"
                     settingId="drawings-folder"
@@ -4046,7 +4104,7 @@ export function SettingsModal(): JSX.Element {
                 {vaultSettings.databasesLocation?.mode === "folder" && (
                   <TextInputRow
                     label="Databases folder"
-                    description="Vault-relative subfolder for new databases, e.g. `assets/databases`."
+                    description={`A folder inside your primary notes area, e.g. \`assets/databases\`. New databases go to ${specificFolderDestinationLabel(vaultSettings.databasesLocation?.folder, vaultSettings)}.`}
                     value={vaultSettings.databasesLocation?.folder ?? ""}
                     placeholder="assets/databases"
                     settingId="databases-folder"
@@ -4082,7 +4140,7 @@ export function SettingsModal(): JSX.Element {
                 {vaultSettings.tasksLocation?.mode === "folder" && (
                   <TextInputRow
                     label="Tasks folder"
-                    description="Vault-relative subfolder for new task files, e.g. `Tasks` or `Projects/Inbox`."
+                    description={`A folder inside your primary notes area, e.g. \`Tasks\` or \`Projects/Inbox\`. New task files go to ${specificFolderDestinationLabel(vaultSettings.tasksLocation?.folder, vaultSettings)}.`}
                     value={vaultSettings.tasksLocation?.folder ?? ""}
                     placeholder="Tasks"
                     settingId="tasks-folder"

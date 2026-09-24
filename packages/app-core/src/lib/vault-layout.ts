@@ -526,7 +526,7 @@ function normalizeFileLocation(
 }
 
 /**
- * Resolve where a new Drawing/Database should be created, from a
+ * Resolve where a new Drawing/Database/task file should be created, from a
  * `FileLocationSetting` + the note you're currently viewing. Returns the
  * `(folder, subpath)` pair the `createExcalidraw` / `createDatabase` bridge calls
  * expect. (#362)
@@ -549,6 +549,21 @@ export function resolveCreateLocation(
     return { folder: 'inbox', subpath: normalized.folder }
   }
   return { folder: 'inbox', subpath: '' }
+}
+
+/**
+ * The vault-relative directory a `Specific folder` location really creates
+ * files in ('' is the vault root), so Settings can spell it out. The folder is
+ * an inbox subpath, not a vault path: `Tasks` is `inbox/Tasks` in an Inbox
+ * vault, `Tasks` in a root vault, and follows a remapped inbox. The Settings
+ * field used to call it vault-relative, which only held in a root vault.
+ */
+export function specificFolderDestination(
+  folder: string | null | undefined,
+  settings: VaultSettings | null | undefined
+): string {
+  const location = resolveCreateLocation({ mode: 'folder', folder: folder ?? '' }, null, settings)
+  return vaultRelativeFolderPath(location.folder, location.subpath, settings)
 }
 
 /**

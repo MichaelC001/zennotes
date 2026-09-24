@@ -202,6 +202,53 @@ describe("SettingsModal date note directories", () => {
     expect(mocks.state.setShowWindowTitleBar).toHaveBeenCalledWith(false);
   });
 
+  it("finds the new-file location rows by the words people search for", async () => {
+    await act(async () => root.render(createElement(SettingsModal)));
+    const search = host.querySelector<HTMLInputElement>('input[placeholder="Search settings…"]')!;
+    const cases = [
+      ["tasks folder", "Default tasks location", "tasks-location"],
+      ["task folder", "Default tasks location", "tasks-location"],
+      ["new task", "Default tasks location", "tasks-location"],
+      ["drawings folder", "Default drawings location", "drawings-location"],
+      ["database location", "Default databases location", "databases-location"],
+    ] as const;
+    for (const [query, title, settingId] of cases) {
+      await act(async () => changeInput(search, query));
+      const result = [...host.querySelectorAll<HTMLButtonElement>("aside nav button")].find(
+        (button) => button.textContent?.includes(title),
+      );
+      expect(result, query).toBeTruthy();
+      await act(async () => result!.click());
+      expect(host.querySelector(`[data-settings-search-id="${settingId}"]`), query).toBeTruthy();
+    }
+  });
+
+  it("says where a specific tasks folder really lands for the vault's layout", async () => {
+    const original = mocks.state.vaultSettings;
+    const withTasksFolder = (primaryNotesLocation: "inbox" | "root") =>
+      ({
+        ...original,
+        primaryNotesLocation,
+        tasksLocation: { mode: "folder", folder: "Tasks" },
+      }) as typeof original;
+    const folderRowText = () =>
+      host.querySelector('[data-settings-search-id="tasks-folder"]')?.textContent ?? "";
+    try {
+      mocks.state.vaultSettings = withTasksFolder("inbox");
+      await act(async () => root.render(createElement(SettingsModal)));
+      const search = host.querySelector<HTMLInputElement>('input[placeholder="Search settings…"]')!;
+      await act(async () => changeInput(search, "tasks folder"));
+      expect(folderRowText()).toContain("New task files go to `inbox/Tasks/`.");
+      expect(folderRowText()).not.toContain("Vault-relative");
+
+      mocks.state.vaultSettings = withTasksFolder("root");
+      await act(async () => root.render(createElement(SettingsModal)));
+      expect(folderRowText()).toContain("New task files go to `Tasks/`.");
+    } finally {
+      mocks.state.vaultSettings = original;
+    }
+  });
+
   it("does not offer native title bar settings in the web app", async () => {
     mocks.runtime = "web";
     await act(async () => root.render(createElement(SettingsModal)));
