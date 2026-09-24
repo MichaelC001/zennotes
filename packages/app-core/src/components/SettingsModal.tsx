@@ -47,6 +47,7 @@ import {
   resolveTypstPreambleFolder,
 } from "@shared/typst-preamble-folder";
 import { useStore, refreshCustomThemes, refreshOverrides } from "../store";
+import { vaultFolderName } from "../lib/rename-vault";
 import {
   WORKFLOW_PRESETS,
   hiddenPresetsInOrder,
@@ -310,6 +311,7 @@ function settingsSearchTargetProps(settingId: string | undefined): {
 } {
   return settingId ? { "data-settings-search-id": settingId } : {};
 }
+
 
 function findSettingsSearchTarget(
   root: HTMLElement,
@@ -597,6 +599,8 @@ export function SettingsModal(): JSX.Element {
   const setContentAlign = useStore((s) => s.setContentAlign);
   const vault = useStore((s) => s.vault);
   const workspaceMode = useStore((s) => s.workspaceMode);
+  const renameVault = useStore((s) => s.renameVault);
+  const vaultDisplayName = useStore((s) => s.vaultSettings.displayName ?? "");
   const remoteWorkspaceInfo = useStore((s) => s.remoteWorkspaceInfo);
   const remoteWorkspaceProfiles = useStore((s) => s.remoteWorkspaceProfiles);
   const vaultSettings = useStore((s) => s.vaultSettings);
@@ -3622,6 +3626,13 @@ export function SettingsModal(): JSX.Element {
           keywords: ["folder", "root", "location", "open vault", "change"],
         },
         {
+          id: "vault-name",
+          title: "Vault name",
+          description:
+            "What the sidebar and the vault switcher call this vault; the folder keeps its own name.",
+          keywords: ["vault name", "display name", "rename vault", "rename", "title", "label", "switcher"],
+        },
+        {
           id: "saved-remote-workspaces",
           title: "Saved Remote Workspaces",
           description:
@@ -4071,7 +4082,7 @@ export function SettingsModal(): JSX.Element {
           id: "location",
           title: "Location",
           description: "Where this vault lives, plus saved remote connections.",
-          searchIds: ["vault-location", "saved-remote-workspaces"],
+          searchIds: ["vault-location", "vault-name", "saved-remote-workspaces"],
           content: (
             <div className="space-y-6">
               <Section
@@ -4135,6 +4146,20 @@ export function SettingsModal(): JSX.Element {
                     </button>
                   )}
                 </div>
+                {/* Local vaults only (#692): a temporary folder session writes
+                    nothing into its folder, and a remote workspace's settings
+                    belong to the server. */}
+                {workspaceMode !== "remote" && vault && !vault.temporary && (
+                  <TextInputRow
+                    label="Vault name"
+                    description={`What the sidebar, the vault switcher and the title bar call this vault. The folder stays ${vaultFolderName(vault.root)} on disk; leave the field empty to use that name.`}
+                    value={vaultDisplayName}
+                    placeholder={vaultFolderName(vault.root)}
+                    settingId="vault-name"
+                    commitOnBlur
+                    onChange={(next) => void renameVault(next)}
+                  />
+                )}
               </Section>
 
               {supportsRemoteWorkspace && (

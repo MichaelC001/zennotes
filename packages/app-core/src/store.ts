@@ -11,6 +11,7 @@ import {
   type EditorCursorPosition
 } from './lib/editor-cursor-position'
 import { DEFAULT_VAULT_SETTINGS } from '@shared/ipc'
+import { normalizeVaultDisplayName, resolveVaultName } from '@shared/vault-display-name'
 import {
   DEFAULT_HARPER_DIALECT,
   isHarperDialect,
@@ -3249,6 +3250,14 @@ interface Store {
    *  save that never happened. */
   setVaultSettings: (next: VaultSettings) => Promise<boolean>
   /**
+   * Give the open vault a display name (#692), kept in its vault.json so it
+   * travels with the folder; empty or whitespace goes back to the folder's
+   * own name. Local vaults only: a temporary folder session writes nothing.
+   * Resolves true once saved; the header, switcher and remembered-vaults
+   * list follow without a reopen.
+   */
+  renameVault: (name: string | null) => Promise<boolean>
+  /**
    * Toggle a favorite (a note path or a `folder:subpath` key) and persist it.
    * Favorites pin to the top of the sidebar.
    */
@@ -4780,6 +4789,22 @@ function withoutNoteInWorkspace(s: Store, path: string): Partial<Store> {
   }
 }
 
+/**
+ * Give the open vault the name its settings say (#692): the display name when
+ * there is one, else the folder's own, read off the root the way main does.
+ * Runs after every settings save and every external vault.json change, so
+ * the header, title bar and note-list heading move with the file. A plain
+ * `set`, not `setVault`: a renamed vault is the same vault.
+ */
+function applyVaultNameFromSettings(settings: VaultSettings): void {
+  const vault = useStore.getState().vault
+  if (!vault) return
+  const folder = vault.root.split(/[\\/]/).filter(Boolean).pop() ?? vault.root
+  const name = resolveVaultName(settings.displayName, folder)
+  if (name === vault.name) return
+  useStore.setState({ vault: { ...vault, name } })
+}
+
 export const useStore = create<Store>((set, get) => {
   const mutateNoteImpl = async (
     path: string,
@@ -5829,7 +5854,10 @@ export const useStore = create<Store>((set, get) => {
 
   setVault: (v) =>
     set((s) => {
-      const vaultChanged = s.vault?.root !== v?.root || s.vault?.name !== v?.name
+      // The root is the vault's identity. Its name is a label the user can
+      // change (#692), so a renamed vault keeps its caches, undo stacks and
+      // closed-tab history; only a different folder starts those over.
+      const vaultChanged = s.vault?.root !== v?.root
       if (vaultChanged) {
         clearNoteContentReadCaches()
       }
@@ -5842,6 +5870,7 @@ export const useStore = create<Store>((set, get) => {
       set({
         vaultSettings: settings
       })
+      applyVaultNameFromSettings(settings)
     } catch (err) {
       console.error('setVaultSettings failed', err)
       return false
@@ -5855,6 +5884,21 @@ export const useStore = create<Store>((set, get) => {
       console.error('setVaultSettings failed', err)
     }
     return true
+  },
+  renameVault: async (name) => {
+    const vault = get().vault
+    if (!vault || vault.temporary) return false
+    const displayName = normalizeVaultDisplayName(name ?? '')
+    const current = get().vaultSettings
+    if (current.displayName === displayName) return true
+    const { displayName: _previous, ...rest } = current
+    const saved = await get().setVaultSettings(
+      displayName ? { ...rest, displayName } : rest
+    )
+    // Main rewrote the remembered-vaults entry with the save; the switcher
+    // and the sidebar header read that list, so fetch it again.
+    if (saved) await get().refreshLocalVaults()
+    return saved
   },
   applyFavorites: async (nextFavorites) => {
     const isCurrent = captureFolderActionContext(get)
@@ -7659,6 +7703,11 @@ export const useStore = create<Store>((set, get) => {
                 vaultSettings: normalized,
                 ...(get().viewSettingsScope === 'vault' ? viewPrefsFromVault(normalized) : {})
               })
+              // A display name edited outside (#692) renames the open vault
+              // too; the remembered list is what main rewrites, so refetch it.
+              const nameBefore = get().vault?.name
+              applyVaultNameFromSettings(normalized)
+              if (get().vault?.name !== nameBefore) void get().refreshLocalVaults()
             })
             .catch((err) => {
               console.error('refresh vault settings failed', err)

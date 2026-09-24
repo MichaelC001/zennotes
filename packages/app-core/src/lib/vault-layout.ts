@@ -28,6 +28,7 @@ import {
 import { normalizeTasksExcludedFolders } from '@shared/tasks-excluded-folders'
 import { normalizeTypstPreambleSettings } from '@shared/typst-preamble-folder'
 import { normalizeHarperVaultState } from '@shared/harper-settings'
+import { normalizeVaultDisplayName } from '@shared/vault-display-name'
 import { getISOWeek, getISOWeekYear, mondayOfISOWeek } from './template-render'
 
 // Reserved however the system folders are remapped:
@@ -618,6 +619,7 @@ export function normalizeVaultSettings(
   )
   const normalizedTypstPreambles = normalizeTypstPreambleSettings(settings?.typstPreambles)
   const normalizedHarper = normalizeHarperVaultState(settings?.harper)
+  const displayName = normalizeVaultDisplayName(settings?.displayName)
   const primaryNotesLocation =
     settings?.primaryNotesLocation === 'root'
       ? 'root'
@@ -688,7 +690,8 @@ export function normalizeVaultSettings(
       ? { tasks: { excludedFolders: normalizedTasksExcluded } }
       : {}),
     ...(normalizedTypstPreambles ? { typstPreambles: normalizedTypstPreambles } : {}),
-    ...(normalizedHarper ? { harper: normalizedHarper } : {})
+    ...(normalizedHarper ? { harper: normalizedHarper } : {}),
+    ...(displayName ? { displayName } : {})
   }
 }
 

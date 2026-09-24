@@ -30,6 +30,7 @@ import {
 import { harperEditorConfig, harperSupported } from './harper-runtime'
 import { reflowParagraph } from './cm-reflow'
 import { convertTableToDatabase } from './table-to-database'
+import { canRenameVault, renameVaultWithPrompt } from './rename-vault'
 import { promptImageWidth } from './image-resize'
 import { copyLinkAtCursor } from './link-copy'
 import { getKeymapDisplay, type KeymapId } from './keymaps'
@@ -1876,6 +1877,18 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
           window.zen.getCapabilities().supportsRemoteWorkspace),
       run: () => {
         /* handled by CommandPalette */
+      }
+    },
+    {
+      id: 'vault.rename',
+      title: 'Rename Vault…',
+      category: 'Vault',
+      keywords: 'vault name display name rename label switcher sidebar header folder',
+      // Local vaults only (#692): a temporary folder session writes nothing
+      // into its folder, and a remote workspace's settings belong to its server.
+      when: () => canRenameVault(getState()),
+      run: async () => {
+        await renameVaultWithPrompt()
       }
     },
     {
