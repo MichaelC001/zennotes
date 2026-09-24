@@ -3432,7 +3432,14 @@ interface Store {
   jumpToPreviousNote: () => Promise<void>
   jumpToNextNote: () => Promise<void>
   toggleRecentNote: () => Promise<void>
-  applyChange: (ev: VaultChangeEvent) => Promise<void>
+  /**
+   * Bring a vault change into the store. A body re-read for an open note
+   * counts as a change from disk unless `options.source` is `'app'`: the app
+   * itself rewrote the file (a link re-targeted after an asset rename) and
+   * the editor should keep the note's undo history through it, as it does
+   * for a rename's heading rewrite, rather than start it clean (#852).
+   */
+  applyChange: (ev: VaultChangeEvent, options?: { source?: 'disk' | 'app' }) => Promise<void>
   refreshNotes: () => Promise<void>
   refreshRootContentHidden: () => Promise<void>
   /** Dismiss the vault-root notice for the current vault, persisted (#216). */
@@ -3879,6 +3886,21 @@ const savedBodies = new Map<string, string>()
 // Only the latest watcher read may apply, and a newer local save invalidates
 // older reads even if it finishes or returns to the same starting body.
 const noteContentVersions = new Map<string, number>()
+/**
+ * How many times each open note's body was taken from disk this session (a
+ * watcher event, a resync after a remote feed came back), bumped in the same
+ * update that replaces the body and left alone by every in-app writer. The
+ * editor reads it to tell a change from disk apart from a peer pane or a
+ * rename rewrite, which look the same in the body, and starts the note's undo
+ * history clean for the former (#852). Keyed by path like noteContentVersions;
+ * an entry outliving a vault switch is harmless, since an editor re-baselines
+ * on every note it starts showing.
+ */
+const noteDiskRevisions = new Map<string, number>()
+
+export function noteDiskRevision(path: string): number {
+  return noteDiskRevisions.get(path) ?? 0
+}
 
 /**
  * Old paths of renames the host has not answered yet. A rename is a move on
@@ -7452,7 +7474,7 @@ export const useStore = create<Store>((set, get) => {
       result = await window.zen.renameAsset(relPath, nextName)
       await Promise.all([get().refreshAssets(), get().refreshNotes()])
       await Promise.all(Object.values(get().noteContents).map(({ path, folder }) =>
-        get().applyChange({ kind: 'change', path, folder })
+        get().applyChange({ kind: 'change', path, folder }, { source: 'app' })
       ))
     }, false, true)
     return result
@@ -7463,7 +7485,7 @@ export const useStore = create<Store>((set, get) => {
       result = await window.zen.moveAsset(relPath, targetDir)
       await Promise.all([get().refreshAssets(), get().refreshNotes()])
       await Promise.all(Object.values(get().noteContents).map(({ path, folder }) =>
-        get().applyChange({ kind: 'change', path, folder })
+        get().applyChange({ kind: 'change', path, folder }, { source: 'app' })
       ))
     }, false, true)
     return result
@@ -7537,7 +7559,7 @@ export const useStore = create<Store>((set, get) => {
     }
   },
 
-  applyChange: async (ev) => {
+  applyChange: async (ev, options) => {
     if (folderMutationBlocks(ev.path)) return
     // The live feed's unlink handling, shared with the resync path below:
     // a deleted note's tab closes wherever it is open.
@@ -7623,6 +7645,10 @@ export const useStore = create<Store>((set, get) => {
               if (!existing || existing.body === content.body || s.noteDirty[openPath]) return s
               const contents = { ...s.noteContents, [openPath]: content }
               const dirty = { ...s.noteDirty, [openPath]: false }
+              // The body comes from the server's disk: the editor starts the
+              // note's undo history clean rather than mapping steps onto
+              // text written elsewhere (#852).
+              noteDiskRevisions.set(openPath, noteDiskRevision(openPath) + 1)
               return {
                 noteContents: contents,
                 noteDirty: dirty,
@@ -7783,6 +7809,12 @@ export const useStore = create<Store>((set, get) => {
           if (s.noteDirty[ev.path]) return s
           const contents = { ...s.noteContents, [ev.path]: content }
           const dirty = { ...s.noteDirty, [ev.path]: false }
+          // Text from disk, not from this app: the editor starts the note's
+          // undo history clean, since the user's steps would map onto text
+          // nobody here wrote (#852). A rewrite the app made itself keeps it.
+          if (options?.source !== 'app') {
+            noteDiskRevisions.set(ev.path, noteDiskRevision(ev.path) + 1)
+          }
           return {
             noteContents: contents,
             noteDirty: dirty,
