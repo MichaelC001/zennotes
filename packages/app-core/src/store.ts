@@ -6863,8 +6863,10 @@ export const useStore = create<Store>((set, get) => {
     // already reads as that day, so strip any `due:` token; otherwise write the
     // explicit date.
     const movedLine = setTaskDueAtIndex(line, 0, inferDue ? null : dateIso)
-    const trimmed = tgtBody.replace(/\s+$/u, '')
-    const nextTgt = trimmed.length ? `${trimmed}\n${movedLine}\n` : `${movedLine}\n`
+
+    // Insert into the destination note's Tasks section when one exists;
+    // otherwise append to the end of the note.
+    const nextTgt = insertTasksUnderTasksHeading(tgtBody, [movedLine])
 
     // Persist both notes (open buffers go through the edit pipeline).
     if (srcBuffer) get().updateNoteBody(task.sourcePath, strippedSrc)
@@ -9150,8 +9152,9 @@ export const useStore = create<Store>((set, get) => {
       : `- [ ] ${content} due:${dateIso}`
     const openBuffer = get().noteContents[path]
     const body = openBuffer?.body ?? (await window.zen.readNote(path)).body
-    const trimmed = body.replace(/\s+$/u, '')
-    const nextBody = trimmed.length ? `${trimmed}\n${line}\n` : `${line}\n`
+    // Insert into the note's Tasks section when one exists; otherwise
+    // append to the end of the note
+    const nextBody = insertTasksUnderTasksHeading(body, [line])
     if (openBuffer) {
       // Open note: edit through the buffer so unsaved changes aren't stomped;
       // its autosave + the watcher rescan the tasks (a disk rescan now would be

@@ -94,6 +94,11 @@ export function ContextMenu({ x, y, items, onClose }: Props): JSX.Element {
     }
   }, [])
 
+  // Keep keyboard focus on the context menu while it is open.
+  useEffect(() => {
+   ref.current?.focus({ preventScroll: true })
+  }, [])
+
   useEffect(() => {
     const onDown = (e: MouseEvent): void => {
       if (!ref.current) return
