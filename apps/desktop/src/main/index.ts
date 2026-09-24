@@ -210,7 +210,11 @@ import {
   type DatabaseOps as SharedDatabaseOps,
 } from "@shared/database-ops";
 import { createAbsenceAwareReader } from "@shared/remote-absence";
-import type { DatabaseSidecar, DbRow } from "@shared/databases";
+import type {
+  DatabaseSeed,
+  DatabaseSidecar,
+  DbRow,
+} from "@shared/databases";
 import { VaultWatcher } from "./watcher";
 import { WindowVaultRegistry } from "./window-vaults";
 import { registerEphemeralRoot, isEphemeralRoot } from "./ephemeral-vaults";
@@ -3809,15 +3813,28 @@ function registerIpc(): void {
 
   handle(
     IPC.VAULT_CREATE_DATABASE,
-    async (_e, folder: NoteFolder, subpath: string, title?: string) => {
+    async (
+      _e,
+      folder: NoteFolder,
+      subpath: string,
+      title?: string,
+      seed?: DatabaseSeed,
+    ) => {
       if (isRemoteWorkspaceActive()) {
         return await databaseOpsForRemote().createDatabase(
           folder,
           subpath,
           title,
+          seed,
         );
       }
-      return await createDatabase(requireVault().root, folder, subpath, title);
+      return await createDatabase(
+        requireVault().root,
+        folder,
+        subpath,
+        title,
+        seed,
+      );
     },
   );
 

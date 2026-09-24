@@ -29,6 +29,7 @@ import {
 } from './cm-harper'
 import { harperEditorConfig, harperSupported } from './harper-runtime'
 import { reflowParagraph } from './cm-reflow'
+import { convertTableToDatabase } from './table-to-database'
 import { promptImageWidth } from './image-resize'
 import { copyLinkAtCursor } from './link-copy'
 import { getKeymapDisplay, type KeymapId } from './keymaps'
@@ -964,6 +965,24 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
         if (!view) return
         reflowParagraph(view)
         view.focus()
+      }
+    },
+    {
+      id: 'table.to-database',
+      title: 'Convert Table to Database…',
+      category: 'Editor',
+      shortcut: getState().vimMode
+        ? chord('vim.leaderPrefix', 'vim.leaderNoteActions', 'vim.leaderTableToDatabase')
+        : undefined,
+      keywords: 'table database convert csv base grid board rows columns markdown pipe extract',
+      // Stays listed whenever a note is open: with no table under the cursor
+      // the run says so, which beats an entry that vanishes from the palette
+      // and an ex command that returns nothing.
+      when: () => !!getState().editorViewRef && !!getState().activeNote,
+      run: async () => {
+        const view = getState().editorViewRef
+        if (!view) return
+        await convertTableToDatabase(view)
       }
     },
     {

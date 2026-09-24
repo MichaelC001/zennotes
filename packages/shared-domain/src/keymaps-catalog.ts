@@ -97,6 +97,7 @@ export const KEYMAP_CATALOG: KeymapCatalogEntry[] = [
   { id: "vim.leaderFormatNote", group: "vim", defaultBinding: "f", title: "Leader note action: format note" },
   { id: "vim.leaderCopyMarkdown", group: "vim", defaultBinding: "y", title: "Leader note action: copy note as Markdown" },
   { id: "vim.leaderToggleFavorite", group: "vim", defaultBinding: "s", title: "Leader note action: toggle favorite" },
+  { id: "vim.leaderTableToDatabase", group: "vim", defaultBinding: "d", title: "Leader note action: convert table to database" },
   { id: "vim.leaderQuickCapture", group: "vim", defaultBinding: "q", title: "Leader: open quick capture" },
   { id: "vim.leaderTemplatePicker", group: "vim", defaultBinding: "t", title: "Leader: new from template" },
   { id: "vim.leaderInsertTemplate", group: "vim", defaultBinding: "i", title: "Leader: insert template into note" },

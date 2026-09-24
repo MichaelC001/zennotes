@@ -67,7 +67,7 @@ import {
   taskFilePriorityValue,
   updateFrontmatterFields
 } from '@shared/frontmatter'
-import type { DatabaseDoc, DatabaseSidecar } from '@shared/databases'
+import type { DatabaseDoc, DatabaseSeed, DatabaseSidecar } from '@shared/databases'
 import {
   databaseTabPath,
   csvPathFromDatabaseTab,
@@ -1747,6 +1747,13 @@ export interface ConnectionPreviewState {
   anchorRect: PreviewAnchorRect
 }
 
+export interface CreateDatabaseOptions {
+  /** Initial columns and rows (a converted Markdown table, #832). */
+  seed?: DatabaseSeed
+  /** Open the new grid in the active pane. Default true. */
+  open?: boolean
+}
+
 function getVisiblePreviewScrollElement(): HTMLElement | null {
   if (typeof document === 'undefined') return null
   return [...document.querySelectorAll<HTMLElement>('[data-preview-scroll]')].find(
@@ -3294,8 +3301,18 @@ interface Store {
   loadDatabase: (csvPath: string) => Promise<void>
   /** Load a database and open it as a tab in the active pane. */
   openDatabase: (csvPath: string) => Promise<void>
-  /** Create a new empty database under `folder`/`subpath` and open it. */
-  createDatabase: (folder: NoteFolder, subpath?: string, title?: string, isCurrent?: () => boolean) => Promise<void>
+  /** Create a new database under `folder`/`subpath` and open it: empty by
+   *  default, or holding `options.seed` (a converted Markdown table, #832).
+   *  `options.open: false` leaves the caller in place. Resolves to the created
+   *  doc (its title may carry a collision suffix), or undefined when nothing
+   *  was created or the workspace moved on meanwhile. */
+  createDatabase: (
+    folder: NoteFolder,
+    subpath?: string,
+    title?: string,
+    isCurrent?: () => boolean,
+    options?: CreateDatabaseOptions
+  ) => Promise<DatabaseDoc | undefined>
   /** Create a database in the configured default databases location and open it. (#362) */
   newDatabase: () => Promise<void>
   /** Rename a database (its `.base` folder); rehomes the open grid tab. */
@@ -6112,10 +6129,10 @@ export const useStore = create<Store>((set, get) => {
     ;(document.activeElement as HTMLElement | null)?.blur?.()
     set({ focusedPanel: 'editor' })
   },
-  createDatabase: async (folder, subpath = '', title, hostIsCurrent) => {
-    if (workspaceWritesBlocked()) return
+  createDatabase: async (folder, subpath = '', title, hostIsCurrent, options) => {
+    if (workspaceWritesBlocked()) return undefined
     const isCurrent = captureFolderActionContext(get, hostIsCurrent)
-    if (!isCurrent()) return
+    if (!isCurrent()) return undefined
     const directory = vaultRelativeFolderPath(folder, subpath, get().vaultSettings)
     const prefix = directory ? `${directory}/` : ''
     let release: (() => void) | undefined
@@ -6135,15 +6152,17 @@ export const useStore = create<Store>((set, get) => {
           release = resolve
         })
       )
-      const doc = await window.zen.createDatabase(folder, subpath, title)
-      if (!isCurrent()) return
+      const doc = await window.zen.createDatabase(folder, subpath, title, options?.seed)
+      if (!isCurrent()) return undefined
       set((s) => ({ databases: { ...s.databases, [doc.path]: doc } }))
       await get().refreshNotes()
-      if (!isCurrent()) return
+      if (!isCurrent()) return undefined
+      if (options?.open === false) return doc
       await get().openNoteInPane(get().activePaneId, databaseTabPath(doc.path))
-      if (!isCurrent()) return
+      if (!isCurrent()) return undefined
       ;(document.activeElement as HTMLElement | null)?.blur?.()
       set({ focusedPanel: 'editor' })
+      return doc
     } catch (err) {
       if (hostIsCurrent) throw err
       console.error('createDatabase failed', err)
@@ -6151,6 +6170,7 @@ export const useStore = create<Store>((set, get) => {
         const { useToastStore } = await import('./lib/toast')
         useToastStore.getState().addToast(humanIpcError(err, 'Could not create database'), 'error')
       }
+      return undefined
     } finally {
       if (release) {
         databaseCreations.delete(prefix)
