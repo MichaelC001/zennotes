@@ -258,6 +258,13 @@ describe('#852: a note body taken from disk moves its disk revision', () => {
     await flush()
     expect(useStore.getState().noteContents[a]?.body).toBe('unsaved typing')
     expect(noteDiskRevision(a)).toBe(0)
+
+    // The typing above armed the debounced save; settle it here rather than
+    // let it fire into a later test. The user's own write reaching disk is
+    // not a disk change either.
+    await useStore.getState().persistNote(a)
+    expect(vault.get(a)).toBe('unsaved typing')
+    expect(noteDiskRevision(a)).toBe(0)
   })
 })
 
