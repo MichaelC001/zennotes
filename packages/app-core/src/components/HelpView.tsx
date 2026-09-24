@@ -66,6 +66,8 @@ function resolveShortcutKeys(
     if (action === 'Search notes (non-Vim mode)') return shortcut(overrides, 'global.searchNotesNonVim')
     if (action === 'Open commands') return shortcut(overrides, 'global.commandPalette')
     if (action === 'New Quick Note') return shortcut(overrides, 'global.newQuickNote')
+    if (action === 'New note from template') return shortcut(overrides, 'global.newNoteFromTemplate')
+    if (action === 'Insert template into current note') return shortcut(overrides, 'global.insertTemplate')
     if (action === 'Open Settings') return shortcut(overrides, 'global.openSettings')
     if (action === 'Toggle sidebar') return shortcut(overrides, 'global.toggleSidebar')
     if (action === 'Toggle connections') return shortcut(overrides, 'global.toggleConnections')

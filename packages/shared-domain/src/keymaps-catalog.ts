@@ -46,6 +46,8 @@ export const KEYMAP_CATALOG: KeymapCatalogEntry[] = [
   { id: "global.commandPalette", group: "global", defaultBinding: "Shift+Mod+P", title: "Open command palette" },
   { id: "global.newQuickNote", group: "global", defaultBinding: "Shift+Mod+N", title: "New quick note" },
   { id: "global.newNoteHere", group: "global", defaultBinding: "Mod+N", title: "New note in current folder" },
+  { id: "global.newNoteFromTemplate", group: "global", defaultBinding: "", defaultBindingMac: "Alt+Mod+T", title: "New note from template" },
+  { id: "global.insertTemplate", group: "global", defaultBinding: "", title: "Insert template into current note" },
   { id: "global.openSettings", group: "global", defaultBinding: "Mod+,", title: "Open settings" },
   { id: "global.openFile", group: "global", defaultBinding: "Mod+O", title: "Open file" },
   { id: "global.toggleSidebar", group: "global", defaultBinding: "Mod+1", title: "Toggle sidebar" },

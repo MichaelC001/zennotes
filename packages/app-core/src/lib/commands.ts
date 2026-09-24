@@ -196,7 +196,9 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       title: 'New Note from Template…',
       category: 'Note',
       keywords: 'template scaffold adr rfc meeting daily weekly boilerplate new',
-      shortcut: leaderShortcut('vim.leaderTemplatePicker'),
+      shortcut:
+        shortcut('global.newNoteFromTemplate') ||
+        (getState().vimMode ? leaderShortcut('vim.leaderTemplatePicker') : undefined),
       run: () => getState().setTemplatePaletteOpen(true)
     },
     {
@@ -204,7 +206,9 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       title: 'Insert Template into Current Note…',
       category: 'Note',
       keywords: 'template insert apply into current note scaffold fill',
-      shortcut: leaderShortcut('vim.leaderInsertTemplate'),
+      shortcut:
+        shortcut('global.insertTemplate') ||
+        (getState().vimMode ? leaderShortcut('vim.leaderInsertTemplate') : undefined),
       when: () => !!getState().activeNote,
       run: () => getState().openTemplatePaletteForInsert()
     },
