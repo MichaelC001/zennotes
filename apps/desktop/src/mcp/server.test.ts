@@ -15,6 +15,7 @@ import {
   describeToolError,
   listToolNames,
   runMcpServer,
+  VaultSwitchedError,
   type McpServerOptions
 } from './server'
 
@@ -154,6 +155,19 @@ describe('describeToolError', () => {
   })
 })
 
+describe('VaultSwitchedError', () => {
+  it('names a saved server by its quoted name and URL, and never the token', () => {
+    const err = new VaultSwitchedError(
+      { kind: 'remote', name: 'Server Vault (10.0.0.5:7878)', baseUrl: 'http://10.0.0.5:7878', authToken: 'tok-secret' },
+      { kind: 'local', root: '/notes' }
+    )
+    expect(err.message).toContain(
+      'it was the server "Server Vault (10.0.0.5:7878)" at http://10.0.0.5:7878 and is now the local vault /notes.'
+    )
+    expect(err.message).not.toContain('tok-secret')
+  })
+})
+
 describe('comment tools (#738)', () => {
   it('lists the four comment tools', () => {
     const names = listToolNames()
@@ -270,12 +284,16 @@ describe('runMcpServer follows the target it is given (#831)', () => {
     await runMcpServer({ ...options, transport: serverTransport })
     const client = new Client({ name: 'server-test', version: '0' })
     await client.connect(clientTransport)
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const result = await client.callTool({ name, arguments: args })
+      return { text: (result.content as Array<{ text: string }>)[0].text, isError: !!result.isError }
+    }
     return {
       stderr,
+      call,
       vaultInfo: async () => {
-        const result = await client.callTool({ name: 'vault_info', arguments: {} })
-        const text = (result.content as Array<{ text: string }>)[0].text
-        return result.isError ? { error: text } : { info: JSON.parse(text) as Record<string, unknown> }
+        const { text, isError } = await call('vault_info')
+        return isError ? { error: text } : { info: JSON.parse(text) as Record<string, unknown> }
       },
       close: () => client.close()
     }
@@ -347,12 +365,12 @@ describe('runMcpServer follows the target it is given (#831)', () => {
     }
   })
 
-  it('pins the first vault that resolves and retries only after a failure', async () => {
-    // One attempt at startup (warned), one per failing tool call, then the
-    // session keeps the first vault that resolved.
+  it('retries until a vault resolves, and starts the session at the first call it serves', async () => {
+    // One attempt at startup (warned), then one per tool call.
     const outcomes: Array<Error | VaultTarget> = [
       new Error('not at startup'),
       new Error('not yet'),
+      { kind: 'local', root: beta },
       { kind: 'local', root: beta },
       { kind: 'local', root: alpha }
     ]
@@ -366,10 +384,70 @@ describe('runMcpServer follows the target it is given (#831)', () => {
     })
     expect(s.stderr.join('')).toContain('not at startup')
     expect((await s.vaultInfo()).error).toBe('Error: not yet')
-    expect((await s.vaultInfo()).info).toMatchObject({ vaultRoot: beta })
-    // A further call must not move the session to alpha: the target is pinned.
-    expect((await s.vaultInfo()).info).toMatchObject({ vaultRoot: beta })
-    expect(calls).toBe(3)
+    // Nothing was served before, so beta is no switch.
+    const first = (await s.vaultInfo()).info
+    expect(first).toMatchObject({ vaultRoot: beta })
+    expect(String(first?.notes)).not.toContain('The vault changed')
+    expect((await s.call('list_notes')).isError).toBe(false)
+    // The app moved to alpha: the next call stops instead of running there.
+    const moved = await s.call('list_notes')
+    expect(moved.isError).toBe(true)
+    expect(moved.text).toContain(`it was the local vault ${beta} and is now the local vault ${alpha}`)
+    expect(calls).toBe(5)
     await s.close()
+  })
+
+  it('a vault the app left before the first call is no switch', async () => {
+    const s = await session()
+    await writeConfig({ vaultRoot: beta, localVaults: [{ root: beta, name: 'beta' }] })
+    const listed = await s.call('list_notes')
+    expect(listed.isError).toBe(false)
+    await s.close()
+  })
+
+  it('follows the app to another vault only after vault_info confirms it', async () => {
+    await fsp.writeFile(path.join(alpha, 'inbox', 'Alpha.md'), '# Alpha\n')
+    await fsp.writeFile(path.join(beta, 'inbox', 'Beta.md'), '# Beta\n')
+    try {
+      const s = await session()
+      const before = await s.call('list_notes')
+      expect(before.isError).toBe(false)
+      expect(before.text).toContain('inbox/Alpha.md')
+
+      await writeConfig({ vaultRoot: beta, localVaults: [{ root: beta, name: 'beta' }] })
+      // A write planned against alpha must not land in beta, and a whole
+      // batch stops, not only its first call.
+      const batch = await Promise.all([
+        s.call('write_note', { path: 'inbox/Alpha.md', content: 'planned for alpha' }),
+        s.call('list_notes'),
+        s.call('read_note', { path: 'inbox/Alpha.md' })
+      ])
+      for (const result of batch) {
+        expect(result.isError).toBe(true)
+        expect(result.text).toContain('The ZenNotes vault changed')
+        expect(result.text).toContain(alpha)
+        expect(result.text).toContain(beta)
+        expect(result.text).toContain('vault_info')
+      }
+      await expect(fsp.access(path.join(beta, 'inbox', 'Alpha.md'))).rejects.toThrow()
+      expect(await fsp.readFile(path.join(alpha, 'inbox', 'Alpha.md'), 'utf8')).toBe('# Alpha\n')
+
+      const { info } = await s.vaultInfo()
+      expect(info).toMatchObject({ kind: 'local', vaultRoot: beta })
+      expect(
+        String(info?.notes).startsWith(
+          `The vault changed: until this call the session worked in the local vault ${alpha}.`
+        )
+      ).toBe(true)
+      const after = await s.call('list_notes')
+      expect(after.isError).toBe(false)
+      expect(after.text).toContain('inbox/Beta.md')
+      expect(after.text).not.toContain('Alpha.md')
+      expect(String((await s.vaultInfo()).info?.notes)).not.toContain('The vault changed')
+      await s.close()
+    } finally {
+      await fsp.rm(path.join(alpha, 'inbox', 'Alpha.md'), { force: true })
+      await fsp.rm(path.join(beta, 'inbox', 'Beta.md'), { force: true })
+    }
   })
 })
