@@ -219,30 +219,35 @@ export function unfoldAtCursor(view: EditorView): boolean {
 }
 
 /**
- * Fold every heading section, every list item with children and every
- * foldable callout, nested, the way Vim's zM closes every fold: opening a
- * heading then shows its lists still folded, one line per item. CodeMirror's
- * foldAll folds only the outermost ranges, so a heading swallowed the tasks
- * under it and there was no way to see just the task lines (#848).
+ * Fold every heading section, list item, callout and syntax fold, nested,
+ * the way Vim's zM closes every fold: opening a heading then shows its lists
+ * still folded, one line per item. CodeMirror's foldAll folds only the
+ * outermost ranges, so a heading swallowed the tasks under it (#848), but
+ * its syntax folds (code blocks, tables, quotes) must still participate.
  */
 export function foldAllOutline(view: EditorView): boolean {
   const { state } = view
   const tree = ensureSyntaxTree(state, state.doc.length, 500) ?? syntaxTree(state)
-  const ranges: FoldRange[] = []
+  const ranges = new Map<string, FoldRange>()
   for (let n = 1; n <= state.doc.lines; n++) {
+    const line = state.doc.line(n)
     const level = headingLevelAt(state, n)
-    if (level === null) continue
-    const range = rangeForHeading(state, n, level)
-    if (range) ranges.push(range)
+    const range =
+      level === null
+        ? foldable(state, line.from, line.to)
+        : rangeForHeading(state, n, level)
+    if (range) ranges.set(`${range.from}:${range.to}`, range)
   }
-  ranges.push(...allListItemFoldRanges(state, tree), ...foldableCalloutRanges(state, tree))
-  const fresh = ranges.filter((range) => !exactFoldAtRange(state, range))
+  for (const range of [...allListItemFoldRanges(state, tree), ...foldableCalloutRanges(state, tree)]) {
+    ranges.set(`${range.from}:${range.to}`, range)
+  }
+  const fresh = [...ranges.values()].filter((range) => !exactFoldAtRange(state, range))
   if (fresh.length === 0) return false
   // Keep the caret in sight: on the line that opens the outermost fold
   // around it, as zM leaves it in Vim.
   const head = state.selection.main.head
   let outer: FoldRange | null = null
-  for (const range of ranges) {
+  for (const range of ranges.values()) {
     if (head > range.from && head <= range.to && (!outer || range.from < outer.from)) outer = range
   }
   view.dispatch({

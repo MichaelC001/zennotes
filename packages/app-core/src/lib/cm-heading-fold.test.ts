@@ -213,6 +213,17 @@ describe('list item folding (#848)', () => {
     done()
   })
 
+  it('folds standalone code blocks with Fold All, without needing a heading or list', () => {
+    const text = '```js\nconst answer = 42\n```\n\n~~~text\nlog line\n~~~\n'
+    const { view, done } = mount(text, 1)
+    expect(foldAllOutline(view)).toBe(true)
+    expect(folds(view)).toEqual([[1, 3], [5, 7]])
+    expect(foldAllOutline(view)).toBe(false)
+    expect(folds(view)).toEqual([[1, 3], [5, 7]])
+    expect(view.state.doc.toString()).toBe(text)
+    done()
+  })
+
   it('folds every heading and list item, nested, so opening the heading shows the items still folded', () => {
     const { view, done } = mount(doc, 4)
     expect(foldAllOutline(view)).toBe(true)
@@ -220,7 +231,8 @@ describe('list item folding (#848)', () => {
       [1, 16],
       [3, 5],
       [7, 8],
-      [9, 10]
+      [9, 10],
+      [13, 15]
     ])
     // The caret moved out of the hidden text, onto the heading's line.
     expect(view.state.selection.main.head).toBe(0)
@@ -229,7 +241,8 @@ describe('list item folding (#848)', () => {
     expect(folds(view)).toEqual([
       [3, 5],
       [7, 8],
-      [9, 10]
+      [9, 10],
+      [13, 15]
     ])
     done()
   })

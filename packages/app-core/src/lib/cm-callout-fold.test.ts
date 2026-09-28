@@ -165,7 +165,7 @@ describe('foldable callouts in the editor (#853)', () => {
     expect(foldAtCursor(view)).toBe(false)
   })
 
-  it('includes foldable callouts in Fold All', async () => {
+  it('includes foldable callouts and ordinary blockquote folds in Fold All', async () => {
     const view = mount()
     await settle()
     view.dom.querySelector<HTMLElement>('.cm-callout-fold')!.click()
@@ -173,7 +173,8 @@ describe('foldable callouts in the editor (#853)', () => {
     expect(folds(view)).toEqual([
       [1, 14],
       [3, 6],
-      [8, 9]
+      [8, 9],
+      [11, 12]
     ])
   })
 })
