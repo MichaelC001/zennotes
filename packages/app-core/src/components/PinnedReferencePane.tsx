@@ -29,6 +29,8 @@ import {
 import { vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
+import { getKeymapBinding } from '../lib/keymaps'
+import { keyBindingsFor } from '../lib/vim-half-page-keymap'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { noteMarkdown } from '../lib/cm-markdown-language'
 import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languages'
@@ -266,15 +268,13 @@ export function PinnedReferencePane(): JSX.Element | null {
           completionNavKeymap,
           completionKeymapExtension,
           keymap.of([
-            {
-              key: 'Mod-f',
-              run: () => {
-                const state = useStore.getState()
-                if (state.vimMode) return false
-                state.setSearchOpen(true)
-                return true
-              }
-            },
+            // The user's note-search binding, as in the main editor (#860).
+            ...keyBindingsFor(getKeymapBinding(s0.keymapOverrides, 'global.searchNotesNonVim'), () => {
+              const state = useStore.getState()
+              if (state.vimMode) return false
+              state.setSearchOpen(true)
+              return true
+            }),
             indentWithTab,
             ...vimAwareDefaultKeymap(s0.vimMode),
             ...historyKeymap,

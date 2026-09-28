@@ -376,15 +376,16 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
     // edge and misland on wrapped lines under fractional display scaling
     // (#591, the same resolution #575 removed from `$`).
     ...displayRowBoundaryKeymap,
-    {
-      key: 'Mod-f',
-      run: () => {
-        const state = useStore.getState()
-        if (state.vimMode) return false
-        state.setSearchOpen(true)
-        return true
-      }
-    },
+    // Note search's non-Vim shortcut has to win over the find bar's Mod-f in
+    // here, but it is the user's binding: unbound or moved under Settings →
+    // Keymap, Mod+F falls through to the find bar instead of still opening
+    // note search. (#860)
+    ...keyBindingsFor(getKeymapBinding(overrides, 'global.searchNotesNonVim'), () => {
+      const state = useStore.getState()
+      if (state.vimMode) return false
+      state.setSearchOpen(true)
+      return true
+    }),
     // Move the current line (or selection) up/down — reorders the markdown so
     // it persists in the file. Listed before defaultKeymap so the configured
     // binding wins; works in Vim normal/insert and non-Vim alike.
