@@ -330,4 +330,19 @@ describe('sameVault: a vault switch is a different vault, not new credentials', 
     expect(await sameVault(server('http://notes.example.com:7878'), server('http://notes.example.com:7879'))).toBe(false)
     expect(await sameVault(local(workVault), server('https://notes.example.com'))).toBe(false)
   })
+
+  it('normalizes the origin without changing the case of a reverse-proxy path', async () => {
+    expect(
+      await sameVault(server('https://notes.example.com/Work'), server('https://notes.example.com/work'))
+    ).toBe(false)
+    expect(
+      await sameVault(server('HTTPS://Notes.Example.com:443/Work/'), server('https://notes.example.com/Work'))
+    ).toBe(true)
+  })
+
+  it('keeps query values case-sensitive too', async () => {
+    expect(
+      await sameVault(server('https://notes.example.com/?vault=Work'), server('https://notes.example.com/?vault=work'))
+    ).toBe(false)
+  })
 })

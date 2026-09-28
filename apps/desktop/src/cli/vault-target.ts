@@ -39,10 +39,12 @@ export type VaultTarget =
  *  matter. */
 export async function sameVault(a: VaultTarget, b: VaultTarget): Promise<boolean> {
   if (a.kind === 'remote' || b.kind === 'remote') {
+    // URL normalizes the origin while preserving case-sensitive paths and
+    // query values: a reverse proxy may serve different vaults at /Work and /work.
     return (
       a.kind === 'remote' &&
       b.kind === 'remote' &&
-      normalizeBaseUrl(a.baseUrl).toLowerCase() === normalizeBaseUrl(b.baseUrl).toLowerCase()
+      new URL(normalizeBaseUrl(a.baseUrl)).href === new URL(normalizeBaseUrl(b.baseUrl)).href
     )
   }
   if (path.resolve(a.root) === path.resolve(b.root)) return true

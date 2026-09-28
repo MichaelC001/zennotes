@@ -405,6 +405,50 @@ describe('runMcpServer follows the target it is given (#831)', () => {
     await s.close()
   })
 
+  it('refuses writes between case-sensitive server paths until vault_info confirms the switch', async () => {
+    const writes: string[] = []
+    const fake = createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      const prefix = url.pathname.startsWith('/Work/') ? '/Work' : '/work'
+      const route = url.pathname.slice(prefix.length)
+      if (req.method === 'POST') writes.push(url.pathname)
+      const bodies: Record<string, unknown> = {
+        '/api/vault': { root: `/srv${prefix}`, name: prefix.slice(1) },
+        '/api/vault/settings': { primaryNotesLocation: 'inbox', systemFolderPaths: null },
+        '/api/folders': [],
+        '/api/notes/write': { path: 'inbox/Plan.md', title: 'Plan' }
+      }
+      res.writeHead(route in bodies ? 200 : 404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(bodies[route] ?? null))
+    })
+    await new Promise<void>((resolve) => fake.listen(0, '127.0.0.1', resolve))
+    const address = fake.address()
+    if (address == null || typeof address === 'string') throw new Error('no port')
+    const origin = `http://127.0.0.1:${address.port}`
+    let target: VaultTarget = { kind: 'remote', baseUrl: `${origin}/Work`, name: '', authToken: null }
+    let s: Awaited<ReturnType<typeof session>> | undefined
+
+    try {
+      s = await session({ resolveTarget: async () => target })
+      expect((await s.vaultInfo()).info).toMatchObject({ server: `${origin}/Work` })
+
+      target = { ...target, baseUrl: `${origin}/work` }
+      const refused = await s.call('write_note', { path: 'inbox/Plan.md', body: 'planned for Work' })
+      expect(writes).toEqual([])
+      expect(refused.isError).toBe(true)
+      expect(refused.text).toContain('The ZenNotes vault changed')
+
+      const { info } = await s.vaultInfo()
+      expect(info).toMatchObject({ server: `${origin}/work` })
+      expect(String(info?.notes)).toContain(`until this call the session worked in the server at ${origin}/Work`)
+      expect((await s.call('write_note', { path: 'inbox/Plan.md', body: 'planned for work' })).isError).toBe(false)
+      expect(writes).toEqual(['/work/api/notes/write'])
+    } finally {
+      await s?.close()
+      await new Promise<void>((resolve) => fake.close(() => resolve()))
+    }
+  })
+
   it('follows the app to another vault only after vault_info confirms it', async () => {
     await fsp.writeFile(path.join(alpha, 'inbox', 'Alpha.md'), '# Alpha\n')
     await fsp.writeFile(path.join(beta, 'inbox', 'Beta.md'), '# Beta\n')
@@ -418,7 +462,7 @@ describe('runMcpServer follows the target it is given (#831)', () => {
       // A write planned against alpha must not land in beta, and a whole
       // batch stops, not only its first call.
       const batch = await Promise.all([
-        s.call('write_note', { path: 'inbox/Alpha.md', content: 'planned for alpha' }),
+        s.call('write_note', { path: 'inbox/Alpha.md', body: 'planned for alpha' }),
         s.call('list_notes'),
         s.call('read_note', { path: 'inbox/Alpha.md' })
       ])
