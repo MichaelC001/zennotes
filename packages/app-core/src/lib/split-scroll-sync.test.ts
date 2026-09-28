@@ -59,6 +59,22 @@ describe('mapSplitScrollTop (#859)', () => {
     expect(mapSplitScrollTop(g, 'editor', 800)).toBe(2400)
   })
 
+  it.each([
+    ['editor', 900, 2000],
+    ['preview', 700, 2800],
+    ['both panes', 900, 2800]
+  ] as const)('keeps both ends reachable when a block starts exactly at the end of %s', (_, editor, preview) => {
+    const g = geometry([[0, 16], [100, 200], [editor, preview]], 900, 2800)
+    expect(mapSplitScrollTop(g, 'editor', 900)).toBe(2800)
+    expect(mapSplitScrollTop(g, 'preview', 2800)).toBe(900)
+    expect(mapSplitScrollTop(g, 'editor', 899)).toBeLessThan(2800)
+    expect(mapSplitScrollTop(g, 'preview', 2799)).toBeLessThan(900)
+    for (const top of [0, 250, 450, 700, 899, 900]) {
+      const there = mapSplitScrollTop(g, 'editor', top)
+      expect(mapSplitScrollTop(g, 'preview', there)).toBeCloseTo(top, 6)
+    }
+  })
+
   it('clamps to the target pane and handles a pane that cannot scroll', () => {
     const g = geometry([[0, 0], [100, 400]], 500, 2000)
     expect(mapSplitScrollTop(g, 'editor', -50)).toBe(0)

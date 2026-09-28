@@ -28,8 +28,9 @@ export interface SplitScrollAnchor {
  * that begins further down in BOTH panes than the last one kept (blocks the
  * editor folds into one widget, or that render with no height, share a
  * position; the first of them stands for all), then the two panes' ends.
- * Blocks that begin inside a pane's last screenful are unreachable as a
- * scroll position and end the list there.
+ * A block at either scroll limit belongs to the paired end anchor; keeping
+ * it would leave the other pane short of its end. Blocks beyond a limit
+ * are unreachable as scroll positions and end the list there too.
  */
 export function splitScrollAnchors(
   blocks: Iterable<SplitScrollAnchor>,
@@ -38,7 +39,7 @@ export function splitScrollAnchors(
 ): SplitScrollAnchor[] {
   const anchors: SplitScrollAnchor[] = [{ editor: 0, preview: 0 }]
   for (const block of blocks) {
-    if (block.editor > editorMax || block.preview > previewMax) break
+    if (block.editor >= editorMax || block.preview >= previewMax) break
     const last = anchors[anchors.length - 1]
     if (block.editor > last.editor && block.preview > last.preview) anchors.push(block)
   }
