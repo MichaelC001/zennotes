@@ -94,9 +94,9 @@ import {
   defaultHighlightStyle
 } from '@codemirror/language'
 import {
-  foldHeadingAtCursor,
+  foldAtCursor,
   headingFolding,
-  unfoldHeadingAtCursor
+  unfoldAtCursor
 } from '../lib/cm-heading-fold'
 import { tags as t } from '@lezer/highlight'
 import { autocompletion } from '@codemirror/autocomplete'
@@ -401,8 +401,8 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
     // reaching for the arrow keys. Mode-agnostic like the line moves. (#490)
     ...keyBindingsFor(getKeymapBinding(overrides, 'editor.hopMarkerForward'), markerHop.forward),
     ...keyBindingsFor(getKeymapBinding(overrides, 'editor.hopMarkerBackward'), markerHop.backward),
-    ...keyBindingsFor(getKeymapBinding(overrides, 'editor.foldHeading'), foldHeadingAtCursor),
-    ...keyBindingsFor(getKeymapBinding(overrides, 'editor.unfoldHeading'), unfoldHeadingAtCursor),
+    ...keyBindingsFor(getKeymapBinding(overrides, 'editor.foldHeading'), foldAtCursor),
+    ...keyBindingsFor(getKeymapBinding(overrides, 'editor.unfoldHeading'), unfoldAtCursor),
     // Inline-format shortcuts (bold/italic/code/strike/highlight/math/link). In
     // Vim mode VimNav owns these (its window handler also resolves the Ctrl+I
     // jumplist collision on Linux); in non-Vim mode that handler is disabled, so

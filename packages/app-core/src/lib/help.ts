@@ -360,9 +360,9 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
       'When you type `/` at the start of a line or after whitespace, ZenNotes opens an inline insert menu for common markdown structures such as headings, bulleted or numbered lists, to-do items, callouts, code blocks, dividers, tables, math blocks, links, images, and even creating a new note page.'
   },
   {
-    title: 'Label and fold headings',
+    title: 'Label and fold headings and lists',
     body:
-      'Settings → Editor → Writing can show H1 through H6 labels before Markdown headings. Every heading also has a disclosure arrow that folds its section. Click the arrow, use Ctrl+Alt+F and Ctrl+Alt+U (Cmd+Option+F and Cmd+Option+U on macOS), or use zc and zo in Vim mode.'
+      'Settings → Editor → Writing can show H1 through H6 labels before Markdown headings. Every heading also has a disclosure arrow that folds its section, and so does every list item with indented lines under it (a bullet, a numbered item or a task): the arrow beside its marker folds those lines, in Edit and in Preview, and the item line stays in view. Click the arrow, use Ctrl+Alt+F and Ctrl+Alt+U (Cmd+Option+F and Cmd+Option+U on macOS), or use zc and zo in Vim mode; on one of the lines under a list item, they fold the item itself. Fold All (zM) folds every heading and every list item, nested, so opening a heading shows its tasks one line each. Folding only hides lines: the note, and the Tasks view, are unchanged.'
   },
   {
     title: 'Create text replacements',
@@ -574,9 +574,9 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'Space l d', action: 'Convert table to database', detail: 'Turn the Markdown table under the cursor (or the rendered table whose cell you are in) into a `.base` database and leave a `[[link]]` to it in the note. Also “Convert Table to Database…” in the command palette, `:table_to_database`, and the bottom of the table cell menu.' },
       { keys: 'Space, then pause', action: 'Show leader hints', detail: 'If enabled in Settings, open a which-key style guide for the next available leader actions. Sticky mode keeps it open until `Space` or `Esc`.' },
       { keys: 'Mod+3', action: 'Toggle outline panel', detail: 'Show or hide the persistent outline in the active pane. Once focused (Ctrl+W l or Alt+L from the editor), j / k — or the arrows — walk the headings, gg / G jump to the first and last, Enter jumps the editor to the heading under the cursor, and Esc hands focus back.' },
-      { keys: 'zc / zo', action: 'Fold / unfold heading', detail: 'Collapse or expand the section below the heading at the cursor.' },
-      { keys: 'Ctrl+Alt+F / U', action: 'Fold / unfold heading', detail: 'Collapse or expand the heading section at the cursor with Vim mode on or off. On macOS, use Cmd+Option+F / U.' },
-      { keys: 'zM / zR', action: 'Fold / unfold all', detail: 'Collapse or expand every heading section in the note.' },
+      { keys: 'zc / zo', action: 'Fold / unfold heading or list item', detail: 'Collapse or expand the section below the heading at the cursor, or the lines under the list item at the cursor. On one of those lines, zc folds the item it belongs to.' },
+      { keys: 'Ctrl+Alt+F / U', action: 'Fold / unfold, Vim on or off', detail: 'The same as zc / zo, with Vim mode on or off. On macOS, use Cmd+Option+F / U.' },
+      { keys: 'zM / zR', action: 'Fold / unfold all', detail: 'Collapse or expand every heading section and every list item in the note. zM folds them nested, so opening a heading shows its list items still folded.' },
       { keys: ']s / [s', action: 'Next / previous Harper suggestion', detail: 'With Grammar and spelling with Harper on, jump the cursor to the next or previous underlined problem, the way Vim walks misspellings.' },
       { keys: 'z=', action: 'Harper suggestions', detail: 'Open the fixes for the problem under the cursor (or the first one on its line). A digit or Enter applies one, j/k move, Esc closes.' },
       { keys: 'zg', action: 'Add word to Harper dictionary', detail: 'Teach this vault\'s dictionary the word under the cursor. Stored in vault.json, so it travels and syncs with the vault.' },
@@ -1069,13 +1069,13 @@ export const HELP_VIM_COMMANDS: HelpExCommand[] = [
   },
   {
     command: ':fold / :unfold',
-    summary: 'Toggle the heading at the cursor',
-    detail: 'Collapse or expand the section beneath the heading at the current line. This is the ex-line path to the editor fold and unfold motions.'
+    summary: 'Toggle the heading or list item at the cursor',
+    detail: 'Collapse or expand the section beneath the heading at the current line, or the lines under the list item there. This is the ex-line path to the editor fold and unfold motions.'
   },
   {
     command: ':foldall / :unfoldall',
-    summary: 'Fold every heading',
-    detail: 'Collapse or expand every heading section at once. This is the ex-line path to the editor-wide fold motions.'
+    summary: 'Fold every heading and list item',
+    detail: 'Collapse or expand every heading section and every list item with lines under it at once, nested. This is the ex-line path to the editor-wide fold motions.'
   }
 ]
 

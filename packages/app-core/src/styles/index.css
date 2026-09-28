@@ -4859,6 +4859,61 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   color: rgb(var(--z-accent));
 }
 
+/* List item fold arrow (#848): the widget is a zero-width anchor placed at
+ * the item's marker, so the arrow sits just left of the bullet, number or
+ * checkbox at any nesting depth and never shifts the text. The anchor is
+ * boxed and aligned like .cm-task-checkbox, so the arrow centres on the
+ * checkbox it sits beside. Revealed like the heading arrow: on line hover,
+ * on the caret line, and while folded. */
+.cm-list-fold-anchor {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 1.05em;
+  vertical-align: text-bottom;
+}
+/* text-indent: the list line's hanging indent is inherited and would push the
+ * glyph out of its box by the marker's width (six columns for a task). */
+.cm-list-fold-anchor,
+.cm-list-fold-arrow {
+  text-indent: 0;
+}
+.cm-list-fold-arrow {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+  line-height: 1;
+  color: theme("colors.ink.400");
+  opacity: 0;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
+}
+.cm-editor .cm-line:hover .cm-list-fold-arrow,
+.cm-editor .cm-activeLine .cm-list-fold-arrow,
+.cm-list-fold-arrow:hover,
+.cm-list-fold-arrow.is-folded {
+  opacity: 1;
+}
+.cm-list-fold-arrow:hover {
+  color: theme("colors.ink.900");
+  background: rgb(var(--z-bg-2));
+}
+.cm-list-fold-arrow.is-folded {
+  color: rgb(var(--z-accent));
+}
+
 /* The chip gutter must fit inside .cm-content's own box. The fold arrow
  * (≤28px + ≤10px gap) was sized to live inside the default 32px padding;
  * the chip needs another 30px beyond it, which only exists as centered-
@@ -4937,6 +4992,67 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   background: rgb(var(--z-bg-2));
 }
 .prose-zen .prose-heading-fold-arrow.is-folded {
+  color: rgb(var(--z-accent));
+}
+
+/* --- Preview list item fold arrow (#848) --------------------------- */
+/* Just left of the item's marker, as in the editor. A bullet or number
+ * renders outside the item, right-aligned to it, as `• ` or `N. `; the
+ * enhancer counts a number's characters, so `10.` steps its arrow further
+ * left than `9.`. A task's checkbox sits in the item's own padding instead.
+ * Shown while the item itself is hovered (not one nested under it) and while
+ * it is folded. */
+@property --z-list-item-em {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 16px;
+}
+@property --z-list-item-ch {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 9.6px;
+}
+.prose-zen li.prose-list-foldable {
+  position: relative;
+  /* Registered lengths resolve here, in the item's font: the arrow's own
+   * smaller font would shrink every offset below along with its glyph. */
+  --z-list-item-em: 1em;
+  --z-list-item-ch: 1ch;
+}
+.prose-zen .prose-list-fold-arrow {
+  position: absolute;
+  left: calc(var(--z-list-marker-chars, 2) * var(--z-list-item-ch) * -1 - 20px);
+  top: calc(var(--z-list-item-em) * var(--z-editor-line-height, 1.7) / 2 - 8px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+  line-height: 1;
+  color: theme("colors.ink.400");
+  opacity: 0;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
+}
+.prose-zen li.task-list-item > .prose-list-fold-arrow {
+  left: -20px;
+}
+.prose-zen li.prose-list-foldable:hover:not(:has(li:hover)) > .prose-list-fold-arrow,
+.prose-zen .prose-list-fold-arrow:hover,
+.prose-zen .prose-list-fold-arrow.is-folded {
+  opacity: 1;
+}
+.prose-zen .prose-list-fold-arrow:hover {
+  color: theme("colors.ink.900");
+  background: rgb(var(--z-bg-2));
+}
+.prose-zen .prose-list-fold-arrow.is-folded {
   color: rgb(var(--z-accent));
 }
 
