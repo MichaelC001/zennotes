@@ -4,7 +4,8 @@
  * A fold on a heading hides everything from the end of the heading
  * line up to (but not including) the next heading of equal-or-higher
  * level, or the end of the document when none follows. A list item
- * with indented children folds the same way (lib/cm-list-fold, #848).
+ * with indented children folds the same way (lib/cm-list-fold, #848), and
+ * so does a callout below its title line (lib/cm-callout-fold, #853).
  *
  * The exported extension bundles four pieces:
  *   - `foldService`: the semantic range calculator so CodeMirror's
@@ -50,6 +51,7 @@ import {
   listItemFoldArrows,
   type FoldRange
 } from './cm-list-fold'
+import { calloutAtLine, enclosingFoldableCallout, foldableCalloutRanges } from './cm-callout-fold'
 
 const HEADING_RE = /^(#{1,6})\s+/
 
@@ -185,11 +187,18 @@ export function foldAtCursor(view: EditorView): boolean {
   let range: FoldRange | null =
     level !== null
       ? rangeForHeading(state, line.number, level)
-      : (listItemAtLine(state, line.number)?.range ?? null)
+      : (listItemAtLine(state, line.number)?.range ??
+        calloutAtLine(state, line.number)?.range ??
+        null)
   let caret: number | null = null
   if (!range) range = foldable(state, line.from, line.to)
   if (!range) {
-    const parent = enclosingListItem(state, head)
+    // On a line inside a list item or a foldable callout, fold the innermost
+    // of the two and bring the caret up to its first line.
+    const item = enclosingListItem(state, head)
+    const found = enclosingFoldableCallout(state, head)
+    const callout = found?.range ? { node: found.node, range: found.range } : null
+    const parent = item && callout ? (item.range.from >= callout.range.from ? item : callout) : (item ?? callout)
     if (parent) {
       range = parent.range
       caret = parent.node.from
@@ -210,11 +219,11 @@ export function unfoldAtCursor(view: EditorView): boolean {
 }
 
 /**
- * Fold every heading section and every list item with children, nested,
- * the way Vim's zM closes every fold: opening a heading then shows its
- * lists still folded, one line per item. CodeMirror's foldAll folds only
- * the outermost ranges, so a heading swallowed the tasks under it and
- * there was no way to see just the task lines (#848).
+ * Fold every heading section, every list item with children and every
+ * foldable callout, nested, the way Vim's zM closes every fold: opening a
+ * heading then shows its lists still folded, one line per item. CodeMirror's
+ * foldAll folds only the outermost ranges, so a heading swallowed the tasks
+ * under it and there was no way to see just the task lines (#848).
  */
 export function foldAllOutline(view: EditorView): boolean {
   const { state } = view
@@ -226,7 +235,7 @@ export function foldAllOutline(view: EditorView): boolean {
     const range = rangeForHeading(state, n, level)
     if (range) ranges.push(range)
   }
-  ranges.push(...allListItemFoldRanges(state, tree))
+  ranges.push(...allListItemFoldRanges(state, tree), ...foldableCalloutRanges(state, tree))
   const fresh = ranges.filter((range) => !exactFoldAtRange(state, range))
   if (fresh.length === 0) return false
   // Keep the caret in sight: on the line that opens the outermost fold

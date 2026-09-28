@@ -3807,6 +3807,35 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
 .prose-zen .callout > p {
   margin: 0.35em 0 0;
 }
+/* Foldable callouts (#853): `> [!type]-` and `> [!type]+` render as a
+   <details> whose <summary> is the title, so the whole title row toggles it.
+   The chevron follows the title, as in the editor. */
+.prose-zen details.callout > summary.callout-title {
+  display: block;
+  list-style: none;
+  cursor: pointer;
+}
+.prose-zen details.callout > summary.callout-title::-webkit-details-marker {
+  display: none;
+}
+.prose-zen details.callout > summary.callout-title::after {
+  content: "▾";
+  display: inline-block;
+  margin-left: 0.4em;
+  font-size: 0.8em;
+  opacity: 0.75;
+}
+.prose-zen details.callout:not([open]) > summary.callout-title {
+  margin-bottom: 0;
+}
+.prose-zen details.callout:not([open]) > summary.callout-title::after {
+  content: "▸";
+}
+.prose-zen details.callout > summary.callout-title:focus-visible {
+  outline: 2px solid rgb(var(--z-accent) / 0.6);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 /* Callout color groups — the `data-callout` lists mirror the alias→group table
    in `lib/callout-types.ts` (kept in sync by hand; CSS can't import it). */
 .prose-zen .callout[data-callout="note"],
@@ -5577,6 +5606,22 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
 .cm-wysiwyg .cm-editor .cm-callout-title {
   font-weight: 600;
   color: rgb(var(--callout-color));
+}
+/* The fold chevron after a foldable callout's title (#853). */
+.cm-wysiwyg .cm-editor .cm-callout-fold {
+  display: inline-block;
+  margin-left: 0.4em;
+  padding: 0 0.25em;
+  font-size: 0.8em;
+  color: rgb(var(--callout-color));
+  opacity: 0.75;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+}
+.cm-wysiwyg .cm-editor .cm-callout-fold:hover {
+  opacity: 1;
+  background: rgb(var(--callout-color) / 0.14);
 }
 /* A list line inside a callout/blockquote keeps its hanging indent, but it has
    to sit on TOP of the box's own left padding. Otherwise the list's negative

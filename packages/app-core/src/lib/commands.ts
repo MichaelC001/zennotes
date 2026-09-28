@@ -858,7 +858,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       title: 'Fold Heading or List Item at Cursor',
       category: 'Editor',
       shortcut: shortcut('vim.foldCurrent'),
-      keywords: 'collapse fold heading section list item task bullet children',
+      keywords: 'collapse fold heading section list item task bullet children callout',
       when: () => !!getState().editorViewRef && !!getState().activeNote,
       run: () => runFoldCommand('foldAtCursor')
     },
@@ -867,7 +867,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       title: 'Unfold Heading or List Item at Cursor',
       category: 'Editor',
       shortcut: shortcut('vim.unfoldCurrent'),
-      keywords: 'expand unfold heading section list item task bullet children',
+      keywords: 'expand unfold heading section list item task bullet children callout',
       when: () => !!getState().editorViewRef && !!getState().activeNote,
       run: () => runFoldCommand('unfoldAtCursor')
     },
@@ -876,7 +876,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       title: 'Fold All Headings and Lists',
       category: 'Editor',
       shortcut: shortcut('vim.foldAll'),
-      keywords: 'collapse fold all every heading list item task outline',
+      keywords: 'collapse fold all every heading list item task outline callout',
       when: () => !!getState().editorViewRef && !!getState().activeNote,
       run: () => runFoldCommand('foldAllOutline')
     },
@@ -885,7 +885,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       title: 'Unfold All Headings and Lists',
       category: 'Editor',
       shortcut: shortcut('vim.unfoldAll'),
-      keywords: 'expand unfold all every reset heading list item task outline',
+      keywords: 'expand unfold all every reset heading list item task outline callout',
       when: () => !!getState().editorViewRef && !!getState().activeNote,
       run: () => runFoldCommand('unfoldAll')
     },

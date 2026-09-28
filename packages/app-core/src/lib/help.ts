@@ -377,7 +377,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Callouts highlight the important bits',
     body:
-      'Turn a blockquote into a colored callout (an Obsidian-style admonition) by starting its first line with `> [!type]`, optionally followed by a title: `> [!warning] Heads up`. Typing `[!` inside a blockquote opens an insert menu of the callout types — filter by name (aliases match too, so `warn` finds Warning and `tldr` finds Abstract), move with the arrow keys or the Vim/Emacs completion chords (Ctrl+J / Ctrl+K, Ctrl+N / Ctrl+P), and press Enter, Tab, Ctrl+Y, or click to drop in the syntax. The type sets the color: `note`, `info`, `abstract` / `summary` / `tldr` render blue; `tip` / `hint` / `important` and `success` / `check` / `done` green; `question` / `help` / `faq` and `example` purple; `warning` / `caution` / `attention` yellow; `danger` / `error`, `bug`, and `failure` / `fail` red; and `quote` / `cite` a neutral gray. Types are case-insensitive, and an unrecognized one still renders as a neutral note, so callouts pasted in from Obsidian keep working.'
+      'Turn a blockquote into a colored callout (an Obsidian-style admonition) by starting its first line with `> [!type]`, optionally followed by a title: `> [!warning] Heads up`. Typing `[!` inside a blockquote opens an insert menu of the callout types — filter by name (aliases match too, so `warn` finds Warning and `tldr` finds Abstract), move with the arrow keys or the Vim/Emacs completion chords (Ctrl+J / Ctrl+K, Ctrl+N / Ctrl+P), and press Enter, Tab, Ctrl+Y, or click to drop in the syntax. The type sets the color: `note`, `info`, `abstract` / `summary` / `tldr` render blue; `tip` / `hint` / `important` and `success` / `check` / `done` green; `question` / `help` / `faq` and `example` purple; `warning` / `caution` / `attention` yellow; `danger` / `error`, `bug`, and `failure` / `fail` red; and `quote` / `cite` a neutral gray. Types are case-insensitive, and an unrecognized one still renders as a neutral note, so callouts pasted in from Obsidian keep working. Put `-` or `+` right after the type to make a callout foldable, as in Obsidian: `> [!example]- Screenshots` starts collapsed and `> [!example]+ Screenshots` starts expanded. Click the title row in Preview, or the chevron after the title in Edit mode, to open or close it; the fold keys (zc and zo, or Ctrl+Alt+F and Ctrl+Alt+U, Cmd+Option+F and Cmd+Option+U on macOS) work on it from its title line or any line inside it, and Fold All (zM) includes it. A collapsed callout starts closed each time the note opens and prints open in a PDF export; folding never changes the note.'
   },
   {
     title: '@ inserts dates and links notes',
@@ -574,9 +574,9 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'Space l d', action: 'Convert table to database', detail: 'Turn the Markdown table under the cursor (or the rendered table whose cell you are in) into a `.base` database and leave a `[[link]]` to it in the note. Also “Convert Table to Database…” in the command palette, `:table_to_database`, and the bottom of the table cell menu.' },
       { keys: 'Space, then pause', action: 'Show leader hints', detail: 'If enabled in Settings, open a which-key style guide for the next available leader actions. Sticky mode keeps it open until `Space` or `Esc`.' },
       { keys: 'Mod+3', action: 'Toggle outline panel', detail: 'Show or hide the persistent outline in the active pane. Once focused (Ctrl+W l or Alt+L from the editor), j / k — or the arrows — walk the headings, gg / G jump to the first and last, Enter jumps the editor to the heading under the cursor, and Esc hands focus back.' },
-      { keys: 'zc / zo', action: 'Fold / unfold heading or list item', detail: 'Collapse or expand the section below the heading at the cursor, or the lines under the list item at the cursor. On one of those lines, zc folds the item it belongs to.' },
+      { keys: 'zc / zo', action: 'Fold / unfold heading or list item', detail: 'Collapse or expand the section below the heading at the cursor, the lines under the list item at the cursor, or the callout whose title it is on. On a line under a list item or inside a foldable callout, zc folds that.' },
       { keys: 'Ctrl+Alt+F / U', action: 'Fold / unfold, Vim on or off', detail: 'The same as zc / zo, with Vim mode on or off. On macOS, use Cmd+Option+F / U.' },
-      { keys: 'zM / zR', action: 'Fold / unfold all', detail: 'Collapse or expand every heading section and every list item in the note. zM folds them nested, so opening a heading shows its list items still folded.' },
+      { keys: 'zM / zR', action: 'Fold / unfold all', detail: 'Collapse or expand every heading section, every list item and every foldable callout in the note. zM folds them nested, so opening a heading shows its list items still folded.' },
       { keys: ']s / [s', action: 'Next / previous Harper suggestion', detail: 'With Grammar and spelling with Harper on, jump the cursor to the next or previous underlined problem, the way Vim walks misspellings.' },
       { keys: 'z=', action: 'Harper suggestions', detail: 'Open the fixes for the problem under the cursor (or the first one on its line). A digit or Enter applies one, j/k move, Esc closes.' },
       { keys: 'zg', action: 'Add word to Harper dictionary', detail: 'Teach this vault\'s dictionary the word under the cursor. Stored in vault.json, so it travels and syncs with the vault.' },
@@ -1069,13 +1069,13 @@ export const HELP_VIM_COMMANDS: HelpExCommand[] = [
   },
   {
     command: ':fold / :unfold',
-    summary: 'Toggle the heading or list item at the cursor',
-    detail: 'Collapse or expand the section beneath the heading at the current line, or the lines under the list item there. This is the ex-line path to the editor fold and unfold motions.'
+    summary: 'Toggle the heading, list item or callout at the cursor',
+    detail: 'Collapse or expand the section beneath the heading at the current line, the lines under the list item there, or the callout whose title it is. This is the ex-line path to the editor fold and unfold motions.'
   },
   {
     command: ':foldall / :unfoldall',
-    summary: 'Fold every heading and list item',
-    detail: 'Collapse or expand every heading section and every list item with lines under it at once, nested. This is the ex-line path to the editor-wide fold motions.'
+    summary: 'Fold every heading, list item and foldable callout',
+    detail: 'Collapse or expand every heading section, every list item with lines under it and every foldable callout at once, nested. This is the ex-line path to the editor-wide fold motions.'
   }
 ]
 

@@ -108,6 +108,7 @@ import { livePreviewPlugin } from '../lib/cm-live-preview'
 import { codeBlockFlairPlugin } from '../lib/cm-code-block-flair'
 import { tablePlugin, tableVimEntry } from '../lib/cm-table'
 import { wysiwygBlocksPlugin } from '../lib/cm-wysiwyg-blocks'
+import { calloutFolding } from '../lib/cm-callout-fold'
 import { hashtagExtension } from '../lib/cm-hashtags'
 import { taskMetadataExtension } from '../lib/cm-task-metadata'
 import { liveTemplateTokenExtension } from '../lib/cm-live-template-tokens'
@@ -479,6 +480,8 @@ function wysiwygExtensions(
     // markdown for full keyboard/Vim editing (#232).
     ...(renderTables ? [tablePlugin, tableVimEntry] : []),
     wysiwygBlocksPlugin,
+    // Collapsed callouts (`> [!type]-`) start folded when a note opens (#853).
+    calloutFolding(),
     ...hashtagExtension,
     ...taskMetadataExtension,
     ...taskRollupExtension,
