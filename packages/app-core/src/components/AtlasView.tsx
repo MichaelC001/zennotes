@@ -15,6 +15,7 @@ import {
   type AtlasPositions
 } from '../lib/atlas'
 import { isAppOverlayOpen } from '../lib/overlay-open'
+import { focusEditorNormalMode } from '../lib/editor-focus'
 import { extractMarkdownLinkHrefs } from '../lib/wikilinks'
 import { resolveInternalNoteHref } from '../lib/internal-links'
 
@@ -670,9 +671,15 @@ export function AtlasView(): JSX.Element {
     setStatus(reg.label)
     touch()
   }
+  // Opening a note leaves the map, and the map held the keyboard: without a
+  // hand-off typing went nowhere with Vim mode off and to the sidebar with it
+  // on (#863).
+  function openNote(path: string): void {
+    void selectNote(path).then(() => focusEditorNormalMode())
+  }
   function openFocused(): void {
     const path = world.current.focusPath
-    if (path) void selectNote(path)
+    if (path) openNote(path)
   }
 
   // Keyboard: capture phase so it beats VimNav; single letters are Vim-only
@@ -893,7 +900,7 @@ export function AtlasView(): JSX.Element {
         const i = hitTest(e.clientX - rect.left, e.clientY - rect.top)
         if (i >= 0) {
           const path = stateRef.current.graph.nodes[i].path
-          if (world.current.focusPath === path) void selectNote(path)
+          if (world.current.focusPath === path) openNote(path)
           else world.current.focusPath = path
         } else world.current.focusPath = null
       }
