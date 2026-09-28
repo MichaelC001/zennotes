@@ -6,6 +6,7 @@ import { useStore, isAtlasViewActive } from '../store'
 import {
   applyExtraLinkEdges,
   atlasHoldsKeyboard,
+  atlasNodeRadius,
   atlasRegionDirection,
   buildAtlasGraph,
   collectAtlasPositions,
@@ -451,7 +452,7 @@ export function AtlasView(): JSX.Element {
         const d = w.display[i]
         const em = emphasis(i)
         const hue = col.regionHues[n.region % col.regionHues.length]
-        const base = Math.max(1.4, (3.4 + Math.sqrt(n.degree) * 2.1) * p.s)
+        const base = Math.max(1.4, atlasNodeRadius(n.degree) * p.s)
         if (em.glow > 0.05) {
           const grad = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, base * 4.2)
           const glowHue = st.lens === 2 ? col.accent : hue
@@ -596,7 +597,7 @@ export function AtlasView(): JSX.Element {
     stateRef.current.graph.nodes.forEach((n, i) => {
       const p = proj[i]
       if (!p || world.current.display[i].alpha < 0.1) return
-      const r = Math.max(1.4, (3.4 + Math.sqrt(n.degree) * 2.1) * p.s) + 6
+      const r = Math.max(1.4, atlasNodeRadius(n.degree) * p.s) + 6
       const d = (p.sx - sx) ** 2 + (p.sy - sy) ** 2
       if (d < r * r && p.depth < bd) {
         bd = p.depth
