@@ -1,4 +1,5 @@
 import {
+  chmod,
   mkdtemp,
   mkdir,
   writeFile,
@@ -105,5 +106,22 @@ describe.skipIf(process.platform === 'win32')(
       await rm(options.bundleDir, { recursive: true })
       expect(await prepareTerminalRuntime(options)).toBeNull()
     })
+
+    // Root reads through any mode, so the denial cannot be staged as root.
+    it.skipIf(process.getuid?.() === 0)(
+      'reports an unreadable bundle as a permission problem, not an invalid manifest (#869)',
+      async () => {
+        const options = await fixture()
+        await chmod(options.bundleDir, 0o000)
+        try {
+          const failure = prepareTerminalRuntime(options)
+          await expect(failure).rejects.toThrow(/cannot be read \(permission denied\)/)
+          await expect(failure).rejects.toThrow(options.bundleDir)
+          await expect(failure).rejects.not.toThrow(/invalid/i)
+        } finally {
+          await chmod(options.bundleDir, 0o755)
+        }
+      },
+    )
   },
 )
