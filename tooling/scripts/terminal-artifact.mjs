@@ -108,7 +108,7 @@ async function installStage(output, bytes, license, manifest, probe) {
       JSON.stringify({ ...manifest, binarySha256: hash(bytes) }, null, 2) +
         '\n',
     )
-    // The stage directory becomes the packaged `resources/terminal`, and the
+    // The stage directory becomes the packaged `resources/zn-cli`, and the
     // Linux packages (deb, rpm, pacman, and the tarball the AUR repackages
     // with `cp -a`) install it root-owned with the mode it has here. mkdtemp
     // creates it 0700, which left every user but root unable to read the

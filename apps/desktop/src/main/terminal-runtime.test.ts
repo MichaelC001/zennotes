@@ -23,7 +23,7 @@ afterEach(async () => {
 async function fixture(version = '1.0.0') {
   const root = await mkdtemp(path.join(os.tmpdir(), "zn terminal ' "))
   roots.push(root)
-  const bundleDir = path.join(root, 'resources', 'terminal')
+  const bundleDir = path.join(root, 'resources', 'zn-cli')
   await mkdir(bundleDir, { recursive: true })
   const binary = `#!/bin/sh\nif [ "$1" = --desktop-integration ]; then\n  echo '{"protocol":1,"version":"${version}"}'\n  exit\nfi\nprintf '%s\\n' "$ZENNOTES_WORKSPACE_SOURCE" "$@"\nexit 7\n`
   await writeFile(path.join(bundleDir, 'zn'), binary, { mode: 0o755 })
