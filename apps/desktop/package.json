@@ -300,6 +300,16 @@
     },
     "pacman": {
       "compression": "xz",
+      "depends": [
+        "gtk3",
+        "nss",
+        "alsa-lib",
+        "mesa",
+        "libnotify",
+        "libsecret",
+        "xdg-utils",
+        "desktop-file-utils"
+      ],
       "fpm": [
         "--provides",
         "zennotes",
