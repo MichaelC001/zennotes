@@ -4217,11 +4217,15 @@ export function SettingsModal(): JSX.Element {
                 title="Location"
                 description="ZenNotes reads markdown directly from the selected vault folder."
               >
+                {/* The buttons are one group that wraps under the label when
+                    the row is too narrow (#871). On one unwrapping line, the
+                    four remote-mode buttons squeezed the label to nothing and
+                    ran past the card's edge. */}
                 <div
-                  className="flex items-center justify-between gap-4 px-5 py-5"
+                  className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-5"
                   {...settingsSearchTargetProps("vault-location")}
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1 basis-56">
                     <div className="text-sm font-medium text-ink-900">
                       {workspaceMode === "remote"
                         ? "Remote workspace"
@@ -4237,42 +4241,44 @@ export function SettingsModal(): JSX.Element {
                         </div>
                       )}
                   </div>
-                  <button
-                    onClick={() =>
-                      void (workspaceMode === "remote"
-                        ? changeRemoteWorkspaceVaultPath()
-                        : openVaultPicker())
-                    }
-                    className="shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3.5 py-2 text-xs font-medium text-ink-800 transition-colors hover:bg-paper-200"
-                  >
-                    {workspaceMode === "remote"
-                      ? "Change Remote Vault…"
-                      : "Change…"}
-                  </button>
-                  {workspaceMode === "remote" && (
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
-                      onClick={() => void disconnectRemoteWorkspace()}
+                      onClick={() =>
+                        void (workspaceMode === "remote"
+                          ? changeRemoteWorkspaceVaultPath()
+                          : openVaultPicker())
+                      }
                       className="shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3.5 py-2 text-xs font-medium text-ink-800 transition-colors hover:bg-paper-200"
                     >
-                      Return to Local Vault
+                      {workspaceMode === "remote"
+                        ? "Change Remote Vault…"
+                        : "Change…"}
                     </button>
-                  )}
-                  {workspaceMode === "remote" && (
-                    <button
-                      onClick={() => void openVaultPicker()}
-                      className="shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3.5 py-2 text-xs font-medium text-ink-800 transition-colors hover:bg-paper-200"
-                    >
-                      Open Local Vault…
-                    </button>
-                  )}
-                  {supportsRemoteWorkspace && (
-                    <button
-                      onClick={() => void connectRemoteWorkspace()}
-                      className="shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3.5 py-2 text-xs font-medium text-ink-800 transition-colors hover:bg-paper-200"
-                    >
-                      Quick Connect…
-                    </button>
-                  )}
+                    {workspaceMode === "remote" && (
+                      <button
+                        onClick={() => void disconnectRemoteWorkspace()}
+                        className="shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3.5 py-2 text-xs font-medium text-ink-800 transition-colors hover:bg-paper-200"
+                      >
+                        Return to Local Vault
+                      </button>
+                    )}
+                    {workspaceMode === "remote" && (
+                      <button
+                        onClick={() => void openVaultPicker()}
+                        className="shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3.5 py-2 text-xs font-medium text-ink-800 transition-colors hover:bg-paper-200"
+                      >
+                        Open Local Vault…
+                      </button>
+                    )}
+                    {supportsRemoteWorkspace && (
+                      <button
+                        onClick={() => void connectRemoteWorkspace()}
+                        className="shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3.5 py-2 text-xs font-medium text-ink-800 transition-colors hover:bg-paper-200"
+                      >
+                        Quick Connect…
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {/* Local vaults only (#692): a temporary folder session writes
                     nothing into its folder, and a remote workspace's settings
