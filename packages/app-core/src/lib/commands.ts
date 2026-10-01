@@ -8,6 +8,7 @@
  */
 import { isTagsViewActive, isTasksViewActive, isTrashViewActive, useStore } from '../store'
 import { confirmApp } from './confirm-requests'
+import { requestSettingsTarget } from './settings-navigation'
 import { promptApp } from './prompt-requests'
 import { captureNavigationContext } from './navigation-context'
 import { buildMoveNotePrompt, moveNoteVocabulary, parseMoveNoteTarget } from './move-note'
@@ -2074,7 +2075,11 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       when: () =>
         window.zen.getAppInfo().runtime === 'desktop' &&
         window.zen.getCapabilities().supportsCliInstall,
-      run: () => getState().setSettingsOpen(true)
+      run: () => {
+        // Without a target Settings reopens on whatever page it showed last.
+        requestSettingsTarget('cli')
+        getState().setSettingsOpen(true)
+      }
     }
   )
 
