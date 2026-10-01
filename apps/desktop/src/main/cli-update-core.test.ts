@@ -21,8 +21,11 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 
-const platform = process.platform
-const arch = process.arch
+// The manifest and parsing tests run everywhere, Windows CI included, so they
+// name a platform ZenNotes manages a CLI on; the install tests that execute a
+// real `zn` are skipped on Windows and use this machine's own.
+const platform = process.platform === 'win32' ? 'linux' : process.platform
+const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
 const goArch = arch === 'x64' ? 'amd64' : arch
 const commit = 'a'.repeat(40)
 
