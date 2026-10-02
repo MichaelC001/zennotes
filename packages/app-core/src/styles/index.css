@@ -55,6 +55,16 @@
   box-sizing: content-box;
 }
 
+/* The conflicted-note banner keeps desktop density under a mouse. On a touch
+ * screen its Review is the nearest way into the Cloud conflict queue, so it
+ * gets a finger-sized target. */
+@media (pointer: coarse) {
+  [data-cloud-conflict-review] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
 .task-kanban-column.is-drop-target {
   border-color: rgb(var(--z-accent) / 0.62);
   box-shadow: 0 0 0 1px rgb(var(--z-accent) / 0.28);

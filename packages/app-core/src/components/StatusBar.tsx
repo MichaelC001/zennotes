@@ -114,6 +114,9 @@ function CloudSyncStatus({
   const error = useCloudSyncStatusStore((state) => state.error);
   const lastSummary = useCloudSyncStatusStore((state) => state.lastSummary);
   const settingsOnly = useCloudSyncStatusStore(cloudSyncAttentionIsSettingsOnly);
+  const settingsQuestionWaiting = useCloudSyncStatusStore(
+    (state) => state.settingsConflict !== null,
+  );
   const setSettingsOpen = useStore((state) => state.setSettingsOpen);
   const [now, setNow] = useState(() => Date.now());
   const resolvableConflictCount = resolvableCloudConflictCount(lastSummary);
@@ -236,8 +239,16 @@ function CloudSyncStatus({
         .filter(Boolean)
         .join(" ")}
     >
+      {/* Stable hooks for the phone shells, which style this bar from outside
+          (the iPhone shows it only while Cloud needs the user). The phase alone
+          cannot hold a row steady: every run passes through ready and syncing,
+          while a waiting decision stays until it is made. */}
       <span
         data-cloud-sync-status
+        data-cloud-sync-phase={phase}
+        data-cloud-sync-review={
+          hasResolvableConflict || settingsQuestionWaiting ? "" : undefined
+        }
         role="status"
         title={title}
         className={`inline-flex items-center gap-1.5 font-medium ${statusTone}`}

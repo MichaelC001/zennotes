@@ -25,6 +25,7 @@ import {
   type CloudAutoSyncEnvironment,
   useCloudSyncStatusStore,
 } from "./cloud-auto-sync";
+import { useToastStore } from "./toast";
 
 function setup(
   initialStatus: CloudAccountStatus = {
@@ -968,5 +969,143 @@ describe("the vault settings question (#816)", () => {
       settingsConflict: question,
       settingsConflictPromptOpen: true,
     });
+  });
+});
+
+describe("the new conflict notification", () => {
+  const base: CloudSyncRunSummary = {
+    cursor: 9,
+    pulled: 0,
+    pushed: 0,
+    conflicts: [],
+    bootstrap_conflicts: [],
+    local_conflicts: [],
+  };
+  const conflict = (id: string, path: string) => ({
+    id,
+    item_id: id,
+    path,
+    cloud_path: path,
+    kind: "content" as const,
+    can_merge: true,
+    has_base: true,
+  });
+  const trip = conflict("trip", "Plans/Trip.md");
+  const budget = conflict("budget", "Plans/Budget.md");
+  const packing = conflict("packing", "Plans/Packing list.md");
+
+  async function runWith(...pending: ReturnType<typeof conflict>[]): Promise<void> {
+    await syncCloudVaultWithStatus(
+      { syncCloudVault: async () => ({ ...base, pending_conflicts: pending }) },
+      "Notes",
+    );
+  }
+  const toasts = () => useToastStore.getState().toasts;
+
+  beforeEach(() => {
+    clearCloudSyncStatus();
+    useToastStore.setState({ toasts: [] });
+  });
+  afterEach(() => {
+    clearCloudSyncStatus();
+    useToastStore.setState({ toasts: [] });
+    vi.useRealTimers();
+  });
+
+  it("names one new conflict once, and not again while it waits", async () => {
+    vi.useFakeTimers();
+    await runWith(trip);
+    expect(toasts()).toHaveLength(1);
+    expect(toasts()[0]).toMatchObject({
+      type: "info",
+      message:
+        "“Trip” changed on this device and on another device. Sync is paused for it.",
+      action: { label: "Review" },
+    });
+
+    await runWith(trip);
+    await runWith(trip);
+    expect(toasts()).toHaveLength(1);
+
+    // Long enough to reach Review, then out of the way.
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(toasts()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(toasts()).toHaveLength(0);
+  });
+
+  it("counts several new conflicts in one notification, then names a later newcomer", async () => {
+    await runWith(trip, budget);
+    expect(toasts().map((toast) => toast.message)).toEqual([
+      "2 files changed on this device and on another device. Sync is paused for them.",
+    ]);
+
+    await runWith(trip, budget, packing);
+    expect(toasts().map((toast) => toast.message)).toEqual([
+      "2 files changed on this device and on another device. Sync is paused for them.",
+      "“Packing list” changed on this device and on another device. Sync is paused for it.",
+    ]);
+  });
+
+  it("announces again once a conflict is resolved and a new one arrives on the same note", async () => {
+    await runWith(trip);
+    await runWith();
+    expect(toasts()).toHaveLength(1);
+    await runWith(trip);
+    expect(toasts()).toHaveLength(2);
+
+    // Resolved in this window, and the next run already reports a fresh
+    // conflict under the same id: no summary without it ever arrived.
+    acknowledgeCloudConflictResolution(trip.id, useCloudSyncStatusStore.getState().lastSummary!);
+    await runWith(trip);
+    expect(toasts()).toHaveLength(3);
+  });
+
+  it("stays silent while the review is open, and counts what the open queue showed as told", async () => {
+    await runWith(trip);
+    expect(toasts()).toHaveLength(1);
+    openCloudConflictReview();
+    await runWith(trip, budget);
+    expect(toasts()).toHaveLength(1);
+
+    closeCloudConflictReview();
+    await runWith(trip, budget);
+    expect(toasts()).toHaveLength(1);
+  });
+
+  it("opens the queue on the conflict it announced", async () => {
+    await runWith(trip);
+    await runWith(trip, budget);
+    const [, second] = toasts();
+    expect(second.message).toContain("“Budget”");
+
+    second.action!.onClick();
+    expect(useCloudSyncStatusStore.getState()).toMatchObject({
+      conflictReviewOpen: true,
+      conflictReviewStartId: budget.id,
+    });
+  });
+
+  it("starts over when the vault or its Cloud link changes", async () => {
+    await runWith(trip);
+    clearCloudSyncStatus();
+    await runWith(trip);
+    expect(toasts()).toHaveLength(2);
+
+    // The link was removed on the server: the failed run finds no link.
+    await expect(
+      syncCloudVaultWithStatus(
+        {
+          syncCloudVault: async () => {
+            throw new Error("Vault link not found");
+          },
+          getCloudVaultLink: async () => null,
+        },
+        "Notes",
+      ),
+    ).rejects.toThrow("Vault link not found");
+    expect(useCloudSyncStatusStore.getState().phase).toBe("unlinked");
+    await runWith(trip);
+    expect(toasts()).toHaveLength(3);
   });
 });

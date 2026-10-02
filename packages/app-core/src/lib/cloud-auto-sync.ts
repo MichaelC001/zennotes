@@ -2,6 +2,8 @@ import { humanIpcError } from "./ipc-error";
 import type { ZenBridge } from "@zennotes/bridge-contract/bridge";
 import { getZenBridge } from "@zennotes/bridge-contract/bridge";
 import type {
+  CloudSyncConflict,
+  CloudSyncPendingConflict,
   CloudSyncRunSummary,
   CloudSyncSettingsChoice,
   CloudSyncSettingsConflict,
@@ -13,8 +15,12 @@ import {
   type CloudAutoSyncControllerOptions,
   type CloudAutoSyncReason,
 } from "@zennotes/shared-domain/cloud-auto-sync";
-import { shouldSyncVaultPath } from "@zennotes/shared-domain/cloud-sync";
+import {
+  cloudSyncPathKey,
+  shouldSyncVaultPath,
+} from "@zennotes/shared-domain/cloud-sync";
 import { vaultSettingsValueEqual } from "@zennotes/shared-domain/vault-settings-conflict";
+import { useToastStore } from "./toast";
 
 /** A host without the settings question (the web client's bridge answers it
  *  with null; a test bridge may leave it out) simply never asks it. */
@@ -70,6 +76,9 @@ interface CloudSyncStatusStore {
    *  status bar, so the command palette and the vim leader open the same
    *  queue the status bar's Review now opens. */
   conflictReviewOpen: boolean;
+  /** The file the queue opens on: the conflict a note's banner or the new
+   *  conflict notification asked about. Null opens the first file. */
+  conflictReviewStartId: string | null;
   /** Remains locked even if this window's own controller refreshes its status. */
   syncWindowLocked: boolean;
   /** A note was saved, but the following whole-vault sync has not completed. */
@@ -93,6 +102,7 @@ const emptyCloudSyncStatus: CloudSyncStatusStore = {
   error: null,
   lastSummary: null,
   conflictReviewOpen: false,
+  conflictReviewStartId: null,
   syncWindowLocked: false,
   resolutionSaved: false,
   settingsConflict: null,
@@ -123,6 +133,12 @@ type CloudAutoSyncTimings = Pick<
 
 let installedRuntime: CloudAutoSyncRuntime | null = null;
 const conflictDraftFlushers = new Set<() => Promise<void>>();
+/**
+ * Pending conflict ids this window has already told the user about. Module
+ * state like the status store itself: one set per window, gone on reload, and
+ * emptied whenever the account or the vault link changes.
+ */
+const announcedCloudConflictIds = new Set<string>();
 
 /** A review's edits must reach durable storage before sync can retire it. */
 export function registerCloudConflictDraftFlusher(
@@ -430,9 +446,18 @@ export function hasPendingCloudReview(): boolean {
   return hasResolvableCloudConflicts() || hasPendingCloudSettingsConflict();
 }
 
-export function openPendingCloudReview(): void {
-  if (hasResolvableCloudConflicts()) openCloudConflictReview();
-  else openCloudSettingsConflictPrompt();
+/**
+ * `notePath` is the note in front of the user. When it waits in the queue,
+ * the queue opens on it: the conflicted-note banner names the leader binding
+ * beside its Review button, so the key has to land where the button does.
+ */
+export function openPendingCloudReview(notePath?: string | null): void {
+  if (hasResolvableCloudConflicts()) {
+    const ownConflict = notePath
+      ? pendingCloudConflictForPath(useCloudSyncStatusStore.getState().lastSummary, notePath)
+      : null;
+    openCloudConflictReview(ownConflict?.id);
+  } else openCloudSettingsConflictPrompt();
 }
 
 async function refreshRemovedCloudLink(
@@ -465,6 +490,9 @@ export function acknowledgeCloudConflictResolution(
     pending_conflicts:
       previous.pending_conflicts?.filter((item) => item.id !== conflictId) ?? [],
   };
+  // Resolved here, so a run may bring the same id back before any summary
+  // without it arrives: that is a new conflict, and it is announced again.
+  announcedCloudConflictIds.delete(conflictId);
   useCloudSyncStatusStore.setState({
     lastSummary: summary,
     resolutionSaved: true,
@@ -491,6 +519,42 @@ function applyCloudSyncSummary(summary: CloudSyncRunSummary, vaultName?: string 
     // Do not reopen a finished review on the next unrelated conflict.
     conflictReviewOpen: current.conflictReviewOpen && resolvableCloudConflictCount(summary) > 0,
   });
+  announceNewCloudConflicts(summary, current.conflictReviewOpen);
+}
+
+/** Long enough to read the sentence and reach Review; the banner, the status
+ *  bar and the queue keep the conflict after the toast is gone. */
+const NEW_CONFLICT_TOAST_MS = 10_000;
+
+/**
+ * One notification per conflict, the first time a run reports it. A phone
+ * hides the status bar and zen mode hides it everywhere, so without this a
+ * conflict could pause a note with nothing on screen to say so.
+ */
+function announceNewCloudConflicts(
+  summary: CloudSyncRunSummary,
+  reviewOpen: boolean,
+): void {
+  const pending = summary.pending_conflicts ?? [];
+  const pendingIds = new Set(pending.map((conflict) => conflict.id));
+  for (const id of announcedCloudConflictIds) {
+    if (!pendingIds.has(id)) announcedCloudConflictIds.delete(id);
+  }
+  const fresh = pending.filter((conflict) => !announcedCloudConflictIds.has(conflict.id));
+  for (const conflict of fresh) announcedCloudConflictIds.add(conflict.id);
+  // An open queue already lists the newcomers; they count as told.
+  if (fresh.length === 0 || reviewOpen) return;
+  const first = fresh[0];
+  const message =
+    fresh.length === 1
+      ? `“${fileName(first.path).replace(/\.md$/i, "")}” changed on this device and on another device. Sync is paused for it.`
+      : `${fresh.length} files changed on this device and on another device. Sync is paused for them.`;
+  useToastStore.getState().addToast(
+    message,
+    "info",
+    { label: "Review", onClick: () => openCloudConflictReview(first.id) },
+    NEW_CONFLICT_TOAST_MS,
+  );
 }
 
 /** Conflicts the queue can actually resolve. Bootstrap conflicts are no longer
@@ -508,17 +572,75 @@ export function hasResolvableCloudConflicts(): boolean {
   );
 }
 
-export function openCloudConflictReview(): void {
+/**
+ * Open the queue, on `conflictId` when one is named and still waiting; the
+ * queue then carries on through the rest as usual.
+ */
+export function openCloudConflictReview(conflictId?: string): void {
   if (!hasResolvableCloudConflicts()) return;
-  useCloudSyncStatusStore.setState({ conflictReviewOpen: true });
+  useCloudSyncStatusStore.setState({
+    conflictReviewOpen: true,
+    conflictReviewStartId: conflictId ?? null,
+  });
 }
 
 export function closeCloudConflictReview(): void {
-  useCloudSyncStatusStore.setState({ conflictReviewOpen: false });
+  useCloudSyncStatusStore.setState({
+    conflictReviewOpen: false,
+    conflictReviewStartId: null,
+  });
 }
 
 export function clearCloudSyncStatus(): void {
+  announcedCloudConflictIds.clear();
   useCloudSyncStatusStore.setState({ ...emptyCloudSyncStatus });
+}
+
+/**
+ * A path sync cannot carry (a Windows-reserved character such as `:` in a
+ * note name) has no key, and is never in the queue. The key function throws
+ * for such a path, and the callers here run inside renders.
+ */
+export function cloudSyncPathKeyOrNull(path: string): string | null {
+  try {
+    return cloudSyncPathKey(path);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The pending conflict a file belongs to, under the name it has on this
+ * device or the one it has in Cloud (a move), compared as sync compares
+ * paths: case-folded and Unicode-normalized.
+ */
+export function pendingCloudConflictForPath(
+  summary: CloudSyncRunSummary | null,
+  path: string,
+): CloudSyncPendingConflict | null {
+  const conflicts = summary?.pending_conflicts ?? [];
+  if (conflicts.length === 0) return null;
+  const key = cloudSyncPathKeyOrNull(path);
+  if (key === null) return null;
+  return (
+    conflicts.find((conflict) =>
+      [conflict.path, conflict.cloud_path].some(
+        (candidate) => candidate !== null && cloudSyncPathKeyOrNull(candidate) === key,
+      ),
+    ) ?? null
+  );
+}
+
+/**
+ * What the banner over a conflicted note says. The content case speaks for
+ * the open note; delete, move and path conflicts keep the words Settings
+ * uses for them, so one conflict is never described two ways.
+ */
+export function cloudConflictNoteMessage(conflict: CloudSyncPendingConflict): string {
+  if (conflict.kind === "content") {
+    return "Sync is paused for this note. It changed on this device and on another device.";
+  }
+  return pendingCloudConflictDetail(conflict);
 }
 
 export function formatRelativeSyncTime(
@@ -556,6 +678,7 @@ function markCloudSyncReady(vaultName: string): void {
 }
 
 function markCloudSyncDisconnected(error: string | null = null): void {
+  announcedCloudConflictIds.clear();
   useCloudSyncStatusStore.setState({
     phase: "disconnected",
     vaultName: null,
@@ -578,6 +701,7 @@ function markCloudSyncConnecting(): void {
 }
 
 function markCloudSyncUnlinked(error: string | null = null): void {
+  announcedCloudConflictIds.clear();
   useCloudSyncStatusStore.setState({
     phase: "unlinked",
     vaultName: null,
@@ -720,6 +844,18 @@ function fileName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
+function pendingCloudConflictDetail(conflict: CloudSyncPendingConflict): string {
+  return conflict.kind === "delete"
+    ? "This file was edited here and deleted on another device. Choose whether to keep the note or delete it everywhere."
+    : conflict.kind === "move"
+      ? "This file was changed here and moved on another device. Review its contents and location before sync continues."
+      : conflict.kind === "path"
+        ? "Another file already uses this name. Choose a clear name for each file."
+        : conflict.can_merge
+          ? "The same part of this note changed on two devices. Review the suggested combined note."
+          : "Different versions exist on this device and another device. Choose what to keep.";
+}
+
 /**
  * One row per file that needs the user's eyes, from a run summary. Capacity
  * rejections are not listed: they are queued uploads that retry on their own,
@@ -732,20 +868,10 @@ export function cloudSyncAttentionItems(
 ): CloudSyncAttentionItem[] {
   const items: CloudSyncAttentionItem[] = [];
   for (const conflict of summary.pending_conflicts ?? []) {
-    const detail =
-      conflict.kind === "delete"
-        ? "This file was edited here and deleted on another device. Choose whether to keep the note or delete it everywhere."
-        : conflict.kind === "move"
-          ? "This file was changed here and moved on another device. Review its contents and location before sync continues."
-          : conflict.kind === "path"
-            ? "Another file already uses this name. Choose a clear name for each file."
-            : conflict.can_merge
-              ? "The same part of this note changed on two devices. Review the suggested combined note."
-              : "Different versions exist on this device and another device. Choose what to keep.";
     items.push({
       kind: "pending",
       path: conflict.path,
-      detail,
+      detail: pendingCloudConflictDetail(conflict),
       conflictCopyPath: null,
     });
   }

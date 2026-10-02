@@ -954,7 +954,7 @@ export function VimNav(): JSX.Element | null {
           e.preventDefault()
           e.stopImmediatePropagation()
           resetLeader()
-          openPendingCloudReview()
+          openPendingCloudReview(state.activeNote?.path)
           return
         }
         if (matchesSequenceToken(e, overrides, 'vim.hintMode')) {

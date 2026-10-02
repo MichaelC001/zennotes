@@ -287,6 +287,79 @@ describe("cloud sync status time", () => {
     }
   });
 
+  it("tells the phone shells the phase and whether a decision waits, apart from its tone classes", () => {
+    const pending = {
+      id: "item-hook",
+      item_id: "item-hook",
+      path: "Daily Notes/Today.md",
+      cloud_path: "Daily Notes/Today.md",
+      kind: "content" as const,
+      can_merge: true,
+      has_base: true,
+    };
+    const waiting = {
+      cursor: 7,
+      pulled: 1,
+      pushed: 0,
+      conflicts: [],
+      bootstrap_conflicts: [],
+      local_conflicts: [],
+      pending_conflicts: [pending],
+    };
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const status = (): HTMLElement =>
+      host.querySelector<HTMLElement>("[data-cloud-sync-status]")!;
+
+    try {
+      useCloudSyncStatusStore.setState({
+        phase: "attention",
+        vaultName: "Notes",
+        error: "Cloud sync needs attention: 1 file differs on this device and in Cloud.",
+        lastSummary: waiting,
+      });
+      act(() => root.render(createElement(StatusBar, { note: null })));
+      expect(status().dataset.cloudSyncPhase).toBe("attention");
+      expect(status().hasAttribute("data-cloud-sync-review")).toBe(true);
+
+      // Every run passes through ready and syncing; the waiting file does not
+      // go away for it, so neither does the flag.
+      act(() => useCloudSyncStatusStore.setState({ phase: "ready", error: null }));
+      expect(status().dataset.cloudSyncPhase).toBe("ready");
+      expect(status().hasAttribute("data-cloud-sync-review")).toBe(true);
+      act(() => useCloudSyncStatusStore.setState({ phase: "syncing" }));
+      expect(status().dataset.cloudSyncPhase).toBe("syncing");
+      expect(status().hasAttribute("data-cloud-sync-review")).toBe(true);
+
+      act(() =>
+        useCloudSyncStatusStore.setState({
+          phase: "error",
+          error: "Connection timed out",
+          lastSummary: { ...waiting, pending_conflicts: [] },
+        }),
+      );
+      expect(status().dataset.cloudSyncPhase).toBe("error");
+      expect(status().hasAttribute("data-cloud-sync-review")).toBe(false);
+
+      act(() =>
+        useCloudSyncStatusStore.setState({
+          phase: "ready",
+          error: null,
+          settingsConflict: {
+            path: ".zennotes/vault.json",
+            cloud_path: ".zennotes/vault.cloud-conflict.json",
+          },
+        }),
+      );
+      expect(status().hasAttribute("data-cloud-sync-review")).toBe(true);
+    } finally {
+      act(() => root.unmount());
+      host.remove();
+      useCloudSyncStatusStore.setState({ settingsConflict: null });
+    }
+  });
+
   it("shows the active editor line and column on the right (discussion #597)", () => {
     useCloudSyncStatusStore.setState({ phase: "hidden" });
     useStore.setState({

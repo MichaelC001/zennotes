@@ -34,7 +34,7 @@ import { convertTableToDatabase } from './table-to-database'
 import { canRenameVault, renameVaultWithPrompt } from './rename-vault'
 import { promptImageWidth } from './image-resize'
 import { copyLinkAtCursor } from './link-copy'
-import { getKeymapDisplay, type KeymapId } from './keymaps'
+import { getKeymapDisplay, getLeaderChordDisplay, type KeymapId } from './keymaps'
 import { dispatchKeyboardContextMenu, findTabContextMenuTarget } from './keyboard-context-menu'
 import { resolveSystemFolderLabels } from './system-folder-labels'
 import { isCalendarToggleAvailable, noteFolderSubpath } from './vault-layout'
@@ -98,7 +98,8 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
     const parts = ids.map(shortcut)
     return parts.every(Boolean) ? parts.join(' ') : ''
   }
-  const leaderShortcut = (id: KeymapId): string => chord('vim.leaderPrefix', id)
+  const leaderShortcut = (id: KeymapId): string =>
+    getLeaderChordDisplay(getState().keymapOverrides, id)
   const paneShortcut = (id: KeymapId): string => chord('vim.panePrefix', id)
   const searchShortcut = (): string => {
     const state = getState()
@@ -1872,7 +1873,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       // opens (the file queue first, then the vault settings question), and
       // there is nothing to review without one of them.
       when: () => hasPendingCloudReview(),
-      run: () => openPendingCloudReview()
+      run: () => openPendingCloudReview(getState().activeNote?.path)
     },
     {
       id: 'app.vault.switch',

@@ -1917,6 +1917,18 @@ export function getKeymapDisplay(
   return formatKeymapBinding(getKeymapBinding(overrides, id), definition.kind);
 }
 
+/** A leader chord as the palette shows it ("Space r"), or the empty string
+ *  when either step is unbound: half a sequence cannot be pressed, so no
+ *  surface names it. */
+export function getLeaderChordDisplay(
+  overrides: KeymapOverrides | null | undefined,
+  id: KeymapId,
+): string {
+  const leader = getKeymapDisplay(overrides, "vim.leaderPrefix");
+  const step = getKeymapDisplay(overrides, id);
+  return leader && step ? `${leader} ${step}` : "";
+}
+
 /** `label (display)` while the action has a key, the bare label once it is
  *  unbound: a tooltip must not read "Go back ()". */
 export function labelWithShortcut(label: string, display: string): string {
