@@ -35,6 +35,11 @@ import {
   hrefFragment,
   resolveAssetVaultRelativePath,
 } from "../lib/local-assets";
+import { useCloudSyncStatusStore } from "../lib/cloud-auto-sync";
+import {
+  oversizedCloudFileNotice,
+  oversizedCloudFiles,
+} from "../lib/cloud-oversized-files";
 import { assetTabPath } from "../lib/asset-tabs";
 import { isExcalidrawPath, isObsidianExcalidrawPath } from "@shared/excalidraw";
 import { resolveExcalidrawEmbedPath } from "../lib/excalidraw-preview";
@@ -227,6 +232,12 @@ export const Preview = memo(function Preview({
   const pinnedRefVisible = useStore((s) => s.pinnedRefVisible);
   const togglePinnedRefVisible = useStore((s) => s.togglePinnedRefVisible);
   const pinnedAssetPath = pinnedRefKind === "asset" ? pinnedRefPath : null;
+  // The same object for as long as the same files are over Cloud's per-file
+  // limit (and one shared empty set while none are), so a sync run that
+  // changes nothing here never re-renders the note.
+  const oversizedFiles = useCloudSyncStatusStore((s) =>
+    oversizedCloudFiles(s.lastSummary),
+  );
   const [hovered, setHovered] = useState<{
     note: NoteMeta;
     rect: DOMRect;
@@ -825,6 +836,10 @@ export const Preview = memo(function Preview({
       onOpenAsset: (path) => {
         void openNoteInTabRef.current(assetTabPath(path));
       },
+      cloudSyncNotice:
+        oversizedFiles.size > 0
+          ? (assetPath) => oversizedCloudFileNotice(oversizedFiles, assetPath)
+          : null,
     });
 
     enhancePreviewHeadingFolds(stage);
@@ -978,6 +993,7 @@ export const Preview = memo(function Preview({
     notePath,
     notes,
     onRequestEdit,
+    oversizedFiles,
     pinnedAssetPath,
     pinnedRefVisible,
     togglePinnedRefVisible,
