@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CloudAccountStatus,
   CloudBackupNoteRestoreResult,
@@ -18,14 +18,22 @@ import type {
 import { getZenBridge } from "@zennotes/bridge-contract/bridge";
 import { confirmApp } from "../lib/confirm-requests";
 import {
+  clearRemovedCloudVault,
   cloudSyncAttentionItems,
+  cloudSyncAttentionLabel,
+  cloudVaultGoneReason,
+  cloudVaultRemovalLabel,
+  cloudVaultRemovalMessage,
+  formatCloudBytes,
   cloudSyncAttentionMessage,
+  markCloudVaultDeleted,
   openCloudSettingsConflictPrompt,
   refreshCloudSettingsConflict,
   resolveCloudSettingsConflictWithStatus,
   useCloudSyncStatusStore,
   requestCloudAutoSync,
   syncCloudVaultWithStatus,
+  type CloudVaultRemoval,
 } from "../lib/cloud-auto-sync";
 import {
   describeVaultSettingsConflict,
@@ -38,6 +46,7 @@ import { Button } from "./ui/Button";
 import { useStore } from "../store";
 import { focusEditorNormalMode } from "../lib/editor-focus";
 import { CloudPendingConflictResolver } from "./CloudPendingConflictResolver";
+import { CloudVaultDeleteDialog } from "./CloudVaultDeleteDialog";
 
 type CloudAction =
   | "connect"
@@ -60,6 +69,19 @@ type CloudAction =
   | "settings-local"
   | "settings-cloud"
   | null;
+
+/**
+ * Actions whose controls live in This vault report their failures there. The
+ * page banner sits above the account and plan, a long scroll on a phone from
+ * the button that was pressed, so a failure there looked like nothing at all.
+ */
+const VAULT_SECTION_ACTIONS: ReadonlySet<CloudAction> = new Set<CloudAction>([
+  "link",
+  "unlink",
+  "vault-delete",
+  "settings-local",
+  "settings-cloud",
+]);
 
 export function CloudSettings({
   localVaultAvailable,
@@ -97,81 +119,154 @@ export function CloudSettings({
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [action, setAction] = useState<CloudAction>(null);
   const [error, setError] = useState<string | null>(null);
+  const [vaultError, setVaultError] = useState<string | null>(null);
+  const [deleteRequest, setDeleteRequest] = useState<CloudVaultLink | null>(
+    null,
+  );
+  // The list is the truth about what can be opened: a choice that is no
+  // longer in it falls back to the first vault that is.
+  const effectiveSelectedVaultId = cloudVaults.some(
+    (vault) => vault.id === selectedVaultId,
+  )
+    ? selectedVaultId
+    : (cloudVaults[0]?.id ?? "");
+
+  // Only the newest load may write: a sign-in can start a second load while
+  // the first is still waiting, and the first must not land on top of it.
+  const loadGeneration = useRef(0);
+
+  /**
+   * Read the account's vaults from Cloud again. Editing the old list here kept
+   * a vault deleted on another device on offer, and opening it failed.
+   * `goneId` names a vault this device knows is gone, so a failed read still
+   * stops offering that one.
+   */
+  const refreshCloudVaults = useCallback(
+    async (goneId?: string): Promise<void> => {
+      const generation = loadGeneration.current;
+      try {
+        const vaults = await bridge.listCloudVaults();
+        if (generation === loadGeneration.current) setCloudVaults(vaults);
+      } catch {
+        if (generation !== loadGeneration.current || !goneId) return;
+        setCloudVaults((current) =>
+          current.filter((vault) => vault.id !== goneId),
+        );
+      }
+    },
+    [bridge],
+  );
+
+  // The link as last drawn, for a store change that arrives between renders:
+  // deleting here drops the link from state just before it reports the
+  // deletion, and the vault that went is still the drawn one.
+  const drawnLink = useRef(link);
+  useEffect(() => {
+    drawnLink.current = link;
+  }, [link]);
 
   useEffect(() => {
+    // One subscription for the panel's whole life. One that was replaced
+    // whenever the link changed abandoned the deletion it was answering: the
+    // delete re-renders the panel before the host confirms the link is gone.
     let mounted = true;
     const unsubscribe = useCloudSyncStatusStore.subscribe((next, previous) => {
       // A saved decision updates this panel immediately, then the remaining
       // vault sync may finish later. Adopt that result (or a vault reset), but
       // keep explicit restore/manual summaries through unrelated status changes.
       if (next.lastSummary !== previous.lastSummary) setSummary(next.lastSummary);
-      if (next.phase === "unlinked" && next.error) {
+      // The link went away with its Cloud vault: a sync found it gone while
+      // this panel was open, or this panel deleted it. This vault's notice
+      // says why. The panel lets go of what belonged to the link and reads
+      // the list again, so the vault that is gone is not offered here.
+      if (
+        next.removedVault !== null &&
+        next.removedVault !== previous.removedVault
+      ) {
+        const goneId = drawnLink.current?.vault_id;
         void bridge.getCloudVaultLink().then((currentLink) => {
           if (!mounted || currentLink !== null) return;
           setLink(null);
-          const remainingVaults = cloudVaults.filter((vault) => vault.id !== link?.vault_id);
-          setCloudVaults(remainingVaults);
-          setSelectedVaultId((selected) => remainingVaults.some((vault) => vault.id === selected)
-            ? selected : (remainingVaults[0]?.id ?? ""));
           setSummary(null);
           setBackups([]);
           setBackupSchedule(null);
           setExpandedBackupId(null);
           setBackupItems([]);
           setRestoreResult(null);
-          setError(next.error);
+          void refreshCloudVaults(goneId);
         }).catch(() => {});
       }
     });
     return () => { mounted = false; unsubscribe(); };
-  }, [bridge, link, cloudVaults]);
+  }, [bridge, refreshCloudVaults]);
 
   const loadStatus = useCallback(
     async (nextStatus?: CloudAccountStatus): Promise<void> => {
-      const next = nextStatus ?? (await bridge.getCloudAccountStatus());
-      setStatus(next);
-      setError(null);
+      const generation = ++loadGeneration.current;
+      const superseded = (): boolean => generation !== loadGeneration.current;
+      let statusHint = nextStatus;
+      for (let attempt = 0; ; attempt += 1) {
+        const next = statusHint ?? (await bridge.getCloudAccountStatus());
+        if (superseded()) return;
+        setStatus(next);
+        setError(null);
+        setVaultError(null);
 
-      if (next.state !== "connected") {
-        setServiceAccount(null);
-        setCloudVaults([]);
-        setLink(null);
-        setSummary(null);
-        setBackups([]);
-        setBackupSchedule(null);
-        setExpandedBackupId(null);
-        setBackupItems([]);
-        setPublishedNotes([]);
-        setRestoreResult(null);
-        return;
-      }
-
-      setLoadingDetails(true);
-      try {
-        const account = await bridge.getCloudServiceAccount();
-        setServiceAccount(account);
-
-        if (!account.features.sync.active || !localVaultAvailable) {
+        if (next.state !== "connected") {
+          setServiceAccount(null);
           setCloudVaults([]);
           setLink(null);
+          setSummary(null);
+          setBackups([]);
+          setBackupSchedule(null);
+          setExpandedBackupId(null);
+          setBackupItems([]);
+          setPublishedNotes([]);
+          setRestoreResult(null);
           return;
         }
 
-        const [availableVaults, currentLink] = await Promise.all([
-          bridge.listCloudVaults(),
-          bridge.getCloudVaultLink(),
-        ]);
-        setCloudVaults(availableVaults);
-        setLink(currentLink);
-        setSelectedVaultId((current) =>
-          availableVaults.some((vault) => vault.id === current)
-            ? current
-            : (availableVaults[0]?.id ?? ""),
-        );
-      } catch (cause) {
-        setError(errorMessage(cause, "Could not load ZenNotes Cloud."));
-      } finally {
-        setLoadingDetails(false);
+        setLoadingDetails(true);
+        try {
+          const account = await bridge.getCloudServiceAccount();
+          if (superseded()) return;
+          setServiceAccount(account);
+
+          if (!account.features.sync.active || !localVaultAvailable) {
+            setCloudVaults([]);
+            setLink(null);
+            return;
+          }
+
+          const [availableVaults, currentLink] = await Promise.all([
+            bridge.listCloudVaults(),
+            bridge.getCloudVaultLink(),
+          ]);
+          if (superseded()) return;
+          setCloudVaults(availableVaults);
+          setLink(currentLink);
+          setSelectedVaultId((current) =>
+            availableVaults.some((vault) => vault.id === current)
+              ? current
+              : (availableVaults[0]?.id ?? ""),
+          );
+          return;
+        } catch (cause) {
+          if (superseded()) return;
+          // Signing in or out cancels every request in flight while the
+          // credential is swapped (the phones do this on purpose). That is not
+          // a failure to show: read the account again once the new one is in.
+          if (isCancelledRequest(cause) && attempt < CANCELLED_LOAD_RETRIES) {
+            statusHint = undefined;
+            await new Promise((resolve) => setTimeout(resolve, CANCELLED_LOAD_RETRY_MS));
+            if (superseded()) return;
+            continue;
+          }
+          setError(errorMessage(cause, "Could not load ZenNotes Cloud."));
+          return;
+        } finally {
+          if (!superseded()) setLoadingDetails(false);
+        }
       }
     },
     [bridge, localVaultAvailable],
@@ -225,6 +320,7 @@ export function CloudSettings({
       setPublishedNotes(await bridge.listCloudPublishedNotes());
       await refreshServiceAccount();
     } catch (cause) {
+      if (isCancelledRequest(cause)) return;
       setError(errorMessage(cause, "Could not load published notes."));
     } finally {
       setLoadingPublishedNotes(false);
@@ -254,6 +350,7 @@ export function CloudSettings({
       setBackupSchedule(nextSchedule);
       await refreshServiceAccount();
     } catch (cause) {
+      if (isCancelledRequest(cause)) return;
       setError(errorMessage(cause, "Could not load cloud backups."));
     } finally {
       setLoadingBackups(false);
@@ -282,15 +379,19 @@ export function CloudSettings({
   ): Promise<void> => {
     setAction(nextAction);
     setError(null);
+    setVaultError(null);
     try {
       await operation();
     } catch (cause) {
       // Sync errors already live in the shared status store. Duplicating one
       // here leaves it visible after a successful editor/background retry.
       if (nextAction !== "sync") {
-        setError(
-          errorMessage(cause, "ZenNotes Cloud could not complete that action."),
+        const message = errorMessage(
+          cause,
+          "ZenNotes Cloud could not complete that action.",
         );
+        if (VAULT_SECTION_ACTIONS.has(nextAction)) setVaultError(message);
+        else setError(message);
       }
     } finally {
       setAction(null);
@@ -310,10 +411,25 @@ export function CloudSettings({
 
   const linkSelectedVault = (): Promise<void> =>
     runAction("link", async () => {
-      if (!selectedVaultId) return;
-      setLink(await bridge.linkCloudVault(selectedVaultId));
+      const chosenId = effectiveSelectedVaultId;
+      if (!chosenId) return;
+      const chosen = cloudVaults.find((vault) => vault.id === chosenId);
+      let linked: CloudVaultLink;
+      try {
+        linked = await bridge.linkCloudVault(chosenId);
+      } catch (cause) {
+        if (cloudVaultGoneReason(cause) === null) throw cause;
+        // The list this choice came from is older than whatever took the
+        // vault away. Read it again first, so the answer arrives beside a
+        // list that no longer offers it.
+        await refreshCloudVaults(chosenId);
+        throw new Error(vaultGoneFromListMessage(chosen?.name ?? null));
+      }
+      setLink(linked);
       setSummary(null);
+      clearRemovedCloudVault();
       requestCloudAutoSync("vault-link");
+      await refreshCloudVaults();
     });
 
   const createAndLinkVault = (): Promise<void> =>
@@ -322,19 +438,11 @@ export function CloudSettings({
       if (!name) throw new Error("Enter a name for the cloud vault.");
       const createdLink = await bridge.createAndLinkCloudVault(name);
       setLink(createdLink);
-      setCloudVaults((current) => [
-        ...current,
-        {
-          id: createdLink.vault_id,
-          name: createdLink.vault_name,
-          cursor: 0,
-          created_at: createdLink.linked_at,
-          updated_at: createdLink.linked_at,
-        },
-      ]);
       setSelectedVaultId(createdLink.vault_id);
       setSummary(null);
+      clearRemovedCloudVault();
       requestCloudAutoSync("vault-link");
+      await refreshCloudVaults();
     });
 
   const clearLinkedVaultState = (): void => {
@@ -363,29 +471,25 @@ export function CloudSettings({
     });
   };
 
-  const deleteVault = async (): Promise<void> => {
-    if (!link) return;
-    const deletedVault = link;
-    const confirmed = await confirmApp({
-      title: `Delete ${deletedVault.vault_name} from ZenNotes Cloud?`,
-      description:
-        "This permanently deletes the Cloud copy, its backups, and its exports. Local files on your devices stay in place, but this cannot be undone.",
-      confirmLabel: "Delete Cloud vault",
-      danger: true,
-    });
-    if (!confirmed) return;
+  const deleteVault = (): void => {
+    if (link) setDeleteRequest(link);
+  };
 
+  const confirmDeleteVault = async (
+    deletedVault: CloudVaultLink,
+  ): Promise<void> => {
+    setDeleteRequest(null);
     await runAction("vault-delete", async () => {
       await bridge.deleteCloudVault();
-      setCloudVaults((current) =>
-        current.filter((vault) => vault.id !== deletedVault.vault_id),
-      );
       clearLinkedVaultState();
+      // The status row and This vault keep saying why sync stopped, and the
+      // store change is also what reads the vault list again here.
+      markCloudVaultDeleted(deletedVault.vault_name);
       await refreshServiceAccount();
       useToastStore
         .getState()
         .addToast(
-          `${deletedVault.vault_name} was deleted from ZenNotes Cloud.`,
+          `“${deletedVault.vault_name}” was deleted from ZenNotes Cloud.`,
           "success",
         );
     });
@@ -628,8 +732,9 @@ export function CloudSettings({
                 linkMismatch={linkMismatch}
                 localVaultAvailable={localVaultAvailable}
                 newVaultName={newVaultName}
-                selectedVaultId={selectedVaultId}
+                selectedVaultId={effectiveSelectedVaultId}
                 summary={summary}
+                vaultError={vaultError}
                 onSummaryChange={setSummary}
                 onCreateAndLink={() => void createAndLinkVault()}
                 onLink={() => void linkSelectedVault()}
@@ -637,7 +742,8 @@ export function CloudSettings({
                 onSelectedVaultChange={setSelectedVaultId}
                 onSync={() => void syncVault()}
                 onUnlink={() => void unlinkVault()}
-                onDelete={() => void deleteVault()}
+                onDelete={deleteVault}
+                onDismissRemoval={clearRemovedCloudVault}
                 onUseAnotherAccount={() => void logout()}
                 settingsConflict={settingsConflict}
                 onResolveSettingsConflict={(choice) =>
@@ -688,6 +794,14 @@ export function CloudSettings({
             </>
           ) : null}
         </>
+      )}
+
+      {deleteRequest && (
+        <CloudVaultDeleteDialog
+          vaultName={deleteRequest.vault_name}
+          onConfirm={() => void confirmDeleteVault(deleteRequest)}
+          onCancel={() => setDeleteRequest(null)}
+        />
       )}
     </div>
   );
@@ -1056,6 +1170,7 @@ function CloudVaultPanel({
   settingsConflict,
   summary,
   syncIncluded,
+  vaultError,
   onCreateAndLink,
   onLink,
   onNewVaultNameChange,
@@ -1064,6 +1179,7 @@ function CloudVaultPanel({
   onSync,
   onUnlink,
   onDelete,
+  onDismissRemoval,
   onUseAnotherAccount,
   onSummaryChange,
 }: {
@@ -1078,6 +1194,7 @@ function CloudVaultPanel({
   settingsConflict: CloudSyncSettingsConflict | null;
   summary: CloudSyncRunSummary | null;
   syncIncluded: boolean;
+  vaultError: string | null;
   onCreateAndLink: () => void;
   onLink: () => void;
   onNewVaultNameChange: (value: string) => void;
@@ -1086,12 +1203,14 @@ function CloudVaultPanel({
   onSync: () => void;
   onUnlink: () => void;
   onDelete: () => void;
+  onDismissRemoval: () => void;
   onUseAnotherAccount: () => void;
   onSummaryChange: (summary: CloudSyncRunSummary) => void;
 }): JSX.Element {
   const lastSummary = useCloudSyncStatusStore((s) => s.lastSummary);
   const syncPhase = useCloudSyncStatusStore((s) => s.phase);
   const syncError = useCloudSyncStatusStore((s) => s.error);
+  const removedVault = useCloudSyncStatusStore((s) => s.removedVault);
   const syncing = syncPhase === "syncing" || action === "sync";
   const syncFailed = syncPhase === "error";
   const currentResult = !syncing && !syncFailed;
@@ -1127,6 +1246,15 @@ function CloudVaultPanel({
           a destination.
         </p>
       </div>
+
+      {vaultError && <CloudSectionError message={vaultError} />}
+      {!link && removedVault && (
+        <CloudVaultRemovedNotice
+          removal={removedVault}
+          vaultsToChoose={cloudVaults.length > 0}
+          onDismiss={onDismissRemoval}
+        />
+      )}
 
       <div className="overflow-hidden rounded-3xl border border-paper-300/60 bg-paper-50/45">
         {link && linkMismatch ? (
@@ -1893,15 +2021,12 @@ function formatCloudVaultDate(value: string): string {
   return date.toLocaleDateString();
 }
 
+// Plans are sold in decimal units (10 GB is 10,000,000,000 bytes), and the
+// sync messages count that way too. Dividing by 1024 showed a 10 GB plan as
+// "9.3 GB", which read as if the allowance had shrunk.
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const unitIndex = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
-  );
-  if (unitIndex === 0) return `${Math.round(bytes)} B`;
-  return `${(bytes / 1024 ** unitIndex).toFixed(1)} ${units[unitIndex]}`;
+  return formatCloudBytes(Math.round(bytes));
 }
 
 function pluralize(value: number, singular: string): string {
@@ -2038,7 +2163,7 @@ function CloudSyncSummary({
         <>
           <div className="font-medium">
             {attention
-              ? "Sync incomplete"
+              ? (cloudSyncAttentionLabel(summary) ?? "Sync incomplete")
               : summary.pulled === 0 && summary.pushed === 0
                 ? "Everything is up to date"
                 : `Downloaded ${summary.pulled} · Uploaded ${summary.pushed}`}
@@ -2167,6 +2292,75 @@ function CloudSyncSummary({
   );
 }
 
+/**
+ * Why this vault stopped syncing when nobody here unlinked it. Review on the
+ * status row opens the Cloud page at its top, and on a phone This vault sits
+ * a long scroll below the account and plan, so the notice brings itself into
+ * view.
+ */
+function CloudVaultRemovedNotice({
+  removal,
+  vaultsToChoose,
+  onDismiss,
+}: {
+  removal: CloudVaultRemoval;
+  vaultsToChoose: boolean;
+  onDismiss: () => void;
+}): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({ block: "nearest" });
+  }, []);
+  return (
+    <div
+      ref={ref}
+      role="status"
+      data-cloud-vault-removed=""
+      className="flex flex-col gap-3 rounded-2xl border border-warning/35 bg-warning/10 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"
+    >
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-ink-900">
+          {cloudVaultRemovalLabel(removal)}
+        </div>
+        <p className="mt-1 break-words text-sm leading-6 text-ink-700">
+          {cloudVaultRemovalMessage(removal)}{" "}
+          {vaultsToChoose
+            ? "Choose a cloud vault or start a new one."
+            : "Create a new cloud vault to sync it again."}
+        </p>
+      </div>
+      <Button variant="ghost" className="self-start" onClick={onDismiss}>
+        Dismiss
+      </Button>
+    </div>
+  );
+}
+
+/** A failed action from This vault, said in This vault and brought into view:
+ *  the button that failed can sit a screen below the section's top. */
+function CloudSectionError({ message }: { message: string }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({ block: "nearest" });
+  }, [message]);
+  return (
+    <div
+      ref={ref}
+      role="alert"
+      data-cloud-vault-error=""
+      className="rounded-xl border border-danger/35 bg-danger/10 px-4 py-3 text-sm leading-6 text-danger"
+    >
+      {message}
+    </div>
+  );
+}
+
+/** The vault chosen from the list was gone by the time it was opened. */
+function vaultGoneFromListMessage(vaultName: string | null): string {
+  const vault = vaultName ? `“${vaultName}”` : "That cloud vault";
+  return `${vault} is no longer in your ZenNotes Cloud account. It may have been deleted on another device. The list below is up to date.`;
+}
+
 function CloudNotice({ children }: { children: React.ReactNode }): JSX.Element {
   return (
     <div className="rounded-2xl border border-paper-300/60 bg-paper-50/45 px-5 py-4 text-sm leading-6 text-ink-500">
@@ -2192,12 +2386,26 @@ function CloudLoadingState({
   );
 }
 
+/** Long enough for a phone to finish saving the new credential. */
+const CANCELLED_LOAD_RETRY_MS = 300;
+const CANCELLED_LOAD_RETRIES = 3;
+
+function isCancelledRequest(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { name?: unknown }).name === "AbortError"
+  );
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   if (!(error instanceof Error) || !error.message.trim()) return fallback;
 
+  // Electron hands the renderer "<ClassName>: <message>" for a main-process
+  // rejection; the class name ("CloudServiceRequestError") is not for people.
   const message = error.message
     .replace(/^Error invoking remote method '[^']+':\s*/i, "")
-    .replace(/^Error:\s*/i, "")
+    .replace(/^(?:[A-Z][A-Za-z]*)?Error:\s*/, "")
     .trim();
 
   return message || fallback;

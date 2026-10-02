@@ -5,7 +5,10 @@ import { backlinksForNote } from "../lib/wikilinks";
 import { countWords } from "../lib/word-count";
 import { setHoveredLink, useHoveredLinkStore } from "../lib/hovered-link";
 import {
+  cloudSyncAttentionLabel,
   cloudSyncAttentionIsSettingsOnly,
+  cloudVaultRemovalLabel,
+  cloudVaultRemovalMessage,
   connectCloudAccountFromStatusBar,
   formatRelativeSyncTime,
   openCloudConflictReview,
@@ -117,6 +120,7 @@ function CloudSyncStatus({
   const settingsQuestionWaiting = useCloudSyncStatusStore(
     (state) => state.settingsConflict !== null,
   );
+  const removedVault = useCloudSyncStatusStore((state) => state.removedVault);
   const setSettingsOpen = useStore((state) => state.setSettingsOpen);
   const [now, setNow] = useState(() => Date.now());
   const resolvableConflictCount = resolvableCloudConflictCount(lastSummary);
@@ -130,8 +134,17 @@ function CloudSyncStatus({
 
   if (phase === "hidden") return null;
 
-  const label =
-    phase === "disconnected"
+  // A device whose Cloud vault went away is unlinked without having chosen
+  // to be, so it reads as needing the person, in the attention tone and
+  // phase. The phone shells hide this row except while Cloud needs the
+  // person, and in the plain unlinked phase a phone said nothing at all
+  // while its sync had stopped.
+  const removal = phase === "unlinked" ? removedVault : null;
+  const shownPhase = removal ? "attention" : phase;
+
+  const label = removal
+    ? cloudVaultRemovalLabel(removal)
+    : phase === "disconnected"
       ? error
         ? "Cloud unavailable"
         : "ZenNotes Cloud"
@@ -146,14 +159,15 @@ function CloudSyncStatus({
                 ? `${resolvableConflictCount} ${resolvableConflictCount === 1 ? "file needs" : "files need"} review`
                 : settingsOnly
                   ? "Settings need review"
-                  : "Sync incomplete"
+                  : (cloudSyncAttentionLabel(lastSummary) ?? "Sync incomplete")
               : phase === "error"
                 ? "Sync failed"
                 : lastSyncedAt === null
                   ? "Cloud ready"
                   : `Synced ${formatRelativeSyncTime(lastSyncedAt, now)}`;
-  const title =
-    phase === "disconnected"
+  const title = removal
+    ? cloudVaultRemovalMessage(removal)
+    : phase === "disconnected"
       ? (error ?? "Connect this vault to ZenNotes Cloud.")
       : phase === "connecting"
         ? "Finish signing in in your browser."
@@ -167,13 +181,13 @@ function CloudSyncStatus({
                 ? `Syncing ${vaultName ?? "this vault"}`
                 : `${vaultName ?? "Cloud vault"} is connected. Click to sync now.`;
   const statusTone =
-    phase === "error"
+    shownPhase === "error"
       ? "text-danger"
-      : phase === "attention"
+      : shownPhase === "attention"
         ? "text-warning"
-        : phase === "ready" || phase === "unlinked"
+        : shownPhase === "ready" || shownPhase === "unlinked"
           ? "text-success"
-          : phase === "disconnected"
+          : shownPhase === "disconnected"
             ? "text-ink-500"
             : "text-accent";
   // Files waiting on a decision outrank every other action: the queue stays
@@ -185,7 +199,9 @@ function CloudSyncStatus({
         ? "Retry"
         : "Connect"
       : phase === "unlinked"
-        ? "Set up"
+        ? removal
+          ? "Review"
+          : "Set up"
         : hasResolvableConflict
           ? "Review now"
           : phase === "attention"
@@ -245,7 +261,7 @@ function CloudSyncStatus({
           while a waiting decision stays until it is made. */}
       <span
         data-cloud-sync-status
-        data-cloud-sync-phase={phase}
+        data-cloud-sync-phase={shownPhase}
         data-cloud-sync-review={
           hasResolvableConflict || settingsQuestionWaiting ? "" : undefined
         }
@@ -253,7 +269,7 @@ function CloudSyncStatus({
         title={title}
         className={`inline-flex items-center gap-1.5 font-medium ${statusTone}`}
       >
-        <CloudStatusIcon phase={phase} />
+        <CloudStatusIcon phase={shownPhase} />
         <span className="tabular-nums">{label}</span>
       </span>
       {showAction && (

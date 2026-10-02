@@ -41,6 +41,7 @@ import { isCalendarToggleAvailable, noteFolderSubpath } from './vault-layout'
 import { runWorkflowById } from './workflow-trigger'
 import { requestPublishNote } from './publish-note-requests'
 import {
+  hasCloudVaultRemovalNotice,
   hasPendingCloudReview,
   openPendingCloudReview
 } from './cloud-auto-sync'
@@ -1868,12 +1869,26 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       title: 'Review Cloud Sync Conflicts',
       category: 'Vault',
       keywords: 'cloud sync conflict merge review resolve queue two devices differ settings',
-      shortcut: leaderShortcut('vim.leaderCloudConflicts'),
+      shortcut: getState().vimMode ? leaderShortcut('vim.leaderCloudConflicts') : undefined,
       // Hidden while nothing waits: the same dialogs the status bar's Review
       // opens (the file queue first, then the vault settings question), and
       // there is nothing to review without one of them.
       when: () => hasPendingCloudReview(),
       run: () => openPendingCloudReview(getState().activeNote?.path)
+    },
+    {
+      id: 'app.cloud.reviewVaultRemoval',
+      title: 'Review Cloud Vault',
+      category: 'Vault',
+      keywords: 'cloud sync vault deleted unavailable gone stopped syncing link choose new',
+      shortcut: getState().vimMode ? leaderShortcut('vim.leaderCloudConflicts') : undefined,
+      // While this vault's Cloud vault is gone the key opens Settings → Cloud,
+      // as the status bar's Review does. A waiting decision keeps the key.
+      when: () => !hasPendingCloudReview() && hasCloudVaultRemovalNotice(),
+      run: () => {
+        requestSettingsTarget('cloud')
+        getState().setSettingsOpen(true)
+      }
     },
     {
       id: 'app.vault.switch',

@@ -19,6 +19,7 @@ import {
   cloudSyncPathKey,
   shouldSyncVaultPath,
 } from "@zennotes/shared-domain/cloud-sync";
+import { CLOUD_VAULT_REMOVED_MESSAGE } from "@zennotes/shared-domain/cloud-vault-availability";
 import { vaultSettingsValueEqual } from "@zennotes/shared-domain/vault-settings-conflict";
 import { useToastStore } from "./toast";
 
@@ -64,6 +65,20 @@ export type CloudSyncPhase =
   | "attention"
   | "error";
 
+/**
+ * Why a Cloud vault stopped being this device's to sync. Cloud answers "not
+ * found" for a vault that no longer exists; "unavailable" is a refusal that
+ * names the account instead.
+ */
+export type CloudVaultRemovalReason = "deleted" | "unavailable";
+
+export interface CloudVaultRemoval {
+  /** The name the link carried, read before the link went away. Null only
+   *  when this window never read the link before losing it. */
+  vaultName: string | null;
+  reason: CloudVaultRemovalReason;
+}
+
 interface CloudSyncStatusStore {
   phase: CloudSyncPhase;
   vaultName: string | null;
@@ -93,6 +108,12 @@ interface CloudSyncStatusStore {
    *  as conflictReviewOpen: the status bar, the palette, the leader binding
    *  and the sync runtime itself all open the one prompt. */
   settingsConflictPromptOpen: boolean;
+  /** The Cloud vault this device was linked to went away and took the link
+   *  with it, whether it was deleted here, on another device, or on the
+   *  website. On its own the unlinked phase reads like a device nobody set
+   *  up, so this stays until the person links or creates a vault, or
+   *  dismisses it. */
+  removedVault: CloudVaultRemoval | null;
 }
 
 const emptyCloudSyncStatus: CloudSyncStatusStore = {
@@ -107,6 +128,7 @@ const emptyCloudSyncStatus: CloudSyncStatusStore = {
   resolutionSaved: false,
   settingsConflict: null,
   settingsConflictPromptOpen: false,
+  removedVault: null,
 };
 
 const SETTINGS_ATTENTION_MESSAGE =
@@ -132,6 +154,13 @@ type CloudAutoSyncTimings = Pick<
 >;
 
 let installedRuntime: CloudAutoSyncRuntime | null = null;
+/**
+ * Where the removed-vault notice outlives a reload: one key per local vault,
+ * because the notice is about that vault's link and another vault opened in
+ * this window never had it. Null while no runtime runs for a vault, and then
+ * the notice lasts the session.
+ */
+let removedVaultStorageKey: string | null = null;
 const conflictDraftFlushers = new Set<() => Promise<void>>();
 /**
  * Pending conflict ids this window has already told the user about. Module
@@ -150,15 +179,22 @@ export function registerCloudConflictDraftFlusher(
   };
 }
 
+/**
+ * `vaultKey` names the local vault this runtime syncs (its root), so a notice
+ * that its Cloud vault went away survives a reload. Without one the notice
+ * lasts the session.
+ */
 export function startCloudAutoSync(
   bridge: CloudAutoSyncBridge,
   environment: CloudAutoSyncEnvironment = browserCloudAutoSyncEnvironment(),
   timings: CloudAutoSyncTimings = {},
+  vaultKey?: string,
 ): CloudAutoSyncRuntime {
   if (bridge.getCapabilities().supportsCloudSync !== true) {
     clearCloudSyncStatus();
     return { request: () => {}, stop: () => {} };
   }
+  restoreRemovedCloudVault(vaultKey);
 
   const reportError = timings.onError ?? logAutomaticSyncError;
   const controller = new CloudAutoSyncController({
@@ -174,6 +210,9 @@ export function startCloudAutoSync(
       }
 
       const link = await bridge.getCloudVaultLink();
+      // Any link at all, even one for another account, is newer than the
+      // one that went away.
+      if (link !== null) clearRemovedCloudVault();
       if (link === null || link.base_url !== status.account.base_url) {
         markCloudSyncUnlinked();
         return false;
@@ -259,12 +298,13 @@ export function startCloudAutoSync(
       unsubscribeAccount();
       unsubscribeOnline();
       unsubscribeForeground();
+      removedVaultStorageKey = null;
     },
   };
 }
 
-export function ensureCloudAutoSyncStarted(): void {
-  installedRuntime ??= startCloudAutoSync(getZenBridge());
+export function ensureCloudAutoSyncStarted(vaultKey?: string): void {
+  installedRuntime ??= startCloudAutoSync(getZenBridge(), undefined, {}, vaultKey);
 }
 
 export function requestCloudAutoSync(reason: CloudAutoSyncReason): void {
@@ -470,8 +510,149 @@ async function refreshRemovedCloudLink(
   } catch {
     return false;
   }
+  const vaultName = useCloudSyncStatusStore.getState().vaultName;
   markCloudSyncUnlinked(syncFailureMessage(error));
+  // The hosts drop a link after a failed request only once Cloud has answered
+  // "not found" for its vault, so a link found gone after a failure means a
+  // deleted vault unless the error names the account instead.
+  recordRemovedCloudVault({
+    vaultName,
+    reason: cloudVaultGoneReason(error) ?? "deleted",
+  });
   return true;
+}
+
+/**
+ * What a refusal says about the vault it concerned: gone ("deleted"), refused
+ * to this account ("unavailable"), or nothing at all (null). Desktop errors
+ * cross IPC as text alone, so the hosts' own sentences count beside the
+ * status and code an in-process host keeps on the error.
+ */
+export function cloudVaultGoneReason(
+  error: unknown,
+): CloudVaultRemovalReason | null {
+  const response =
+    typeof error === "object" && error !== null
+      ? (error as { status?: unknown; code?: unknown })
+      : {};
+  const message = humanIpcError(
+    error instanceof Error ? error : new Error(String(error)),
+    "",
+  );
+  if (
+    (response.status === 403 && response.code === "FORBIDDEN") ||
+    /not available to this account/i.test(message)
+  ) {
+    return "unavailable";
+  }
+  if (
+    (response.status === 404 && response.code === "NOT_FOUND") ||
+    message.startsWith(REMOVED_VAULT_SENTENCE)
+  ) {
+    return "deleted";
+  }
+  return null;
+}
+
+/** "This Cloud vault is no longer available.": the first sentence of the
+ *  hosts' message for a link they dropped. The advice after it is free to
+ *  change. */
+const REMOVED_VAULT_SENTENCE = CLOUD_VAULT_REMOVED_MESSAGE.slice(
+  0,
+  CLOUD_VAULT_REMOVED_MESSAGE.indexOf(".") + 1,
+);
+
+/**
+ * This device deleted the Cloud vault it was linked to. The host has already
+ * dropped the link, so the status says so now rather than at the next run,
+ * and goes on saying why sync stopped.
+ */
+export function markCloudVaultDeleted(vaultName: string): void {
+  markCloudSyncUnlinked();
+  recordRemovedCloudVault({ vaultName, reason: "deleted" });
+}
+
+/** The person linked a vault, started a new one, or dismissed the notice. */
+export function clearRemovedCloudVault(): void {
+  if (useCloudSyncStatusStore.getState().removedVault === null) return;
+  useCloudSyncStatusStore.setState({ removedVault: null });
+  persistRemovedCloudVault(null);
+}
+
+/** True while the status row and Settings say this vault's Cloud vault went
+ *  away. Signed out, the row asks to connect first and says nothing of it. */
+export function hasCloudVaultRemovalNotice(
+  state: Pick<CloudSyncStatusStore, "phase" | "removedVault"> =
+    useCloudSyncStatusStore.getState(),
+): boolean {
+  return state.phase === "unlinked" && state.removedVault !== null;
+}
+
+/** The status row's words for it, and the heading of the Settings notice. */
+export function cloudVaultRemovalLabel(removal: CloudVaultRemoval): string {
+  return removal.reason === "deleted"
+    ? "Cloud vault deleted"
+    : "Cloud vault unavailable";
+}
+
+/**
+ * What happened, for the status row's hover and the Settings notice alike,
+ * so one event is never told two ways.
+ */
+export function cloudVaultRemovalMessage(removal: CloudVaultRemoval): string {
+  const vault = removal.vaultName
+    ? `“${removal.vaultName}”`
+    : "The cloud vault this vault synced with";
+  const happened =
+    removal.reason === "deleted"
+      ? `${vault} was deleted from ZenNotes Cloud`
+      : `${vault} is no longer available to this ZenNotes Cloud account`;
+  return `${happened}, so this vault stopped syncing. Your notes on this device are untouched.`;
+}
+
+function recordRemovedCloudVault(next: CloudVaultRemoval): void {
+  const current = useCloudSyncStatusStore.getState().removedVault;
+  // Two failing requests can both find the link gone, and the second no
+  // longer knows the name the first one read.
+  const removal = next.vaultName === null && current !== null ? current : next;
+  useCloudSyncStatusStore.setState({ removedVault: removal });
+  persistRemovedCloudVault(removal);
+}
+
+function restoreRemovedCloudVault(vaultKey: string | undefined): void {
+  removedVaultStorageKey = vaultKey ? `zen.cloud.removedVault.${vaultKey}` : null;
+  if (removedVaultStorageKey === null) return;
+  let removal: CloudVaultRemoval | null = null;
+  try {
+    const raw =
+      typeof localStorage === "undefined"
+        ? null
+        : localStorage.getItem(removedVaultStorageKey);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === "object") {
+      const { vaultName, reason } = parsed as Record<string, unknown>;
+      if (
+        (reason === "deleted" || reason === "unavailable") &&
+        (typeof vaultName === "string" || vaultName === null)
+      ) {
+        removal = { vaultName, reason };
+      }
+    }
+  } catch {
+    removal = null;
+  }
+  useCloudSyncStatusStore.setState({ removedVault: removal });
+}
+
+function persistRemovedCloudVault(removal: CloudVaultRemoval | null): void {
+  if (removedVaultStorageKey === null || typeof localStorage === "undefined") return;
+  try {
+    if (removal === null) localStorage.removeItem(removedVaultStorageKey);
+    else localStorage.setItem(removedVaultStorageKey, JSON.stringify(removal));
+  } catch {
+    // Storage can be unavailable (a private window); the notice still lasts
+    // the session.
+  }
 }
 
 /** Retire only the acknowledged decision, not the status of the whole vault. */
@@ -771,16 +952,55 @@ function cloudSyncErrorMessage(error: unknown): string {
   return humanIpcError(error instanceof Error ? error : new Error(String(error)), "Cloud sync failed.");
 }
 
-export function cloudSyncAttentionMessage(
-  summary: CloudSyncRunSummary,
-): string | null {
-  const capacityConflict = summary.conflicts.find((conflict) =>
+function firstCapacityConflict(summary: CloudSyncRunSummary): CloudSyncConflict | undefined {
+  return summary.conflicts.find((conflict) =>
     [
       "QUOTA_EXCEEDED",
       "CAPACITY_EXCEEDED",
       "FILE_SIZE_LIMIT_EXCEEDED",
     ].includes(conflict.code),
   );
+}
+
+/** Each file the run left on this device for being over the per-file limit. */
+export function oversizedFileConflicts(summary: CloudSyncRunSummary): CloudSyncConflict[] {
+  const seen = new Set<string>();
+  return summary.conflicts.filter((conflict) => {
+    const oversized =
+      conflict.code === "FILE_SIZE_LIMIT_EXCEEDED" ||
+      conflict.capacity?.dimension === "sync_max_file_bytes";
+    if (!oversized || seen.has(conflict.item_id)) return false;
+    seen.add(conflict.item_id);
+    return true;
+  });
+}
+
+/**
+ * The few words the status row and the Settings heading give a run that could
+ * not finish because of a Cloud limit. A phone has no hover to show the
+ * sentence behind "Sync incomplete", so the limit names itself. Null when the
+ * run stopped for any other reason.
+ */
+export function cloudSyncAttentionLabel(
+  summary: CloudSyncRunSummary | null,
+): string | null {
+  if (!summary) return null;
+  const capacityConflict = firstCapacityConflict(summary);
+  if (!capacityConflict) return null;
+  const dimension = capacityConflict.capacity?.dimension;
+  if (dimension === "sync_max_file_bytes" || capacityConflict.code === "FILE_SIZE_LIMIT_EXCEEDED") {
+    const count = Math.max(1, oversizedFileConflicts(summary).length);
+    return `${count} ${count === 1 ? "file" : "files"} too large for Cloud`;
+  }
+  if (dimension === "sync_active_bytes") return "Cloud storage full";
+  if (dimension === "sync_active_items") return "Cloud item limit reached";
+  return "Cloud capacity reached";
+}
+
+export function cloudSyncAttentionMessage(
+  summary: CloudSyncRunSummary,
+): string | null {
+  const capacityConflict = firstCapacityConflict(summary);
   if (capacityConflict) {
     const capacity = capacityConflict.capacity;
     if (capacity?.dimension === "sync_active_items") {
@@ -790,7 +1010,14 @@ export function cloudSyncAttentionMessage(
       return `Cloud storage limit reached (${formatCloudBytes(capacity.used + capacity.reserved)} of ${formatCloudBytes(capacity.limit)}). Remove files or increase your Cloud capacity.`;
     }
     if (capacity?.dimension === "sync_max_file_bytes") {
-      return `A file exceeds the ${formatCloudBytes(capacity.limit)} Cloud file-size limit. Reduce or remove the oversized file to finish syncing.`;
+      // Name the file: "a file" sent people hunting through the whole vault.
+      const limit = formatCloudBytes(capacity.limit);
+      const oversized = oversizedFileConflicts(summary);
+      const onlyPath = oversized.length === 1 ? oversized[0].path : null;
+      if (oversized.length > 1) {
+        return `${oversized.length} files are larger than the ${limit} Cloud file-size limit, so they stay on this device. Remove them or make them smaller to finish syncing.`;
+      }
+      return `${onlyPath ? `“${fileName(onlyPath)}”` : "A file"} is larger than the ${limit} Cloud file-size limit, so it stays on this device. Remove it or make it smaller to finish syncing.`;
     }
     return "Cloud capacity reached. Remove files or increase your Cloud capacity.";
   }
@@ -936,7 +1163,7 @@ export function cloudSyncAttentionItems(
   return items;
 }
 
-function formatCloudBytes(bytes: number): string {
+export function formatCloudBytes(bytes: number): string {
   if (bytes < 1_000) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let value = bytes / 1_000;

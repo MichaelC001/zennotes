@@ -91,7 +91,7 @@ const serviceAccount: CloudServiceAccount = {
   features: {
     sync: {
       active: true,
-      limits: { max_storage_bytes: 1_073_741_824 },
+      limits: { max_storage_bytes: 1_000_000_000 },
     },
     backup: {
       active: false,
@@ -220,7 +220,7 @@ describe("CloudSettings", () => {
     expect(host.textContent).toContain("BackupNot included");
     expect(host.textContent).toContain("PublishIncluded");
     expect(host.textContent).toContain("Cloud storage");
-    expect(host.textContent).toContain("1.5 MB of 1.0 GB");
+    expect(host.textContent).toContain("1.6 MB of 1.0 GB");
     expect(host.textContent).toContain("38 synced files across 2 vaults");
     expect(host.textContent).toContain(
       "30 Markdown · 5 binary · 2 other · 1 ZenNotes metadata",
@@ -326,7 +326,8 @@ describe("CloudSettings", () => {
     const sync = [...host.querySelectorAll("button")].find(b => b.textContent?.trim() === "Sync now");
     await act(async () => sync!.click());
     expect(host.textContent).toContain("10 MB Cloud file-size limit");
-    expect(host.textContent).toContain("Reduce or remove the oversized file");
+    expect(host.textContent).toContain("Remove it or make it smaller to finish syncing");
+    expect(host.textContent).toContain("1 file too large for Cloud");
     expect(host.textContent).not.toContain("will retry automatically");
   });
 
@@ -488,16 +489,274 @@ describe("CloudSettings", () => {
     expect(remove).toBeTruthy();
     await act(async () => remove!.click());
 
-    expect(mocks.confirmApp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        danger: true,
-        confirmLabel: "Delete Cloud vault",
-        title: "Delete Cloud Notes from ZenNotes Cloud?",
-      }),
+    // Deleting reaches every device, so it has its own dialog that names the
+    // vault and waits for that name, never the shared yes/no confirmation.
+    expect(mocks.confirmApp).not.toHaveBeenCalled();
+    const dialog = deleteDialog();
+    expect(dialog?.querySelector('[role="dialog"]')?.textContent).toContain(
+      "Delete “Cloud Notes” for every device?",
     );
+    expect(dialog?.textContent).toContain(
+      "Every device linked to this Cloud vault stops syncing.",
+    );
+    expect(dialog?.textContent).toContain(
+      "Its Cloud copy, backups, and exports are permanently deleted",
+    );
+    expect(dialog?.textContent).toContain(
+      "Notes already on your devices stay where they are.",
+    );
+    expect(dialog?.textContent).toContain("use Unlink this device instead");
+    await act(async () => typeInto(deleteNameInput()!, "Cloud Notes"));
+    await act(async () => deleteConfirmButton()!.click());
+
+    expect(deleteDialog()).toBeNull();
     expect(mocks.deleteCloudVault).toHaveBeenCalledOnce();
     expect(mocks.unlinkCloudVault).not.toHaveBeenCalled();
     expect(host.textContent).not.toContain("Linked to Cloud Notes");
+  });
+
+  describe("deleting a Cloud vault", () => {
+    const linked = {
+      base_url: "https://zennotes.org",
+      vault_id: "vault-1",
+      vault_name: "Cloud Notes",
+      linked_at: "2026-08-10T12:00:00.000Z",
+    };
+    const otherVault = {
+      id: "vault-2",
+      name: "Other preserved vault",
+      cursor: 3,
+      created_at: "2026-08-10T12:00:00.000Z",
+      updated_at: "2026-08-10T12:30:00.000Z",
+    };
+
+    beforeEach(async () => {
+      mocks.getCloudAccountStatus.mockResolvedValue(connected);
+      mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
+      mocks.getCloudVaultLink.mockResolvedValue(linked);
+      mocks.listCloudVaults.mockResolvedValue([
+        { ...otherVault, id: "vault-1", name: "Cloud Notes" },
+        otherVault,
+      ]);
+      // What the service holds once the vault is gone. The host answers the
+      // link question a moment later, after the panel has already redrawn
+      // without the link, as it does in the app.
+      mocks.deleteCloudVault.mockImplementation(async () => {
+        mocks.getCloudVaultLink.mockImplementation(
+          () => new Promise((resolve) => setTimeout(() => resolve(null), 0)),
+        );
+        mocks.listCloudVaults.mockResolvedValue([otherVault]);
+      });
+      await act(async () =>
+        root.render(
+          createElement(CloudSettings, {
+            localVaultAvailable: true,
+            localVaultName: "Notes",
+          }),
+        ),
+      );
+      await act(async () => buttonNamed("Delete Cloud vault")!.click());
+    });
+
+    it("keeps Delete disabled until the vault name is typed, and Escape cancels", async () => {
+      const confirm = deleteConfirmButton()!;
+      expect(confirm.disabled).toBe(true);
+      // The field is where the keyboard lands, so the name can be typed at once.
+      expect(document.activeElement).toBe(deleteNameInput());
+
+      await act(async () => typeInto(deleteNameInput()!, "Cloud"));
+      expect(confirm.disabled).toBe(true);
+      await act(async () => typeInto(deleteNameInput()!, "cloud notes"));
+      expect(confirm.disabled).toBe(true);
+      // Enter does nothing until the name matches.
+      await act(async () => pressKey(deleteNameInput()!, "Enter"));
+      expect(mocks.deleteCloudVault).not.toHaveBeenCalled();
+      await act(async () => typeInto(deleteNameInput()!, "Cloud Notes"));
+      expect(confirm.disabled).toBe(false);
+
+      await act(async () => pressKey(deleteNameInput()!, "Escape"));
+      expect(deleteDialog()).toBeNull();
+      expect(mocks.deleteCloudVault).not.toHaveBeenCalled();
+      expect(host.textContent).toContain("Linked to Cloud Notes");
+
+      // A fresh dialog starts empty, and Enter in the field deletes once the
+      // name matches.
+      await act(async () => buttonNamed("Delete Cloud vault")!.click());
+      expect(deleteNameInput()!.value).toBe("");
+      expect(deleteConfirmButton()!.disabled).toBe(true);
+      await act(async () => typeInto(deleteNameInput()!, "Cloud Notes"));
+      await act(async () => pressKey(deleteNameInput()!, "Enter"));
+      expect(mocks.deleteCloudVault).toHaveBeenCalledOnce();
+    });
+
+    it("says in This vault and on the status that the vault was deleted, and reads the vault list again", async () => {
+      expect(mocks.listCloudVaults).toHaveBeenCalledTimes(1);
+      await act(async () => typeInto(deleteNameInput()!, "Cloud Notes"));
+      await act(async () => deleteConfirmButton()!.click());
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+
+      expect(useCloudSyncStatusStore.getState()).toMatchObject({
+        phase: "unlinked",
+        removedVault: { vaultName: "Cloud Notes", reason: "deleted" },
+      });
+      const notice = host.querySelector<HTMLElement>("[data-cloud-vault-removed]");
+      expect(notice?.closest('[data-settings-search-id="cloud-vault"]')).not.toBeNull();
+      expect(notice?.textContent).toContain("Cloud vault deleted");
+      expect(notice?.textContent).toContain(
+        "“Cloud Notes” was deleted from ZenNotes Cloud, so this vault stopped syncing. Your notes on this device are untouched. Choose a cloud vault or start a new one.",
+      );
+      // The list comes from the service again, not from editing the old one.
+      expect(mocks.listCloudVaults).toHaveBeenCalledTimes(2);
+      const offered = host.textContent!.replace(notice!.textContent!, "");
+      expect(offered).not.toContain("Cloud Notes");
+      expect(offered).toContain("Other preserved vault");
+      expect(buttonNamed("Open on this device")?.disabled).toBe(false);
+    });
+  });
+
+  describe("a vault deleted on another device", () => {
+    const ghost = {
+      id: "vault-ghost",
+      name: "Cloud QA Mac",
+      cursor: 3,
+      created_at: "2026-08-10T12:00:00.000Z",
+      updated_at: "2026-08-10T12:30:00.000Z",
+    };
+
+    beforeEach(() => {
+      mocks.getCloudAccountStatus.mockResolvedValue(connected);
+      mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
+      mocks.getCloudVaultLink.mockResolvedValue(null);
+    });
+
+    it("reads the list again when opening it fails, and says so inside This vault", async () => {
+      mocks.listCloudVaults.mockResolvedValueOnce([ghost]).mockResolvedValue([]);
+      mocks.linkCloudVault.mockRejectedValue(
+        new Error(
+          "Error invoking remote method 'cloud-vault:link': Error: That ZenNotes Cloud vault is not available to this account.",
+        ),
+      );
+      await act(async () =>
+        root.render(
+          createElement(CloudSettings, {
+            localVaultAvailable: true,
+            localVaultName: "Notes",
+          }),
+        ),
+      );
+      expect(host.textContent).toContain("Cloud QA Mac");
+
+      await act(async () => buttonNamed("Open on this device")!.click());
+
+      expect(mocks.linkCloudVault).toHaveBeenCalledWith("vault-ghost");
+      expect(mocks.listCloudVaults).toHaveBeenCalledTimes(2);
+      const alerts = [...host.querySelectorAll<HTMLElement>('[role="alert"]')];
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0].closest('[data-settings-search-id="cloud-vault"]')).not.toBeNull();
+      expect(alerts[0].textContent).toBe(
+        "“Cloud QA Mac” is no longer in your ZenNotes Cloud account. It may have been deleted on another device. The list below is up to date.",
+      );
+      expect(host.textContent).not.toContain("Continue with your cloud vault");
+      expect(host.textContent).toContain("Create a new cloud vault");
+    });
+
+    it("shows any other failure from This vault there too, as the host worded it", async () => {
+      mocks.listCloudVaults.mockResolvedValue([ghost]);
+      mocks.linkCloudVault.mockRejectedValue(
+        new Error("Error invoking remote method 'cloud-vault:link': Error: Connection timed out."),
+      );
+      await act(async () =>
+        root.render(
+          createElement(CloudSettings, {
+            localVaultAvailable: true,
+            localVaultName: "Notes",
+          }),
+        ),
+      );
+
+      await act(async () => buttonNamed("Open on this device")!.click());
+
+      const alert = host.querySelector<HTMLElement>('[role="alert"]');
+      expect(alert?.closest('[data-settings-search-id="cloud-vault"]')).not.toBeNull();
+      expect(alert?.textContent).toBe("Connection timed out.");
+      // Nothing says the vault is gone, so the list is left as it was.
+      expect(mocks.listCloudVaults).toHaveBeenCalledTimes(1);
+      expect(host.textContent).toContain("Continue with your cloud vault");
+    });
+
+    it.each(["Open on this device", "Create and link"] as const)(
+      "keeps the notice until %s links this vault again",
+      async (choice) => {
+        useCloudSyncStatusStore.setState({
+          phase: "unlinked",
+          removedVault: { vaultName: "Cloud QA iPhone", reason: "deleted" },
+        });
+        mocks.listCloudVaults.mockResolvedValue([
+          { ...ghost, id: "vault-2", name: "Notes" },
+        ]);
+        mocks.linkCloudVault.mockResolvedValue({
+          base_url: connected.account!.base_url,
+          vault_id: "vault-2",
+          vault_name: "Notes",
+          linked_at: "2026-08-11T12:00:00.000Z",
+        });
+        mocks.createAndLinkCloudVault.mockResolvedValue({
+          base_url: connected.account!.base_url,
+          vault_id: "vault-3",
+          vault_name: "Notes",
+          linked_at: "2026-08-11T12:00:00.000Z",
+        });
+        await act(async () =>
+          root.render(
+            createElement(CloudSettings, {
+              localVaultAvailable: true,
+              localVaultName: "Notes",
+            }),
+          ),
+        );
+        expect(
+          host.querySelector("[data-cloud-vault-removed]")?.textContent,
+        ).toContain(
+          "“Cloud QA iPhone” was deleted from ZenNotes Cloud, so this vault stopped syncing.",
+        );
+
+        await act(async () => buttonNamed(choice)!.click());
+
+        expect(host.textContent).toContain("Linked to Notes");
+        expect(host.querySelector("[data-cloud-vault-removed]")).toBeNull();
+        expect(useCloudSyncStatusStore.getState().removedVault).toBeNull();
+        // The list is read again after linking rather than edited here.
+        expect(mocks.listCloudVaults).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    it("lets the notice be dismissed", async () => {
+      useCloudSyncStatusStore.setState({
+        phase: "unlinked",
+        removedVault: { vaultName: "Cloud QA iPhone", reason: "deleted" },
+      });
+      mocks.listCloudVaults.mockResolvedValue([]);
+      await act(async () =>
+        root.render(
+          createElement(CloudSettings, {
+            localVaultAvailable: true,
+            localVaultName: "Notes",
+          }),
+        ),
+      );
+      const notice = host.querySelector("[data-cloud-vault-removed]");
+      // With nothing left to choose, the notice points at the one way on.
+      expect(notice?.textContent).toContain(
+        "Create a new cloud vault to sync it again.",
+      );
+
+      await act(async () => buttonNamed("Dismiss")!.click());
+
+      expect(host.querySelector("[data-cloud-vault-removed]")).toBeNull();
+      expect(useCloudSyncStatusStore.getState().removedVault).toBeNull();
+    });
   });
 
   it("presents capacity rejections as queued uploads instead of reviewable conflicts", async () => {
@@ -547,7 +806,7 @@ describe("CloudSettings", () => {
     );
     await act(async () => sync!.click());
 
-    expect(host.textContent).toContain("Sync incomplete");
+    expect(host.textContent).toContain("Cloud item limit reached");
     expect(host.textContent).toContain(
       "Cloud active-item limit reached (100 of 100)",
     );
@@ -1004,6 +1263,8 @@ describe("CloudSettings", () => {
         // Host confirmation retires only the remote association. Settings
         // must discover that result even while this panel stays mounted.
         mocks.getCloudVaultLink.mockResolvedValue(null);
+        // The service no longer lists the vault it deleted.
+        mocks.listCloudVaults.mockResolvedValue([{ id: "vault-2", name: "Other preserved vault" }]);
         throw new Error("Error invoking remote method 'cloud-vault:sync': Error: This Cloud vault no longer exists. Your local notes are safe.");
       });
       await act(async () => root.render(createElement(CloudSettings, {
@@ -1024,9 +1285,19 @@ describe("CloudSettings", () => {
       }
 
       expect(host.textContent).not.toContain("Linked to Cloud Notes");
-      expect(host.textContent).not.toContain("Cloud Notes");
       expect(host.textContent).not.toContain("Error invoking remote method");
-      expect(host.textContent).toContain("This Cloud vault no longer exists. Your local notes are safe.");
+      // This vault says which vault went and why sync stopped, where the
+      // person can act on it, instead of a banner at the top of the page.
+      const notice = host.querySelector<HTMLElement>("[data-cloud-vault-removed]");
+      expect(notice?.closest('[data-settings-search-id="cloud-vault"]')).not.toBeNull();
+      expect(notice?.textContent).toContain(
+        "“Cloud Notes” was deleted from ZenNotes Cloud, so this vault stopped syncing.",
+      );
+      expect(host.querySelector('[role="alert"]')).toBeNull();
+      // Nothing else on the page still offers the deleted vault.
+      const offered = host.textContent!.replace(notice!.textContent!, "");
+      expect(offered).not.toContain("Cloud Notes");
+      expect(offered).toContain("Other preserved vault");
       const actions = [...host.querySelectorAll("button")].map((button) => button.textContent?.trim());
       expect(actions).not.toContain("Sync now");
       expect(actions).not.toContain("Unlink this device");
@@ -1206,6 +1477,58 @@ describe("CloudSettings", () => {
     expect(host.textContent).not.toContain("Error invoking remote method");
   });
 
+  it("states a 10 GB plan as 10 GB, counting in thousands as the plans do", async () => {
+    mocks.getCloudAccountStatus.mockResolvedValue(connected);
+    mocks.getCloudServiceAccount.mockResolvedValue({
+      ...serviceAccount,
+      features: {
+        ...serviceAccount.features,
+        sync: { active: true, limits: { max_storage_bytes: 10_000_000_000 } },
+      },
+      usage: {
+        ...serviceAccount.usage!,
+        storage: { ...serviceAccount.usage!.storage, sync_bytes: 4_800_000 },
+      },
+    });
+    mocks.listCloudVaults.mockResolvedValue([]);
+    mocks.getCloudVaultLink.mockResolvedValue(null);
+
+    await act(async () =>
+      root.render(
+        createElement(CloudSettings, {
+          localVaultAvailable: true,
+          localVaultName: "Notes",
+        }),
+      ),
+    );
+
+    expect(host.textContent).toContain("4.8 MB of 10 GB");
+    expect(host.textContent).not.toContain("9.3 GB");
+  });
+
+  it("drops the error class name a main-process rejection carries", async () => {
+    mocks.getCloudAccountStatus.mockResolvedValue(connected);
+    mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
+    mocks.listCloudVaults.mockRejectedValue(
+      new Error(
+        "Error invoking remote method 'cloud-vaults:list': CloudServiceRequestError: This backup would exceed your plan limits.",
+      ),
+    );
+    mocks.getCloudVaultLink.mockResolvedValue(null);
+
+    await act(async () =>
+      root.render(
+        createElement(CloudSettings, {
+          localVaultAvailable: true,
+          localVaultName: "Notes",
+        }),
+      ),
+    );
+
+    expect(host.textContent).toContain("This backup would exceed your plan limits.");
+    expect(host.textContent).not.toContain("CloudServiceRequestError");
+  });
+
   it("refreshes and clears a connection error when the network comes back", async () => {
     mocks.getCloudAccountStatus.mockResolvedValue(connected);
     mocks.getCloudServiceAccount
@@ -1226,6 +1549,65 @@ describe("CloudSettings", () => {
     expect(host.textContent).toContain("fetch failed");
 
     await act(async () => window.dispatchEvent(new Event("online")));
+
+    expect(host.textContent).not.toContain("fetch failed");
+    expect(host.textContent).toContain("SyncIncluded");
+  });
+
+  it("loads again after a sign-in cancels the first load instead of reporting the cancellation", async () => {
+    mocks.getCloudAccountStatus.mockResolvedValue(connected);
+    mocks.getCloudServiceAccount
+      .mockRejectedValueOnce(
+        new DOMException("Cloud account changed while loading credentials.", "AbortError"),
+      )
+      .mockResolvedValue(serviceAccount);
+    mocks.listCloudVaults.mockResolvedValue([]);
+    mocks.getCloudVaultLink.mockResolvedValue(null);
+
+    await act(async () =>
+      root.render(
+        createElement(CloudSettings, {
+          localVaultAvailable: true,
+          localVaultName: "Notes",
+        }),
+      ),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+
+    expect(host.textContent).not.toContain("changed while loading credentials");
+    expect(host.textContent).toContain("SyncIncluded");
+    // The cancelled read was retried (Published notes adds its own usage refresh).
+    expect(mocks.getCloudServiceAccount.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps the newest account load when an older one fails late", async () => {
+    let failFirstLoad: (error: unknown) => void = () => {};
+    mocks.getCloudAccountStatus.mockResolvedValue(connected);
+    mocks.getCloudServiceAccount
+      .mockImplementationOnce(
+        () => new Promise((_resolve, reject) => { failFirstLoad = reject; }),
+      )
+      .mockResolvedValue(serviceAccount);
+    mocks.listCloudVaults.mockResolvedValue([]);
+    mocks.getCloudVaultLink.mockResolvedValue(null);
+
+    await act(async () =>
+      root.render(
+        createElement(CloudSettings, {
+          localVaultAvailable: true,
+          localVaultName: "Notes",
+        }),
+      ),
+    );
+    const [accountChanged] = mocks.onCloudAccountChange.mock.calls[0] as unknown as [
+      (status: CloudAccountStatus) => void,
+    ];
+    await act(async () => accountChanged(connected));
+    expect(host.textContent).toContain("SyncIncluded");
+
+    await act(async () => failFirstLoad(new TypeError("fetch failed")));
 
     expect(host.textContent).not.toContain("fetch failed");
     expect(host.textContent).toContain("SyncIncluded");
@@ -1575,3 +1957,30 @@ describe("CloudSettings", () => {
     expect(host.textContent).toContain("Before migration");
   });
 });
+
+function buttonNamed(name: string): HTMLButtonElement | undefined {
+  return [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent?.trim() === name,
+  );
+}
+
+function deleteDialog(): HTMLElement | null {
+  return document.body.querySelector<HTMLElement>("[data-cloud-vault-delete-dialog]");
+}
+
+function deleteNameInput(): HTMLInputElement | null {
+  return deleteDialog()?.querySelector<HTMLInputElement>("input") ?? null;
+}
+
+function deleteConfirmButton(): HTMLButtonElement | null {
+  return document.body.querySelector<HTMLButtonElement>("[data-cloud-vault-delete-confirm]");
+}
+
+function typeInto(input: HTMLInputElement, value: string): void {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function pressKey(target: HTMLElement, key: string): void {
+  target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+}

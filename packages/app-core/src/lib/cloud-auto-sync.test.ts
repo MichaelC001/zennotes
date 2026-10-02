@@ -5,16 +5,24 @@ import type {
   CloudSyncWindowHandlers,
 } from "@zennotes/bridge-contract/cloud-sync";
 import type { VaultChangeEvent } from "@shared/ipc";
+import { CLOUD_VAULT_REMOVED_MESSAGE } from "@zennotes/shared-domain/cloud-vault-availability";
 import {
   acknowledgeCloudConflictResolution,
   clearCloudSyncStatus,
+  clearRemovedCloudVault,
   cloudSyncAttentionIsSettingsOnly,
   cloudSyncAttentionItems,
+  cloudSyncAttentionLabel,
   cloudSyncAttentionMessage,
+  cloudVaultGoneReason,
+  cloudVaultRemovalLabel,
+  cloudVaultRemovalMessage,
   closeCloudConflictReview,
   closeCloudSettingsConflictPrompt,
   connectCloudAccountFromStatusBar,
+  hasCloudVaultRemovalNotice,
   hasPendingCloudReview,
+  markCloudVaultDeleted,
   openCloudConflictReview,
   openPendingCloudReview,
   registerCloudConflictDraftFlusher,
@@ -169,7 +177,42 @@ describe("cloud auto sync host wiring", () => {
         current_revision: null, current_path: null,
         capacity: { dimension: "sync_max_file_bytes", used: 0, reserved: 0,
           limit: 10_000_000, projected: 12_600_000, can_retry_after_reduction: true } }]
-    })).toBe("A file exceeds the 10 MB Cloud file-size limit. Reduce or remove the oversized file to finish syncing.");
+    })).toBe("A file is larger than the 10 MB Cloud file-size limit, so it stays on this device. Remove it or make it smaller to finish syncing.");
+  });
+
+  it("names the oversized file, counts several, and gives each Cloud limit a short label", () => {
+    const tooLarge = (item: string, path: string | null) => ({
+      operation_id: `op-${item}`, item_id: item, code: "FILE_SIZE_LIMIT_EXCEEDED" as const,
+      current_revision: null, current_path: null, path,
+      capacity: { dimension: "sync_max_file_bytes", used: 0, reserved: 0,
+        limit: 10_000_000, projected: 151_250_581, can_retry_after_reduction: true },
+    });
+    const run = (conflicts: CloudSyncRunSummary["conflicts"]): CloudSyncRunSummary => ({
+      cursor: 1, pulled: 0, pushed: 0, bootstrap_conflicts: [], local_conflicts: [], conflicts,
+    });
+
+    const one = run([tooLarge("video", "assets/IMG_2709.mov")]);
+    expect(cloudSyncAttentionMessage(one)).toBe(
+      "“IMG_2709.mov” is larger than the 10 MB Cloud file-size limit, so it stays on this device. Remove it or make it smaller to finish syncing.",
+    );
+    expect(cloudSyncAttentionLabel(one)).toBe("1 file too large for Cloud");
+
+    // The same file rejected twice in one run is still one file.
+    const several = run([tooLarge("a", "a.mov"), tooLarge("b", "b.mov"), tooLarge("a", "a.mov")]);
+    expect(cloudSyncAttentionMessage(several)).toBe(
+      "2 files are larger than the 10 MB Cloud file-size limit, so they stay on this device. Remove them or make them smaller to finish syncing.",
+    );
+    expect(cloudSyncAttentionLabel(several)).toBe("2 files too large for Cloud");
+
+    const limit = (dimension: string) => run([{
+      operation_id: "op", item_id: "item", code: "QUOTA_EXCEEDED", current_revision: null, current_path: null,
+      capacity: { dimension, used: 10, reserved: 0, limit: 10, projected: 11, can_retry_after_reduction: true },
+    }]);
+    expect(cloudSyncAttentionLabel(limit("sync_active_bytes"))).toBe("Cloud storage full");
+    expect(cloudSyncAttentionLabel(limit("sync_active_items"))).toBe("Cloud item limit reached");
+    expect(cloudSyncAttentionLabel(limit("vaults"))).toBe("Cloud capacity reached");
+    expect(cloudSyncAttentionLabel(run([]))).toBeNull();
+    expect(cloudSyncAttentionLabel(null)).toBeNull();
   });
 
   it("keeps the rest of a newly linked review queue when the shared summary is older", () => {
@@ -1107,5 +1150,190 @@ describe("the new conflict notification", () => {
     expect(useCloudSyncStatusStore.getState().phase).toBe("unlinked");
     await runWith(trip);
     expect(toasts()).toHaveLength(3);
+  });
+});
+
+describe("a Cloud vault that went away", () => {
+  const removedByHost = new Error(
+    `Error invoking remote method 'cloud-vault:sync': Error: ${CLOUD_VAULT_REMOVED_MESSAGE}`,
+  );
+
+  beforeEach(() => {
+    clearCloudSyncStatus();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    clearCloudSyncStatus();
+  });
+
+  it("is recorded with the name its link carried, outlasts later checks, and clears once a link exists", async () => {
+    const host = setup();
+    let vaultGone = false;
+    host.syncCloudVault.mockImplementation(async () => {
+      if (vaultGone) {
+        host.setLinked(false);
+        throw removedByHost;
+      }
+      return {
+        cursor: 1, pulled: 0, pushed: 0, conflicts: [], bootstrap_conflicts: [], local_conflicts: [],
+      };
+    });
+    const runtime = startCloudAutoSync(host.bridge, host.environment, {
+      intervalMs: 60_000, onError: vi.fn(),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      expect(useCloudSyncStatusStore.getState()).toMatchObject({
+        phase: "ready", vaultName: "Notes", removedVault: null,
+      });
+
+      vaultGone = true;
+      runtime.request("foreground");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(useCloudSyncStatusStore.getState()).toMatchObject({
+        phase: "unlinked",
+        vaultName: null,
+        removedVault: { vaultName: "Notes", reason: "deleted" },
+      });
+      expect(hasCloudVaultRemovalNotice()).toBe(true);
+
+      // Every later check finds no link and says unlinked again; what
+      // happened to the link still stands.
+      runtime.request("foreground");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(useCloudSyncStatusStore.getState().removedVault).toEqual({
+        vaultName: "Notes", reason: "deleted",
+      });
+
+      vaultGone = false;
+      host.setLinked(true);
+      runtime.request("vault-link");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(useCloudSyncStatusStore.getState()).toMatchObject({
+        phase: "ready", removedVault: null,
+      });
+    } finally {
+      runtime.stop();
+    }
+  });
+
+  it("tells a deleted vault from one refused to this account, by what each host surfaces", () => {
+    expect(cloudVaultGoneReason(new Error(CLOUD_VAULT_REMOVED_MESSAGE))).toBe("deleted");
+    expect(cloudVaultGoneReason(removedByHost)).toBe("deleted");
+    expect(cloudVaultGoneReason(
+      Object.assign(new Error("The requested resource was not found."), { status: 404, code: "NOT_FOUND" }),
+    )).toBe("deleted");
+    expect(cloudVaultGoneReason(new Error(
+      "Error invoking remote method 'cloud-vault:link': Error: That ZenNotes Cloud vault is not available to this account.",
+    ))).toBe("unavailable");
+    expect(cloudVaultGoneReason(
+      Object.assign(new Error("You are not allowed to perform this action."), { status: 403, code: "FORBIDDEN" }),
+    )).toBe("unavailable");
+    // A 404 without Cloud's own code proves nothing about the vault, and a
+    // refusal about the device is not about the vault either.
+    expect(cloudVaultGoneReason(
+      Object.assign(new Error("Not Found"), { status: 404, code: null }),
+    )).toBeNull();
+    expect(cloudVaultGoneReason(
+      Object.assign(new Error("This device was revoked."), { status: 403, code: "ACTIVE_DEVICE_REQUIRED" }),
+    )).toBeNull();
+    expect(cloudVaultGoneReason("Cloud sync timed out.")).toBeNull();
+  });
+
+  it("records a refusal to this account as unavailable, and keeps the first name it read", async () => {
+    const refused = {
+      syncCloudVault: async () => {
+        throw Object.assign(new Error("You are not allowed to perform this action."), {
+          status: 403, code: "FORBIDDEN",
+        });
+      },
+      getCloudVaultLink: async () => null,
+    };
+    await expect(syncCloudVaultWithStatus(refused, "Work")).rejects.toThrow();
+    expect(useCloudSyncStatusStore.getState().removedVault).toEqual({
+      vaultName: "Work", reason: "unavailable",
+    });
+
+    // A second failure no longer knows the name; it does not erase it.
+    await expect(syncCloudVaultWithStatus(refused)).rejects.toThrow();
+    expect(useCloudSyncStatusStore.getState().removedVault?.vaultName).toBe("Work");
+  });
+
+  it("words it one way for the status row and Settings", () => {
+    expect(cloudVaultRemovalLabel({ vaultName: "Cloud QA iPhone", reason: "deleted" }))
+      .toBe("Cloud vault deleted");
+    expect(cloudVaultRemovalMessage({ vaultName: "Cloud QA iPhone", reason: "deleted" })).toBe(
+      "“Cloud QA iPhone” was deleted from ZenNotes Cloud, so this vault stopped syncing. Your notes on this device are untouched.",
+    );
+    expect(cloudVaultRemovalLabel({ vaultName: "Work", reason: "unavailable" }))
+      .toBe("Cloud vault unavailable");
+    expect(cloudVaultRemovalMessage({ vaultName: "Work", reason: "unavailable" })).toBe(
+      "“Work” is no longer available to this ZenNotes Cloud account, so this vault stopped syncing. Your notes on this device are untouched.",
+    );
+    expect(cloudVaultRemovalMessage({ vaultName: null, reason: "deleted" })).toBe(
+      "The cloud vault this vault synced with was deleted from ZenNotes Cloud, so this vault stopped syncing. Your notes on this device are untouched.",
+    );
+  });
+
+  it("says at once that this device deleted its own Cloud vault", () => {
+    useCloudSyncStatusStore.setState({ phase: "ready", vaultName: "Notes", lastSyncedAt: 1 });
+    markCloudVaultDeleted("Notes");
+    expect(useCloudSyncStatusStore.getState()).toMatchObject({
+      phase: "unlinked",
+      vaultName: null,
+      lastSyncedAt: null,
+      removedVault: { vaultName: "Notes", reason: "deleted" },
+    });
+  });
+
+  it("survives a reload of the same vault, never shows for another vault, and is forgotten once dismissed", async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, String(value)),
+      removeItem: (key: string) => void values.delete(key),
+    });
+    const host = setup();
+    host.syncCloudVault.mockImplementationOnce(async () => {
+      host.setLinked(false);
+      throw removedByHost;
+    });
+    // A reload starts from an empty status and a new runtime for the vault.
+    const reload = async (vaultKey: string) => {
+      clearCloudSyncStatus();
+      const runtime = startCloudAutoSync(host.bridge, host.environment, { onError: vi.fn() }, vaultKey);
+      await vi.advanceTimersByTimeAsync(1);
+      return runtime;
+    };
+
+    let runtime = await reload("/vaults/Notes");
+    expect(useCloudSyncStatusStore.getState().removedVault).toEqual({
+      vaultName: "Notes", reason: "deleted",
+    });
+    runtime.stop();
+
+    runtime = await reload("/vaults/Notes");
+    expect(useCloudSyncStatusStore.getState()).toMatchObject({
+      phase: "unlinked",
+      removedVault: { vaultName: "Notes", reason: "deleted" },
+    });
+    runtime.stop();
+
+    runtime = await reload("/vaults/Work");
+    expect(useCloudSyncStatusStore.getState()).toMatchObject({
+      phase: "unlinked", removedVault: null,
+    });
+    runtime.stop();
+
+    runtime = await reload("/vaults/Notes");
+    clearRemovedCloudVault();
+    runtime.stop();
+    runtime = await reload("/vaults/Notes");
+    expect(useCloudSyncStatusStore.getState().removedVault).toBeNull();
+    runtime.stop();
+    expect(values.size).toBe(0);
   });
 });
