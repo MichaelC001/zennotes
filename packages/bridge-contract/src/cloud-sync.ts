@@ -264,6 +264,32 @@ export interface CloudBackupSnapshotItem {
 
 export interface CloudBackupSnapshotItemCollection {
   data: CloudBackupSnapshotItem[];
+  /** The paginator's position. An answer without it is read as one page. */
+  meta?: {
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+  };
+}
+
+/** Which notes of a backup to list: a page, optionally of a path search. */
+export interface CloudBackupItemsQuery {
+  page?: number;
+  search?: string;
+}
+
+/**
+ * One page of a backup's notes. `total` counts what `search` matched, and
+ * `search` is the trimmed text that was asked for ("" for the whole backup).
+ * A service that predates search ignores it and pages through every note.
+ */
+export interface CloudBackupItemsPage {
+  items: CloudBackupSnapshotItem[];
+  page: number;
+  lastPage: number;
+  total: number;
+  search: string;
 }
 
 export interface CloudBackupNoteRestoreRequest {

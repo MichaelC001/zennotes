@@ -1,4 +1,5 @@
 import type {
+  CloudBackupItemsQuery,
   CloudBackupNoteRestoreRequest,
   CloudBackupNoteRestoreResponse,
   CloudBackupRestoreRequest,
@@ -311,11 +312,16 @@ export class CloudSyncApiClient {
 
   async listBackupItems(
     vaultId: string,
-    backupId: string
+    backupId: string,
+    query: CloudBackupItemsQuery = {}
   ): Promise<CloudBackupSnapshotItemCollection> {
+    const search = query.search?.trim()
     return this.http.request({
       method: 'GET',
-      path: `${this.backupPath(vaultId, backupId)}/items`
+      path: `${this.backupPath(vaultId, backupId)}/items${encodeQuery({
+        page: query.page,
+        search: search || undefined
+      })}`
     })
   }
 

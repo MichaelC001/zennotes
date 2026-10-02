@@ -230,6 +230,33 @@ describe('CloudSyncApiClient', () => {
     ])
   })
 
+  it('pages and searches a backup on the service, and lists it as before when asked for neither', async () => {
+    const requests: CloudSyncHttpRequest[] = []
+    const client = new CloudSyncApiClient({
+      async request<Response>(request: CloudSyncHttpRequest): Promise<Response> {
+        requests.push(request)
+        return {} as Response
+      }
+    })
+
+    await client.listBackupItems('vault/1', 'backup/1')
+    await client.listBackupItems('vault/1', 'backup/1', {})
+    await client.listBackupItems('vault/1', 'backup/1', { page: 2, search: '  foo  ' })
+    await client.listBackupItems('vault/1', 'backup/1', { page: 1, search: '   ' })
+    await client.listBackupItems('vault/1', 'backup/1', { search: 'Launch plan & 100%' })
+
+    expect(requests).toEqual([
+      { method: 'GET', path: '/api/v1/vaults/vault%2F1/backups/backup%2F1/items' },
+      { method: 'GET', path: '/api/v1/vaults/vault%2F1/backups/backup%2F1/items' },
+      { method: 'GET', path: '/api/v1/vaults/vault%2F1/backups/backup%2F1/items?page=2&search=foo' },
+      { method: 'GET', path: '/api/v1/vaults/vault%2F1/backups/backup%2F1/items?page=1' },
+      {
+        method: 'GET',
+        path: '/api/v1/vaults/vault%2F1/backups/backup%2F1/items?search=Launch%20plan%20%26%20100%25'
+      }
+    ])
+  })
+
   it('lists, publishes, updates, and unpublishes notes', async () => {
     const requests: CloudSyncHttpRequest[] = []
     const client = new CloudSyncApiClient({

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CloudAccountStatus,
+  CloudBackupItemsPage,
   CloudBackupNoteRestoreResult,
   CloudBackupRestoreResult,
   CloudBackupSchedule,
@@ -15,7 +16,7 @@ import type {
   CloudUsage,
   CloudVaultLink,
 } from "@zennotes/bridge-contract/cloud-sync";
-import { getZenBridge } from "@zennotes/bridge-contract/bridge";
+import { getZenBridge, type ZenBridge } from "@zennotes/bridge-contract/bridge";
 import { confirmApp } from "../lib/confirm-requests";
 import {
   clearRemovedCloudVault,
@@ -106,8 +107,8 @@ export function CloudSettings({
   const [backups, setBackups] = useState<CloudBackupSnapshot[]>([]);
   const [backupSchedule, setBackupSchedule] =
     useState<CloudBackupSchedule | null>(null);
-  const [expandedBackupId, setExpandedBackupId] = useState<string | null>(null);
-  const [backupItems, setBackupItems] = useState<CloudBackupSnapshotItem[]>([]);
+  const backupNotes = useBackupNotes(bridge);
+  const closeBackupNotes = backupNotes.close;
   const [publishedNotes, setPublishedNotes] = useState<CloudPublishedNote[]>(
     [],
   );
@@ -190,15 +191,14 @@ export function CloudSettings({
           setSummary(null);
           setBackups([]);
           setBackupSchedule(null);
-          setExpandedBackupId(null);
-          setBackupItems([]);
+          closeBackupNotes();
           setRestoreResult(null);
           void refreshCloudVaults(goneId);
         }).catch(() => {});
       }
     });
     return () => { mounted = false; unsubscribe(); };
-  }, [bridge, refreshCloudVaults]);
+  }, [bridge, closeBackupNotes, refreshCloudVaults]);
 
   const loadStatus = useCallback(
     async (nextStatus?: CloudAccountStatus): Promise<void> => {
@@ -219,8 +219,7 @@ export function CloudSettings({
           setSummary(null);
           setBackups([]);
           setBackupSchedule(null);
-          setExpandedBackupId(null);
-          setBackupItems([]);
+          closeBackupNotes();
           setPublishedNotes([]);
           setRestoreResult(null);
           return;
@@ -269,7 +268,7 @@ export function CloudSettings({
         }
       }
     },
-    [bridge, localVaultAvailable],
+    [bridge, closeBackupNotes, localVaultAvailable],
   );
 
   useEffect(() => {
@@ -335,8 +334,7 @@ export function CloudSettings({
     if (!backupIncluded || !activeLink) {
       setBackups([]);
       setBackupSchedule(null);
-      setExpandedBackupId(null);
-      setBackupItems([]);
+      closeBackupNotes();
       return;
     }
 
@@ -355,7 +353,13 @@ export function CloudSettings({
     } finally {
       setLoadingBackups(false);
     }
-  }, [activeLink, backupIncluded, bridge, refreshServiceAccount]);
+  }, [
+    activeLink,
+    backupIncluded,
+    bridge,
+    closeBackupNotes,
+    refreshServiceAccount,
+  ]);
 
   useEffect(() => {
     void loadBackups();
@@ -450,8 +454,7 @@ export function CloudSettings({
     setSummary(null);
     setBackups([]);
     setBackupSchedule(null);
-    setExpandedBackupId(null);
-    setBackupItems([]);
+    closeBackupNotes();
     setRestoreResult(null);
   };
 
@@ -539,16 +542,12 @@ export function CloudSettings({
     });
 
   const browseBackup = (backup: CloudBackupSnapshot): Promise<void> => {
-    if (expandedBackupId === backup.id) {
-      setExpandedBackupId(null);
-      setBackupItems([]);
+    if (backupNotes.view?.backupId === backup.id) {
+      closeBackupNotes();
       return Promise.resolve();
     }
 
-    return runAction("backup-browse", async () => {
-      setBackupItems(await bridge.listCloudBackupItems(backup.id));
-      setExpandedBackupId(backup.id);
-    });
+    return runAction("backup-browse", () => backupNotes.open(backup.id));
   };
 
   const refreshPublishedNotes = (): Promise<void> =>
@@ -769,9 +768,8 @@ export function CloudSettings({
                 action={action}
                 backupIncluded={backupIncluded}
                 backupLabel={backupLabel}
-                backupItems={backupItems}
+                backupNotes={backupNotes}
                 backups={backups}
-                expandedBackupId={expandedBackupId}
                 limits={serviceAccount.features.backup.limits}
                 link={activeLink}
                 loading={loadingBackups}
@@ -1514,13 +1512,192 @@ function CloudVaultDestinationOptions({
   );
 }
 
+/** One expanded backup and its notes, as far as they have been loaded. */
+interface BackupNotesView {
+  backupId: string;
+  items: CloudBackupSnapshotItem[];
+  /** Null on a host that lists a backup's first page alone and cannot search. */
+  paging: Omit<CloudBackupItemsPage, "items"> | null;
+  /** Notes in the whole backup, whatever the search. */
+  notesTotal: number;
+}
+
+interface BackupNotes {
+  view: BackupNotesView | null;
+  search: string;
+  /** The service has not answered the search in the box yet. */
+  searching: boolean;
+  loadingMore: boolean;
+  error: string | null;
+  open: (backupId: string) => Promise<void>;
+  close: () => void;
+  setSearch: (value: string) => void;
+  loadMore: () => Promise<void>;
+}
+
+const BACKUP_NOTES_SEARCH_DELAY_MS = 250;
+
+/**
+ * Browsing one backup's notes. The service lists a backup 50 notes at a time,
+ * so a search has to run there: filtering here could only ever find notes on
+ * the pages already loaded. Those rows are still filtered as the search is
+ * typed, so the list answers at once and the service's answer replaces it.
+ */
+function useBackupNotes(bridge: ZenBridge): BackupNotes {
+  const [view, setView] = useState<BackupNotesView | null>(null);
+  const [search, setSearchValue] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Only the newest backup opened may land, and not after it was closed. An
+  // open that fails leaves the backup already showing as it was.
+  const latestOpen = useRef(0);
+  // Only the newest answer about the backup on screen may land: one for an
+  // older search would show notes for words no longer in the box.
+  const latestRequest = useRef(0);
+  // What the newest request searched for, so words the list already answers
+  // (or is waiting on) are not asked again. A failure forgets them, so the
+  // same words can be asked again once the search changes.
+  const requestedSearch = useRef<string | null>("");
+
+  const close = useCallback((): void => {
+    latestOpen.current += 1;
+    latestRequest.current += 1;
+    requestedSearch.current = "";
+    setView(null);
+    setSearchValue("");
+    setLoadingMore(false);
+    setError(null);
+  }, []);
+
+  const open = async (backupId: string): Promise<void> => {
+    const opening = ++latestOpen.current;
+    let next: BackupNotesView;
+    if (bridge.listCloudBackupItemsPage) {
+      const { items, ...paging } = await bridge.listCloudBackupItemsPage(
+        backupId,
+        { page: 1 },
+      );
+      next = { backupId, items, paging, notesTotal: paging.total };
+    } else {
+      const items = await bridge.listCloudBackupItems(backupId);
+      next = { backupId, items, paging: null, notesTotal: items.length };
+    }
+    if (opening !== latestOpen.current) return;
+    latestRequest.current += 1;
+    requestedSearch.current = "";
+    setView(next);
+    setSearchValue("");
+    setLoadingMore(false);
+    setError(null);
+  };
+
+  const searchNotes = useCallback(
+    async (backupId: string, term: string): Promise<void> => {
+      if (!bridge.listCloudBackupItemsPage) return;
+      const request = ++latestRequest.current;
+      requestedSearch.current = term;
+      setLoadingMore(false);
+      setError(null);
+      try {
+        const { items, ...paging } = await bridge.listCloudBackupItemsPage(
+          backupId,
+          { page: 1, search: term },
+        );
+        if (request !== latestRequest.current) return;
+        setView((current) =>
+          current?.backupId === backupId
+            ? { ...current, items, paging }
+            : current,
+        );
+      } catch (cause) {
+        if (request !== latestRequest.current) return;
+        requestedSearch.current = null;
+        setError(errorMessage(cause, "Could not search this backup."));
+      }
+    },
+    [bridge],
+  );
+
+  const backupId = view?.backupId ?? null;
+  const searchable = view !== null && view.paging !== null;
+  const searchTerm = search.trim();
+  useEffect(() => {
+    if (backupId === null || !searchable) return;
+    if (searchTerm === requestedSearch.current) return;
+    const timer = window.setTimeout(() => {
+      if (searchTerm !== requestedSearch.current) {
+        void searchNotes(backupId, searchTerm);
+      }
+    }, BACKUP_NOTES_SEARCH_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [backupId, searchable, searchTerm, searchNotes]);
+
+  const loadMore = async (): Promise<void> => {
+    if (!view?.paging || view.paging.page >= view.paging.lastPage) return;
+    if (!bridge.listCloudBackupItemsPage) return;
+    const { backupId: loadingId, paging } = view;
+    const request = ++latestRequest.current;
+    requestedSearch.current = paging.search;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const { items, ...nextPaging } = await bridge.listCloudBackupItemsPage(
+        loadingId,
+        { page: paging.page + 1, search: paging.search },
+      );
+      if (request !== latestRequest.current) return;
+      setView((current) => {
+        if (current?.backupId !== loadingId) return current;
+        // Pages are offsets, so a note can come back twice when the order
+        // shifts between two requests. The list keeps each note once.
+        const loaded = new Set(current.items.map((item) => item.id));
+        return {
+          ...current,
+          items: [
+            ...current.items,
+            ...items.filter((item) => !loaded.has(item.id)),
+          ],
+          paging: nextPaging,
+        };
+      });
+    } catch (cause) {
+      if (request !== latestRequest.current) return;
+      setError(errorMessage(cause, "Could not load more notes."));
+    } finally {
+      if (request === latestRequest.current) setLoadingMore(false);
+    }
+  };
+
+  const setSearch = (value: string): void => {
+    setSearchValue(value);
+    // Nothing is asked again until the words change, so a failure stays on
+    // screen until they do.
+    if (value.trim() !== searchTerm) setError(null);
+  };
+
+  return {
+    view,
+    search,
+    searching:
+      view !== null &&
+      view.paging !== null &&
+      searchTerm !== view.paging.search &&
+      error === null,
+    loadingMore,
+    error,
+    open,
+    close,
+    setSearch,
+    loadMore,
+  };
+}
+
 function CloudBackupPanel({
   action,
   backupIncluded,
   backupLabel,
-  backupItems,
+  backupNotes,
   backups,
-  expandedBackupId,
   limits,
   link,
   loading,
@@ -1539,9 +1716,8 @@ function CloudBackupPanel({
   action: CloudAction;
   backupIncluded: boolean;
   backupLabel: string;
-  backupItems: CloudBackupSnapshotItem[];
+  backupNotes: BackupNotes;
   backups: CloudBackupSnapshot[];
-  expandedBackupId: string | null;
   limits: Record<string, unknown> | null;
   link: CloudVaultLink | null;
   loading: boolean;
@@ -1560,19 +1736,8 @@ function CloudBackupPanel({
   ) => void;
   onScheduleChange: (enabled: boolean) => void;
 }): JSX.Element {
-  const [noteSearch, setNoteSearch] = useState("");
   const [recoveryDate, setRecoveryDate] = useState("");
-
-  useEffect(() => {
-    setNoteSearch("");
-  }, [expandedBackupId]);
-
-  const normalizedNoteSearch = noteSearch.trim().toLowerCase();
-  const filteredBackupItems = normalizedNoteSearch
-    ? backupItems.filter((item) =>
-        item.path.toLowerCase().includes(normalizedNoteSearch),
-      )
-    : backupItems;
+  const expandedNotes = backupNotes.view;
   const latestRecoveryDate = localDateKey(new Date().toISOString());
   const recoveryDateIsFuture = recoveryDate > latestRecoveryDate;
   const recoverySelection = recoveryDateIsFuture
@@ -1754,7 +1919,7 @@ function CloudBackupPanel({
         ) : (
           <div className="divide-y divide-paper-300/45">
             {recoverySelection.backups.map((backup) => {
-              const expanded = expandedBackupId === backup.id;
+              const expanded = expandedNotes?.backupId === backup.id;
 
               return (
                 <div key={backup.id}>
@@ -1824,65 +1989,19 @@ function CloudBackupPanel({
                     </div>
                   </div>
 
-                  {expanded && (
-                    <div className="border-t border-paper-300/45 bg-paper-100/35 px-5 py-4">
-                      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-ink-500">
-                          Notes in this backup
-                        </div>
-                        {backupItems.length > 0 && (
-                          <input
-                            type="search"
-                            aria-label="Search notes in this backup"
-                            value={noteSearch}
-                            autoComplete="off"
-                            spellCheck={false}
-                            onChange={(event) =>
-                              setNoteSearch(event.target.value)
-                            }
-                            className="w-full rounded-lg border border-paper-300 bg-paper-50 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent sm:w-72"
-                            placeholder="Search by name or path"
-                          />
-                        )}
-                      </div>
-                      {backupItems.length === 0 ? (
-                        <div className="text-sm text-ink-500">
-                          This backup contains no notes.
-                        </div>
-                      ) : filteredBackupItems.length === 0 ? (
-                        <div className="rounded-xl border border-paper-300/50 bg-paper-50/70 px-4 py-8 text-center text-sm text-ink-500">
-                          No notes match &quot;{noteSearch.trim()}&quot;.
-                        </div>
-                      ) : (
-                        <div className="divide-y divide-paper-300/45 overflow-hidden rounded-xl border border-paper-300/50 bg-paper-50/70">
-                          {filteredBackupItems.map((item) => (
-                            <div
-                              key={item.id}
-                              className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                            >
-                              <div className="min-w-0">
-                                <div className="truncate text-sm font-medium text-ink-800">
-                                  {item.path}
-                                </div>
-                                <div className="mt-0.5 text-xs text-ink-500">
-                                  {formatBytes(item.byte_length)} · Revision{" "}
-                                  {item.revision}
-                                </div>
-                              </div>
-                              <Button
-                                variant="secondary"
-                                disabled={action !== null}
-                                onClick={() => onRestoreNote(backup, item)}
-                              >
-                                {action === "backup-note-restore"
-                                  ? "Restoring…"
-                                  : "Restore note"}
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                  {expanded && expandedNotes && (
+                    <CloudBackupNotes
+                      action={action}
+                      backup={backup}
+                      notes={expandedNotes}
+                      search={backupNotes.search}
+                      searching={backupNotes.searching}
+                      loadingMore={backupNotes.loadingMore}
+                      error={backupNotes.error}
+                      onSearchChange={backupNotes.setSearch}
+                      onLoadMore={backupNotes.loadMore}
+                      onRestoreNote={onRestoreNote}
+                    />
                   )}
                 </div>
               );
@@ -1891,6 +2010,141 @@ function CloudBackupPanel({
         )}
       </div>
     </section>
+  );
+}
+
+function CloudBackupNotes({
+  action,
+  backup,
+  notes,
+  search,
+  searching,
+  loadingMore,
+  error,
+  onSearchChange,
+  onLoadMore,
+  onRestoreNote,
+}: {
+  action: CloudAction;
+  backup: CloudBackupSnapshot;
+  notes: BackupNotesView;
+  search: string;
+  searching: boolean;
+  loadingMore: boolean;
+  error: string | null;
+  onSearchChange: (value: string) => void;
+  onLoadMore: () => Promise<void>;
+  onRestoreNote: (
+    backup: CloudBackupSnapshot,
+    item: CloudBackupSnapshotItem,
+  ) => void;
+}): JSX.Element {
+  const searchTerm = search.trim();
+  const normalizedSearch = searchTerm.toLowerCase();
+  // The rows always match the box: while the service is still answering, and
+  // from a service that predates search and sends every note regardless.
+  const visibleItems = normalizedSearch
+    ? notes.items.filter((item) =>
+        item.path.toLowerCase().includes(normalizedSearch),
+      )
+    : notes.items;
+  // Counts and further pages belong to the service's answer, so they show
+  // only once that answer is for the words in the box.
+  const answer =
+    notes.paging !== null && notes.paging.search === searchTerm
+      ? notes.paging
+      : null;
+  const canLoadMore = answer !== null && answer.page < answer.lastPage;
+  const loadedCount =
+    answer !== null && notes.items.length < answer.total
+      ? `Showing ${notes.items.length.toLocaleString()} of ${answer.total.toLocaleString()} ${answer.search ? "matches" : "notes"}`
+      : null;
+  const footer =
+    searching && visibleItems.length > 0 ? "Searching…" : loadedCount;
+
+  return (
+    <div className="border-t border-paper-300/45 bg-paper-100/35 px-5 py-4">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs font-medium uppercase tracking-[0.16em] text-ink-500">
+          Notes in this backup
+        </div>
+        {notes.notesTotal > 0 && (
+          <input
+            type="search"
+            aria-label="Search notes in this backup"
+            value={search}
+            maxLength={200}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => onSearchChange(event.target.value)}
+            className="w-full rounded-lg border border-paper-300 bg-paper-50 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent sm:w-72"
+            placeholder="Search by name or path"
+          />
+        )}
+      </div>
+      {error && (
+        <p
+          role="alert"
+          className="mb-3 rounded-lg border border-danger/35 bg-danger/10 px-3 py-2 text-xs leading-5 text-danger"
+        >
+          {error}
+        </p>
+      )}
+      {notes.notesTotal === 0 ? (
+        <div className="text-sm text-ink-500">
+          This backup contains no notes.
+        </div>
+      ) : visibleItems.length > 0 ? (
+        <div className="divide-y divide-paper-300/45 overflow-hidden rounded-xl border border-paper-300/50 bg-paper-50/70">
+          {visibleItems.map((item) => (
+            <div
+              key={item.id}
+              className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-ink-800">
+                  {item.path}
+                </div>
+                <div className="mt-0.5 text-xs text-ink-500">
+                  {formatBytes(item.byte_length)} · Revision {item.revision}
+                </div>
+              </div>
+              <Button
+                variant="secondary"
+                disabled={action !== null}
+                onClick={() => onRestoreNote(backup, item)}
+              >
+                {action === "backup-note-restore"
+                  ? "Restoring…"
+                  : "Restore note"}
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : error ? null : (
+        <div className="rounded-xl border border-paper-300/50 bg-paper-50/70 px-4 py-8 text-center text-sm text-ink-500">
+          {searching ? (
+            "Searching…"
+          ) : (
+            <>No notes match &quot;{searchTerm}&quot;.</>
+          )}
+        </div>
+      )}
+      {(footer || canLoadMore) && (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-ink-500">{footer}</p>
+          {canLoadMore && (
+            <Button
+              variant="ghost"
+              disabled={action !== null || loadingMore}
+              onClick={() => void onLoadMore()}
+            >
+              {loadingMore ? "Loading…" : "Load more"}
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

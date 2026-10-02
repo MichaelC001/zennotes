@@ -5,9 +5,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CloudAccountStatus,
+  CloudBackupItemsPage,
+  CloudBackupItemsQuery,
+  CloudBackupSnapshotItem,
   CloudServiceAccount,
   CloudSyncRunSummary,
 } from "@zennotes/bridge-contract/cloud-sync";
+import type { ZenBridge } from "@zennotes/bridge-contract/bridge";
 import { useStore } from "../store";
 import { getPublishNoteRequest, dismissPublishNoteRequest } from "../lib/publish-note-requests";
 import { CloudSettings } from "./CloudSettings";
@@ -1956,7 +1960,361 @@ describe("CloudSettings", () => {
     expect(host.textContent).toContain("Earlier recovery point");
     expect(host.textContent).toContain("Before migration");
   });
+
+  describe("browsing a backup's notes", () => {
+    // 110 journal days, then 10 launch notes that the first page never holds.
+    const backupNotes = [
+      ...Array.from({ length: 110 }, (_, index) =>
+        backupNote(
+          index + 1,
+          `Journal/Day ${String(index + 1).padStart(3, "0")}.md`,
+        ),
+      ),
+      ...Array.from({ length: 10 }, (_, index) =>
+        backupNote(111 + index, `Projects/Launch ${index + 1}.md`),
+      ),
+    ];
+    const listPage = vi.fn<NonNullable<ZenBridge["listCloudBackupItemsPage"]>>();
+
+    /** A host that pages and searches on the service, 50 notes a page. */
+    function usePagedHost(): void {
+      listPage.mockImplementation(async (_backupId, query) =>
+        servicePage(backupNotes, query),
+      );
+      Object.assign(mocks, { listCloudBackupItemsPage: listPage });
+    }
+
+    async function openBackupNotes(): Promise<void> {
+      await act(async () =>
+        root.render(
+          createElement(CloudSettings, {
+            localVaultAvailable: true,
+            localVaultName: "Notes",
+          }),
+        ),
+      );
+      await act(async () => buttonNamed("Browse notes")!.click());
+    }
+
+    function searchBox(): HTMLInputElement | null {
+      return host.querySelector<HTMLInputElement>(
+        'input[aria-label="Search notes in this backup"]',
+      );
+    }
+
+    function shownNotes(): number {
+      return [...host.querySelectorAll("button")].filter(
+        (button) => button.textContent?.trim() === "Restore note",
+      ).length;
+    }
+
+    beforeEach(() => {
+      listPage.mockReset();
+      mocks.getCloudAccountStatus.mockResolvedValue(connected);
+      mocks.getCloudServiceAccount.mockResolvedValue({
+        ...serviceAccount,
+        features: {
+          ...serviceAccount.features,
+          backup: { active: true, limits: null },
+        },
+      });
+      mocks.listCloudVaults.mockResolvedValue([]);
+      mocks.getCloudVaultLink.mockResolvedValue({
+        base_url: "https://zennotes.org",
+        vault_id: "vault-1",
+        vault_name: "Cloud Notes",
+        linked_at: "2026-08-10T12:00:00.000Z",
+      });
+      mocks.listCloudBackups.mockResolvedValue([
+        {
+          id: "backup-1",
+          label: "Nightly",
+          trigger: "automatic",
+          status: "ready",
+          cursor: 12,
+          item_count: backupNotes.length,
+          total_bytes: 61_440,
+          archive_bytes: 2_048,
+          expires_at: null,
+          created_at: "2026-09-30T03:00:00.000Z",
+        },
+      ]);
+    });
+
+    afterEach(() => {
+      delete (mocks as { listCloudBackupItemsPage?: unknown })
+        .listCloudBackupItemsPage;
+    });
+
+    it("says how many notes are loaded and appends each further page until the last", async () => {
+      usePagedHost();
+      let answerSecondPage: () => void = () => {};
+      listPage.mockImplementation(async (_backupId, query) => {
+        const page = servicePage(backupNotes, query);
+        if (query.page !== 2) return page;
+        // The second page repeats the note the first one ended on.
+        await new Promise<void>((resolve) => {
+          answerSecondPage = resolve;
+        });
+        return { ...page, items: [backupNotes[49], ...page.items] };
+      });
+
+      await openBackupNotes();
+
+      expect(listPage).toHaveBeenCalledWith("backup-1", { page: 1 });
+      expect(mocks.listCloudBackupItems).not.toHaveBeenCalled();
+      expect(shownNotes()).toBe(50);
+      expect(host.textContent).toContain("Showing 50 of 120 notes");
+
+      await act(async () => buttonNamed("Load more")!.click());
+      expect(listPage).toHaveBeenLastCalledWith("backup-1", {
+        page: 2,
+        search: "",
+      });
+      expect(buttonNamed("Loading…")?.disabled).toBe(true);
+      await act(async () => answerSecondPage());
+      expect(shownNotes()).toBe(100);
+      expect(host.textContent).toContain("Showing 100 of 120 notes");
+
+      await act(async () => buttonNamed("Load more")!.click());
+      expect(listPage).toHaveBeenLastCalledWith("backup-1", {
+        page: 3,
+        search: "",
+      });
+      expect(shownNotes()).toBe(120);
+      expect(host.textContent).toContain("Projects/Launch 10.md");
+      expect(host.textContent).not.toContain("Showing");
+      expect(buttonNamed("Load more")).toBeUndefined();
+    });
+
+    it("searches the whole backup on the service with the trimmed words, after a pause", async () => {
+      usePagedHost();
+      await openBackupNotes();
+
+      await act(async () => typeInto(searchBox()!, "  LAUNCH  "));
+      // The loaded page holds no launch note, and the service has not been
+      // asked yet, so the list waits instead of saying nothing matches.
+      expect(listPage).toHaveBeenCalledTimes(1);
+      expect(host.textContent).toContain("Searching…");
+      expect(host.textContent).not.toContain("No notes match");
+
+      await afterSearchPause();
+      expect(listPage).toHaveBeenLastCalledWith("backup-1", {
+        page: 1,
+        search: "LAUNCH",
+      });
+      expect(shownNotes()).toBe(10);
+      expect(host.textContent).toContain("Projects/Launch 1.md");
+      expect(host.textContent).not.toContain("Journal/Day 001.md");
+      expect(host.textContent).not.toContain("Showing");
+      expect(host.textContent).not.toContain("Searching…");
+
+      await act(async () => typeInto(searchBox()!, "journal"));
+      await afterSearchPause();
+      expect(listPage).toHaveBeenLastCalledWith("backup-1", {
+        page: 1,
+        search: "journal",
+      });
+      expect(host.textContent).toContain("Showing 50 of 110 matches");
+
+      await act(async () => buttonNamed("Load more")!.click());
+      expect(listPage).toHaveBeenLastCalledWith("backup-1", {
+        page: 2,
+        search: "journal",
+      });
+      expect(host.textContent).toContain("Showing 100 of 110 matches");
+
+      await act(async () => typeInto(searchBox()!, ""));
+      await afterSearchPause();
+      expect(listPage).toHaveBeenLastCalledWith("backup-1", {
+        page: 1,
+        search: "",
+      });
+      expect(host.textContent).toContain("Showing 50 of 120 notes");
+
+      // Closing drops a search still waiting to be asked, and opening again
+      // starts over from the whole backup.
+      await act(async () => typeInto(searchBox()!, "launch"));
+      await act(async () => buttonNamed("Hide notes")!.click());
+      await act(async () => buttonNamed("Browse notes")!.click());
+      await afterSearchPause();
+      expect(searchBox()!.value).toBe("");
+      expect(listPage).toHaveBeenLastCalledWith("backup-1", { page: 1 });
+      expect(host.textContent).toContain("Showing 50 of 120 notes");
+    });
+
+    it("still filters what a service that ignores the search sends back", async () => {
+      usePagedHost();
+      listPage.mockImplementation(async (_backupId, query) => ({
+        ...servicePage(backupNotes, { page: query.page }),
+        search: query.search?.trim() ?? "",
+      }));
+      await openBackupNotes();
+
+      await act(async () => typeInto(searchBox()!, "day 04"));
+      await afterSearchPause();
+
+      expect(listPage).toHaveBeenLastCalledWith("backup-1", {
+        page: 1,
+        search: "day 04",
+      });
+      expect(shownNotes()).toBe(10);
+      expect(host.textContent).toContain("Journal/Day 040.md");
+      expect(host.textContent).not.toContain("Journal/Day 001.md");
+    });
+
+    it("keeps the search box when nothing matches, and says so", async () => {
+      usePagedHost();
+      await openBackupNotes();
+
+      await act(async () => typeInto(searchBox()!, "zzz"));
+      await afterSearchPause();
+
+      expect(listPage).toHaveBeenLastCalledWith("backup-1", {
+        page: 1,
+        search: "zzz",
+      });
+      expect(searchBox()).toBeTruthy();
+      expect(host.textContent).toContain('No notes match "zzz".');
+      expect(host.textContent).not.toContain("This backup contains no notes.");
+      expect(host.textContent).not.toContain("Searching…");
+    });
+
+    it("says an empty backup contains no notes, with nothing to search", async () => {
+      usePagedHost();
+      listPage.mockImplementation(async (_backupId, query) =>
+        servicePage([], query),
+      );
+      await openBackupNotes();
+
+      expect(host.textContent).toContain("This backup contains no notes.");
+      expect(searchBox()).toBeNull();
+      expect(buttonNamed("Load more")).toBeUndefined();
+    });
+
+    it("lets only the newest search land when an older answer arrives late", async () => {
+      usePagedHost();
+      let answerPlan: (page: CloudBackupItemsPage) => void = () => {};
+      listPage.mockImplementation(async (_backupId, query) =>
+        query.search === "plan"
+          ? new Promise<CloudBackupItemsPage>((resolve) => {
+              answerPlan = resolve;
+            })
+          : servicePage(backupNotes, query),
+      );
+      await openBackupNotes();
+
+      await act(async () => typeInto(searchBox()!, "plan"));
+      await afterSearchPause();
+      await act(async () => typeInto(searchBox()!, "launch"));
+      await afterSearchPause();
+      expect(shownNotes()).toBe(10);
+
+      // The late answer also matches "launch", so only the request order
+      // keeps it off the screen.
+      await act(async () =>
+        answerPlan({
+          items: [backupNote(999, "Projects/Launch plan.md")],
+          page: 1,
+          lastPage: 1,
+          total: 1,
+          search: "plan",
+        }),
+      );
+
+      expect(shownNotes()).toBe(10);
+      expect(host.textContent).toContain("Projects/Launch 1.md");
+      expect(host.textContent).not.toContain("Launch plan.md");
+      expect(host.textContent).not.toContain("Searching…");
+    });
+
+    it("shows a failed search or page under the search box, not across the page", async () => {
+      usePagedHost();
+      listPage.mockImplementation(async (_backupId, query) => {
+        if (query.search === "launch") {
+          throw new Error("ZenNotes Cloud is busy. Try again in a moment.");
+        }
+        if (query.page === 2) throw new Error("");
+        return servicePage(backupNotes, query);
+      });
+      await openBackupNotes();
+
+      await act(async () => buttonNamed("Load more")!.click());
+      const inline = (): string | null | undefined =>
+        host.querySelector('p[role="alert"]')?.textContent;
+      expect(inline()).toBe("Could not load more notes.");
+      expect(shownNotes()).toBe(50);
+
+      await act(async () => typeInto(searchBox()!, "launch"));
+      expect(inline()).toBeUndefined();
+      await afterSearchPause();
+      expect(inline()).toBe("ZenNotes Cloud is busy. Try again in a moment.");
+      expect(host.querySelector('div[role="alert"]')).toBeNull();
+      expect(buttonNamed("Hide notes")!.disabled).toBe(false);
+      expect(host.textContent).not.toContain("Searching…");
+    });
+
+    it("lists one page and filters it here on a host that cannot page", async () => {
+      mocks.listCloudBackupItems.mockResolvedValue(backupNotes.slice(0, 50));
+      await openBackupNotes();
+
+      expect(mocks.listCloudBackupItems).toHaveBeenCalledTimes(1);
+      expect(mocks.listCloudBackupItems).toHaveBeenCalledWith("backup-1");
+      expect(shownNotes()).toBe(50);
+      expect(host.textContent).not.toContain("Showing");
+      expect(buttonNamed("Load more")).toBeUndefined();
+
+      await act(async () => typeInto(searchBox()!, "day 00"));
+      expect(shownNotes()).toBe(9);
+      await act(async () => typeInto(searchBox()!, "launch"));
+      expect(host.textContent).toContain('No notes match "launch".');
+      await afterSearchPause();
+      expect(mocks.listCloudBackupItems).toHaveBeenCalledTimes(1);
+      expect(host.textContent).toContain('No notes match "launch".');
+    });
+  });
 });
+
+function backupNote(id: number, path: string): CloudBackupSnapshotItem {
+  return {
+    id,
+    item_id: `note-${id}`,
+    path,
+    kind: "text",
+    byte_length: 512,
+    revision: 1,
+    content_hash: null,
+    media_type: "text/markdown",
+  };
+}
+
+/** The service's answer: a case-insensitive path search, 50 notes a page. */
+function servicePage(
+  notes: CloudBackupSnapshotItem[],
+  query: CloudBackupItemsQuery,
+): CloudBackupItemsPage {
+  const search = query.search?.trim() ?? "";
+  const matches = search
+    ? notes.filter((note) =>
+        note.path.toLowerCase().includes(search.toLowerCase()),
+      )
+    : notes;
+  const page = query.page ?? 1;
+  return {
+    items: matches.slice((page - 1) * 50, page * 50),
+    page,
+    lastPage: Math.max(1, Math.ceil(matches.length / 50)),
+    total: matches.length,
+    search,
+  };
+}
+
+/** Past the pause a backup search waits for before it asks the service. */
+async function afterSearchPause(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+}
 
 function buttonNamed(name: string): HTMLButtonElement | undefined {
   return [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(

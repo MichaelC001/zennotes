@@ -3,6 +3,8 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type {
   CloudAccountStatus,
+  CloudBackupItemsPage,
+  CloudBackupItemsQuery,
   CloudBackupNoteRestoreResult,
   CloudBackupRestoreResult,
   CloudBackupSchedule,
@@ -23,7 +25,7 @@ import type {
   CloudSyncVault,
   CloudVaultLink
 } from '@zennotes/bridge-contract/cloud-sync'
-import { restoreCloudBackup } from '@zennotes/shared-domain/cloud-backup'
+import { cloudBackupItemsPage, restoreCloudBackup } from '@zennotes/shared-domain/cloud-backup'
 import {
   CLOUD_SYNC_SETTINGS_CONFLICT_PATH,
   CLOUD_SYNC_VAULT_SETTINGS_PATH
@@ -203,6 +205,15 @@ export class DesktopCloudSyncService {
   ): Promise<CloudBackupSnapshotItem[]> {
     const { client, link } = await this.linkedConnection(localRoot)
     return (await client.listBackupItems(link.vault_id, backupId)).data
+  }
+
+  async listBackupItemsPage(
+    localRoot: string,
+    backupId: string,
+    query: CloudBackupItemsQuery
+  ): Promise<CloudBackupItemsPage> {
+    const { client, link } = await this.linkedConnection(localRoot)
+    return cloudBackupItemsPage(await client.listBackupItems(link.vault_id, backupId, query), query)
   }
 
   async createBackup(localRoot: string, label?: string): Promise<CloudBackupSnapshot> {
