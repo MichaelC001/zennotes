@@ -23,6 +23,8 @@ import {
   openWikilinkTarget,
 } from "../lib/wikilink-navigation";
 import { followLinkTarget } from "../lib/follow-link";
+import { findHeadingForAnchor } from "../lib/heading-anchor";
+import { parseOutline } from "../lib/outline";
 import { resolveAssetPathAmong } from "../lib/asset-path-resolution";
 import { listDatabaseLinkTargets, resolveDatabaseWikilink } from "../lib/database-links";
 import { externalLinkUrl, resolveInternalNoteHref } from "../lib/internal-links";
@@ -588,7 +590,17 @@ export const Preview = memo(function Preview({
           window.setTimeout(() => {
             dest.style.backgroundColor = "";
           }, 900);
+          return;
         }
+        // Rendered headings carry no id, so `[jump](#section-three)` and
+        // `[jump](#Section%20Three)` found nothing above and went nowhere.
+        // A heading the anchor names is followed the way `[[#Heading]]` is,
+        // so it lands the same in reading, split and edit mode.
+        const notePath = notePathRef.current;
+        const heading = notePath
+          ? findHeadingForAnchor(parseOutline(markdownRef.current), id)
+          : undefined;
+        if (notePath && heading) void openWikilinkTarget(notePath, `#${heading.text}`);
         return;
       }
       // A link to a file outside the vault (`~/…`, `file://…`, an absolute path):
@@ -600,7 +612,18 @@ export const Preview = memo(function Preview({
       }
       e.preventDefault();
     };
+    // A tap arrives as pointer events with pointerType "touch", then the
+    // synthetic mouseover, mousemove and click. iOS WebKit turns a tap whose
+    // mouseover changes the page into a hover and drops its click, so opening
+    // the hover card from that mouseover left a tapped wikilink showing a card
+    // of its note (for `[[#Heading]]`, this very note) and never followed it.
+    // Touch never opens the card; a mouse or a pen's hover still does.
+    let lastPointerType = "";
+    const notePointerType = (e: PointerEvent): void => {
+      lastPointerType = e.pointerType;
+    };
     const onMouseOver = (e: MouseEvent): void => {
+      if (lastPointerType === "touch") return;
       const target = e.target as HTMLElement;
       const anchor = target.closest("a.wikilink") as HTMLAnchorElement | null;
       if (!anchor) return;
@@ -623,6 +646,7 @@ export const Preview = memo(function Preview({
               anyLink.getAttribute("href")
           : null,
       );
+      if (lastPointerType === "touch") return;
       const anchor = target.closest("a.wikilink") as HTMLAnchorElement | null;
       if (!anchor) {
         // Pointer moved off the link. Don't dismiss immediately — the
@@ -718,6 +742,10 @@ export const Preview = memo(function Preview({
       requestEdit(request);
     };
 
+    const pointerOptions = { capture: true, passive: true } as const;
+    root.addEventListener("pointerover", notePointerType, pointerOptions);
+    root.addEventListener("pointerdown", notePointerType, pointerOptions);
+    root.addEventListener("pointermove", notePointerType, pointerOptions);
     root.addEventListener("click", onClick);
     root.addEventListener("dblclick", onDoubleClick);
     root.addEventListener("mouseover", onMouseOver);
@@ -728,6 +756,9 @@ export const Preview = memo(function Preview({
     root.addEventListener("contextmenu", onContextMenu);
 
     return () => {
+      root.removeEventListener("pointerover", notePointerType, pointerOptions);
+      root.removeEventListener("pointerdown", notePointerType, pointerOptions);
+      root.removeEventListener("pointermove", notePointerType, pointerOptions);
       root.removeEventListener("click", onClick);
       root.removeEventListener("dblclick", onDoubleClick);
       root.removeEventListener("mouseover", onMouseOver);
