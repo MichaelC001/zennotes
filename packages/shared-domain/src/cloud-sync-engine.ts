@@ -107,6 +107,9 @@ export function planCloudSyncMutations(
   )
 
   for (const trackedItem of trackedItems) {
+    // Older clients may have uploaded local-only state. Excluding it from a
+    // scan must not turn it into a delete or rename on another device.
+    if (!shouldSyncVaultPath(trackedItem.path)) continue
     const exactLocalItem = localByPathKey.get(cloudSyncPathKey(trackedItem.path))
     if (exactLocalItem) {
       unmatchedLocalItems.delete(exactLocalItem)
