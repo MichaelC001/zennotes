@@ -192,6 +192,8 @@ describe('bounded bulk Cloud bootstrap', () => {
   })
 
   it('recovers the same pages across multiple low-limit windows during a complete bootstrap', async () => {
+    // Taken before the fake timers go in, so the wait below runs on real time.
+    const realNow = process.hrtime.bigint.bind(process.hrtime)
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-10-01T12:00:00Z'))
     try {
@@ -250,7 +252,11 @@ describe('bounded bulk Cloud bootstrap', () => {
       )
       // WebCrypto completes on the native event loop. Advance only scheduled
       // cooldowns, without spending real seconds polling through fake windows.
-      for (let turn = 0; !settled && turn < 10_000; turn++) {
+      // The budget is real time, not a count of turns: the hashing runs on
+      // Node's thread pool, and on a CI runner busy with other suites 10,000
+      // instant turns ran out in about 0.1 s before the sync had finished.
+      const deadline = realNow() + 20_000_000_000n
+      while (!settled && realNow() < deadline) {
         await yieldToNativeWork()
         if (vi.getTimerCount() > 0) await vi.advanceTimersToNextTimerAsync()
       }
