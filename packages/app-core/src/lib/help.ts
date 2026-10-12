@@ -382,7 +382,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Tune indentation and switch notes quickly',
     body:
-      'Set the editor tab size from 1 through 8 spaces under Settings → Editor → Writing. Press Ctrl+Tab to switch to the most recently used note, then press it again to alternate between the same two notes.'
+      'Set the editor tab size from 1 through 8 spaces under Settings → Editor → Writing. Tab and Shift+Tab indent and outdent lines (`>>` and `<<` in Vim mode). Headings stay at the margin: Markdown reads a heading indented four spaces as a code block, so indenting leaves heading lines where they are and indents the rest. Press Ctrl+Tab to switch to the most recently used note, then press it again to alternate between the same two notes.'
   },
   {
     title: 'Callouts highlight the important bits',
