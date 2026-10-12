@@ -13,6 +13,8 @@
  * web app updates with its server.
  */
 
+export type UsageCountEvent = 'install' | 'update'
+
 export interface WhatsNewEntry {
   version: string
   highlights: ReadonlyArray<{ title: string; body: string }>
@@ -108,19 +110,22 @@ export function whatsNewBetween(
  * from a version without it, gets every entry up to `current`; otherwise the
  * entries since the version they last saw. A downgrade shows nothing and
  * records the version, so the way back up opens the window again.
+ *
+ * `count` is the event for the anonymous usage count (Settings > About): once
+ * per fresh install, once per update, nothing for a relaunch or a downgrade.
  */
 export function whatsNewAtLaunch(input: {
   lastSeen: string | null
   current: string
   returningUser: boolean
   entries?: readonly WhatsNewEntry[]
-}): { updated: boolean; entries: WhatsNewEntry[]; record: boolean } {
+}): { updated: boolean; entries: WhatsNewEntry[]; record: boolean; count: UsageCountEvent | null } {
   const { lastSeen, current, returningUser, entries = WHATS_NEW } = input
   const none = { updated: false, entries: [] as WhatsNewEntry[] }
-  if (lastSeen !== null && compareVersions(lastSeen, current) === 0) return { ...none, record: false }
-  if (lastSeen === null && !returningUser) return { ...none, record: true }
-  if (lastSeen !== null && compareVersions(lastSeen, current) > 0) return { ...none, record: true }
-  return { updated: true, entries: whatsNewBetween(lastSeen, current, entries), record: true }
+  if (lastSeen !== null && compareVersions(lastSeen, current) === 0) return { ...none, record: false, count: null }
+  if (lastSeen === null && !returningUser) return { ...none, record: true, count: 'install' }
+  if (lastSeen !== null && compareVersions(lastSeen, current) > 0) return { ...none, record: true, count: null }
+  return { updated: true, entries: whatsNewBetween(lastSeen, current, entries), record: true, count: 'update' }
 }
 
 /** The palette's entries: this version's, or the newest at or below it, or

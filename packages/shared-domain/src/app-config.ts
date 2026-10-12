@@ -106,6 +106,10 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   // edit can be reviewed (docs/ideas/agent-edit-review.md). The MCP server
   // reads it from config.toml, without the app running.
   reviewAgentEdits: true,
+  // The desktop app's anonymous count of installs and updates: version, OS,
+  // architecture and install kind, with no identifier (lib/whats-new.ts sends
+  // it with the first launch of each version). Settings > About turns it off.
+  usageCount: true,
   markdownSnippets: true,
   textReplacementsEnabled: true,
   textReplacements: { '->': '→' },

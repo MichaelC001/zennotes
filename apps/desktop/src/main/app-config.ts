@@ -39,7 +39,7 @@ interface ScalarFieldMap {
 }
 
 // Order sections are emitted in. Keeps the file stable across rewrites.
-const SECTION_ORDER = ['vim', 'search', 'editor', 'appearance', 'typography', 'view', 'mcp'] as const
+const SECTION_ORDER = ['vim', 'search', 'editor', 'appearance', 'typography', 'view', 'mcp', 'privacy'] as const
 
 // Scalar (string / number / boolean) portable prefs → [section].key (snake_case).
 const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
@@ -121,6 +121,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     section: 'mcp',
     tomlKey: 'review_agent_edits',
     comment: 'keep what a note said before an assistant edits it through MCP, so you can review the change'
+  },
+  usageCount: {
+    section: 'privacy',
+    tomlKey: 'usage_count',
+    comment: 'send an anonymous count when ZenNotes installs or updates: version, OS, architecture, install kind; no identifier'
   },
   markdownSnippets: {
     section: 'editor',

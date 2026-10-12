@@ -39,6 +39,7 @@ export const PORTABLE_PREF_KEYS = [
   'defaultPaneMode',
   'syncTitleHeadingOnRename',
   'reviewAgentEdits',
+  'usageCount',
   'markdownSnippets',
   'textReplacementsEnabled',
   'textReplacements',

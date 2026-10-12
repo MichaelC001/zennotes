@@ -269,6 +269,7 @@ import {
   getRaycastExtensionStatus,
   installRaycastExtension,
 } from "./raycast-integration";
+import { sendUsageCount } from "./usage-count";
 import {
   checkForAppUpdates,
   describeInstall,
@@ -3391,6 +3392,7 @@ function registerIpc(): void {
   });
   handle(IPC.APP_UPDATER_GET_STATE, () => getAppUpdateState());
   handle(IPC.APP_UPDATER_CHECK, async () => await checkForAppUpdates());
+  handle(IPC.APP_USAGE_COUNT, async (_e, event: unknown) => await sendUsageCount(event));
   handle(IPC.APP_UPDATER_CHECK_WITH_UI, async () => {
     await runMenuUpdateCheck();
   });

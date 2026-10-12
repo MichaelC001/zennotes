@@ -5669,6 +5669,22 @@ export function SettingsModal(): JSX.Element {
           keywords: ["company", "lumary", "logo"],
         },
         {
+          id: "usage-count",
+          title: "Count this copy anonymously",
+          description:
+            "Once per install and per update, tell zennotes.org the version, system and install type, with no identifier.",
+          keywords: [
+            "privacy",
+            "anonymous",
+            "count",
+            "usage",
+            "telemetry",
+            "analytics",
+            "statistics",
+          ],
+          available: appInfo.runtime === "desktop",
+        },
+        {
           id: "config-file",
           title: "Configuration file",
           description:
@@ -5743,6 +5759,7 @@ export function SettingsModal(): JSX.Element {
               </div>
             </div>
           </Section>
+          {appInfo.runtime === "desktop" && <UsageCountSetting />}
           {appInfo.runtime === "desktop" && <ConfigFileSection />}
         </div>
       ),
@@ -8974,6 +8991,21 @@ function McpSettings(): JSX.Element {
 
       <McpInstructionsEditor />
     </div>
+  );
+}
+
+function UsageCountSetting(): JSX.Element {
+  const usageCount = useStore((s) => s.usageCount);
+  const setUsageCount = useStore((s) => s.setUsageCount);
+  return (
+    <Section title="Privacy" settingId="usage-count">
+      <ToggleRow
+        label="Count this copy anonymously"
+        description="Once when ZenNotes is installed and once per update, send zennotes.org the version, operating system, architecture and install type, so we know how many copies are in use. No identifier and nothing about your notes, vaults or account; only daily totals are kept."
+        value={usageCount}
+        onChange={setUsageCount}
+      />
+    </Section>
   );
 }
 

@@ -167,6 +167,11 @@ export interface ZenBridge {
   resetAppZoom(): Promise<number>
   getAppUpdateState(): Promise<AppUpdateState>
   checkForAppUpdates(): Promise<AppUpdateState>
+  /** The desktop app's anonymous install/update count: one message to
+   *  zennotes.org with the event, version, OS, architecture and install kind,
+   *  no identifier. The caller checks the setting; the host refuses
+   *  development builds and test runs, and sends each event once per run. */
+  sendUsageCount?(event: 'install' | 'update'): Promise<void>
   checkForAppUpdatesWithUi(): Promise<void>
   downloadAppUpdate(): Promise<AppUpdateState>
   installAppUpdate(): Promise<void>

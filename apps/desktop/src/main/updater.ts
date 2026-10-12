@@ -905,20 +905,24 @@ export function describeInstall(): { os: string; install: string } {
       mas: Boolean(process.mas),
       windowsStore: Boolean(process.windowsStore),
       portableExecutableDir: process.env.PORTABLE_EXECUTABLE_DIR,
-      linuxFormat: () =>
-        linuxUpdaterFormat({
-          isAppImage: Boolean(process.env.APPIMAGE),
-          isOfficialSystemPackage: isOfficialLinuxSystemPackage(
-            process.resourcesPath,
-            existsSync(join(process.resourcesPath, 'package-type'))
-          ),
-          osRelease
-        })
+      linuxFormat: () => currentLinuxFormat(osRelease)
     })
   } catch {
     install = 'unknown'
   }
   return { os, install }
+}
+
+/** This copy's Linux install format, as the updater acts on it. */
+export function currentLinuxFormat(osRelease: string | null = readOsReleaseOrNull()): LinuxPackageFormat {
+  return linuxUpdaterFormat({
+    isAppImage: Boolean(process.env.APPIMAGE),
+    isOfficialSystemPackage: isOfficialLinuxSystemPackage(
+      process.resourcesPath,
+      existsSync(join(process.resourcesPath, 'package-type'))
+    ),
+    osRelease
+  })
 }
 
 function shellQuote(value: string): string {

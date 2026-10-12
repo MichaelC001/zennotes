@@ -30,7 +30,8 @@ describe('whatsNewAtLaunch', () => {
     expect(whatsNewAtLaunch({ lastSeen: null, current: '2.69.0', returningUser: false, entries })).toEqual({
       updated: false,
       entries: [],
-      record: true
+      record: true,
+      count: 'install'
     })
   })
 
@@ -39,6 +40,7 @@ describe('whatsNewAtLaunch', () => {
     expect(result.updated).toBe(true)
     expect(versions(result.entries)).toEqual(['2.69.0', '2.68.0'])
     expect(result.record).toBe(true)
+    expect(result.count).toBe('update')
   })
 
   it('opens with the entries since the version last seen, newest first', () => {
@@ -51,7 +53,8 @@ describe('whatsNewAtLaunch', () => {
     expect(whatsNewAtLaunch({ lastSeen: '2.70.0', current: '2.70.1', returningUser: true, entries })).toEqual({
       updated: true,
       entries: [],
-      record: true
+      record: true,
+      count: 'update'
     })
   })
 
@@ -59,15 +62,17 @@ describe('whatsNewAtLaunch', () => {
     expect(whatsNewAtLaunch({ lastSeen: '2.69.0', current: '2.69.0', returningUser: true, entries })).toEqual({
       updated: false,
       entries: [],
-      record: false
+      record: false,
+      count: null
     })
   })
 
-  it('records a downgrade without opening', () => {
+  it('records a downgrade without opening or counting', () => {
     expect(whatsNewAtLaunch({ lastSeen: '2.70.0', current: '2.69.0', returningUser: true, entries })).toEqual({
       updated: false,
       entries: [],
-      record: true
+      record: true,
+      count: null
     })
   })
 })

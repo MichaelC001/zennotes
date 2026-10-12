@@ -260,6 +260,7 @@ const api: ZenBridge = {
   resetAppZoom: (): Promise<number> => ipcRenderer.invoke(IPC.APP_ZOOM_RESET),
   getAppUpdateState: (): Promise<AppUpdateState> => ipcRenderer.invoke(IPC.APP_UPDATER_GET_STATE),
   checkForAppUpdates: (): Promise<AppUpdateState> => ipcRenderer.invoke(IPC.APP_UPDATER_CHECK),
+  sendUsageCount: (event: 'install' | 'update'): Promise<void> => ipcRenderer.invoke(IPC.APP_USAGE_COUNT, event),
   checkForAppUpdatesWithUi: (): Promise<void> =>
     ipcRenderer.invoke(IPC.APP_UPDATER_CHECK_WITH_UI),
   downloadAppUpdate: (): Promise<AppUpdateState> => ipcRenderer.invoke(IPC.APP_UPDATER_DOWNLOAD),

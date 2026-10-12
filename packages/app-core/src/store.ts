@@ -610,6 +610,8 @@ interface Prefs {
   /** Keep what a note said before an assistant edits it through MCP, so the
    *  edit can be reviewed. The MCP server reads it from config.toml. */
   reviewAgentEdits: boolean
+  /** Send the anonymous install/update count (desktop). Portable. */
+  usageCount: boolean
   /** Auto-close markdown delimiters while typing: `**`+Space → `**|**`,
    *  ```` ``` ````+Enter expands a fenced block. Off restores plain typing. */
   markdownSnippets: boolean
@@ -1109,6 +1111,7 @@ export const DEFAULT_PREFS: Prefs = {
   defaultPaneMode: 'edit',
   syncTitleHeadingOnRename: true,
   reviewAgentEdits: true,
+  usageCount: true,
   markdownSnippets: true,
   textReplacementsEnabled: true,
   textReplacements: { '->': '→' },
@@ -1311,6 +1314,7 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
         : DEFAULT_PREFS.syncTitleHeadingOnRename,
     reviewAgentEdits:
       typeof p.reviewAgentEdits === 'boolean' ? p.reviewAgentEdits : DEFAULT_PREFS.reviewAgentEdits,
+    usageCount: typeof p.usageCount === 'boolean' ? p.usageCount : DEFAULT_PREFS.usageCount,
     markdownSnippets:
       typeof p.markdownSnippets === 'boolean'
         ? p.markdownSnippets
@@ -2398,6 +2402,7 @@ function collectPrefs(s: {
   defaultPaneMode: PaneMode
   syncTitleHeadingOnRename: boolean
   reviewAgentEdits: boolean
+  usageCount: boolean
   markdownSnippets: boolean
   textReplacementsEnabled: boolean
   textReplacements: TextReplacements
@@ -2511,6 +2516,7 @@ function collectPrefs(s: {
     defaultPaneMode: s.defaultPaneMode,
     syncTitleHeadingOnRename: s.syncTitleHeadingOnRename,
     reviewAgentEdits: s.reviewAgentEdits,
+    usageCount: s.usageCount,
     markdownSnippets: s.markdownSnippets,
     textReplacementsEnabled: s.textReplacementsEnabled,
     textReplacements: s.textReplacements,
@@ -3049,6 +3055,8 @@ interface Store {
   syncTitleHeadingOnRename: boolean
   /** Record assistant edits made through MCP for review. Persisted (portable). */
   reviewAgentEdits: boolean
+  /** Send the anonymous install/update count (desktop). Persisted (portable). */
+  usageCount: boolean
   /** Auto-close markdown delimiters while typing. Persisted. */
   markdownSnippets: boolean
   textReplacementsEnabled: boolean
@@ -3658,6 +3666,7 @@ interface Store {
   setDefaultPaneMode: (mode: PaneMode) => void
   setSyncTitleHeadingOnRename: (on: boolean) => void
   setReviewAgentEdits: (on: boolean) => void
+  setUsageCount: (on: boolean) => void
   setMarkdownSnippets: (on: boolean) => void
   setTextReplacementsEnabled: (on: boolean) => void
   setTextReplacements: (replacements: TextReplacements) => void
@@ -3827,8 +3836,8 @@ interface Store {
   }) => Promise<number>
   /** Mark the first-run onboarding as complete (or skipped). Persists. */
   completeOnboarding: () => void
-  /** First launch of a version: record it, and after an update open What’s
-   *  New. Desktop only. */
+  /** First launch of a version: record it, send the anonymous count (when
+   *  Settings allows it), and after an update open What’s New. Desktop only. */
   showWhatsNewAfterUpdate: () => Promise<void>
   /** The palette's What’s New in ZenNotes. */
   openWhatsNew: () => Promise<void>
@@ -5867,6 +5876,7 @@ export const useStore = create<Store>((set, get) => {
   defaultPaneMode: loadPrefs().defaultPaneMode,
   syncTitleHeadingOnRename: loadPrefs().syncTitleHeadingOnRename,
   reviewAgentEdits: loadPrefs().reviewAgentEdits,
+  usageCount: loadPrefs().usageCount,
   markdownSnippets: loadPrefs().markdownSnippets,
   textReplacementsEnabled: loadPrefs().textReplacementsEnabled,
   textReplacements: loadPrefs().textReplacements,
@@ -9040,6 +9050,10 @@ export const useStore = create<Store>((set, get) => {
     set({ reviewAgentEdits: on })
     savePrefs(collectPrefs(get()))
   },
+  setUsageCount: (on) => {
+    set({ usageCount: on })
+    savePrefs(collectPrefs(get()))
+  },
   setMarkdownSnippets: (on) => {
     set({ markdownSnippets: on })
     savePrefs(collectPrefs(get()))
@@ -10036,7 +10050,7 @@ export const useStore = create<Store>((set, get) => {
   showWhatsNewAfterUpdate: async () => {
     if (!isDesktopHost()) return
     const current = window.zen.getAppInfo().version
-    const { updated, entries, record } = whatsNewAtLaunch({
+    const { updated, entries, record, count } = whatsNewAtLaunch({
       lastSeen: get().lastSeenWhatsNewVersion,
       current,
       returningUser: onboardedAtLaunch ?? get().hasCompletedOnboarding
@@ -10047,6 +10061,9 @@ export const useStore = create<Store>((set, get) => {
       set({ lastSeenWhatsNewVersion: current })
       savePrefs(collectPrefs(get()))
     }
+    // One anonymous count per fresh install and per update, never per launch
+    // (the recorded version above is what makes it once).
+    if (count && get().usageCount) void window.zen.sendUsageCount?.(count)
     if (!updated) return
     const showCloud = !(await cloudConnected())
     if (!entries.length && !showCloud) return
