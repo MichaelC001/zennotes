@@ -6025,6 +6025,20 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
 .cm-editor.zen-agent-review .cm-changedText {
   background: rgb(var(--z-green) / 0.24);
 }
+/* The unchanged stretch folded away between changes. The merge view picks
+   this bar's grey from CodeMirror's dark-theme flag, which ZenNotes never sets
+   (its themes are CSS variables), so every dark theme drew a near-white bar. */
+.cm-editor.zen-agent-review .cm-collapsedLines {
+  background: transparent;
+  border-image-source: linear-gradient(rgb(var(--z-bg-1)), rgb(var(--z-bg-1)));
+  border-image-slice: 0 fill;
+  border-image-outset: 0 100vw 0 0;
+  color: rgb(var(--z-grey-1));
+  font-size: 11px;
+}
+.cm-editor.zen-agent-review .cm-collapsedLines:hover {
+  color: rgb(var(--z-fg-2));
+}
 .cm-editor.zen-agent-review .cm-deletedChunk .zen-review-control {
   margin: 0 2px;
   padding: 1px 8px;
