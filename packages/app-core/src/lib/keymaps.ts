@@ -98,6 +98,10 @@ export type KeymapId =
   | "vim.harperSuggest"
   | "vim.harperAddWord"
   | "vim.harperIgnore"
+  | "vim.reviewNextChange"
+  | "vim.reviewPreviousChange"
+  | "vim.reviewAcceptChange"
+  | "vim.reviewRejectChange"
   | "nav.moveDown"
   | "nav.moveUp"
   | "nav.moveLeft"
@@ -129,7 +133,11 @@ export type KeymapId =
   | "editor.foldHeading"
   | "editor.unfoldHeading"
   | "editor.toggleCheckbox"
-  | "editor.reflowParagraph";
+  | "editor.reflowParagraph"
+  | "editor.reviewNextChange"
+  | "editor.reviewPreviousChange"
+  | "editor.reviewAcceptChange"
+  | "editor.reviewRejectChange";
 
 export type KeymapOverrides = Partial<Record<KeymapId, string>>;
 
@@ -993,6 +1001,50 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     maxTokens: 2,
   },
   {
+    id: "vim.reviewNextChange",
+    kind: "sequence",
+    scope: "vim-editor",
+    group: "vim",
+    title: "Next change to review",
+    description: "While reviewing an assistant's edits, jump to the next change. Vim's own diff-mode key.",
+    defaultBinding: "] c",
+    vimOnly: true,
+    maxTokens: 2,
+  },
+  {
+    id: "vim.reviewPreviousChange",
+    kind: "sequence",
+    scope: "vim-editor",
+    group: "vim",
+    title: "Previous change to review",
+    description: "While reviewing an assistant's edits, jump to the previous change.",
+    defaultBinding: "[ c",
+    vimOnly: true,
+    maxTokens: 2,
+  },
+  {
+    id: "vim.reviewAcceptChange",
+    kind: "sequence",
+    scope: "vim-editor",
+    group: "vim",
+    title: "Accept change",
+    description: "While reviewing an assistant's edits, keep the change at the cursor (diff put).",
+    defaultBinding: "d p",
+    vimOnly: true,
+    maxTokens: 2,
+  },
+  {
+    id: "vim.reviewRejectChange",
+    kind: "sequence",
+    scope: "vim-editor",
+    group: "vim",
+    title: "Reject change",
+    description: "While reviewing an assistant's edits, put back what the change replaced (diff obtain).",
+    defaultBinding: "d o",
+    vimOnly: true,
+    maxTokens: 2,
+  },
+  {
     id: "vim.harperPrevious",
     kind: "sequence",
     scope: "vim-editor",
@@ -1283,6 +1335,42 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     title: "Fold heading or list item",
     description: "Fold the heading section, the list item or the callout at the cursor; on a line under a list item or inside a foldable callout, fold that.",
     defaultBinding: "Mod+Alt+F",
+  },
+  {
+    id: "editor.reviewNextChange",
+    kind: "shortcut",
+    scope: "vim-editor",
+    group: "view-actions",
+    title: "Next change to review",
+    description: "While reviewing an assistant's edits, jump to the next change.",
+    defaultBinding: "Mod+Alt+ArrowDown",
+  },
+  {
+    id: "editor.reviewPreviousChange",
+    kind: "shortcut",
+    scope: "vim-editor",
+    group: "view-actions",
+    title: "Previous change to review",
+    description: "While reviewing an assistant's edits, jump to the previous change.",
+    defaultBinding: "Mod+Alt+ArrowUp",
+  },
+  {
+    id: "editor.reviewAcceptChange",
+    kind: "shortcut",
+    scope: "vim-editor",
+    group: "view-actions",
+    title: "Accept change",
+    description: "While reviewing an assistant's edits, keep the change at the cursor.",
+    defaultBinding: "Mod+Shift+Enter",
+  },
+  {
+    id: "editor.reviewRejectChange",
+    kind: "shortcut",
+    scope: "vim-editor",
+    group: "view-actions",
+    title: "Reject change",
+    description: "While reviewing an assistant's edits, put back what the change at the cursor replaced.",
+    defaultBinding: "Mod+Shift+Backspace",
   },
   {
     id: "editor.unfoldHeading",

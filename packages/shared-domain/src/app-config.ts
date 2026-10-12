@@ -102,6 +102,10 @@ export const PORTABLE_DEFAULTS: Record<PortablePrefKey, unknown> = {
   persistUndoHistory: false,
   defaultPaneMode: 'edit',
   syncTitleHeadingOnRename: true,
+  // Keep what a note said before an assistant edits it through MCP, so the
+  // edit can be reviewed (docs/ideas/agent-edit-review.md). The MCP server
+  // reads it from config.toml, without the app running.
+  reviewAgentEdits: true,
   markdownSnippets: true,
   textReplacementsEnabled: true,
   textReplacements: { '->': '→' },

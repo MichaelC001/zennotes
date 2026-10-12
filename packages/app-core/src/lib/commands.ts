@@ -6,6 +6,7 @@
  * reflect the store state at that moment (toggle labels flip, context-
  * sensitive commands like "Unarchive" only show up when applicable).
  */
+import { requestAgentEditReview } from './agent-review-runtime'
 import { isTagsViewActive, isTasksViewActive, isTrashViewActive, useStore } from '../store'
 import { confirmApp } from './confirm-requests'
 import { requestSettingsTarget } from './settings-navigation'
@@ -1888,6 +1889,24 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       when: () => hasPendingCloudReview(),
       run: () => openPendingCloudReview(getState().activeNote?.path)
     },
+    // One entry per note an assistant edited through MCP that has not been
+    // reviewed yet (docs/ideas/agent-edit-review.md), newest first. A record
+    // whose note is gone (deleted outside ZenNotes) has nothing to open.
+    ...Object.values(getState().agentEdits)
+      .filter((summary) => getState().notes.some((note) => note.path === summary.notePath))
+      .sort((a, b) => b.at - a.at)
+      .map(
+        (summary): Command => ({
+          id: `app.agentEdits.review:${summary.notePath}`,
+          title: `Review Agent Changes: ${(summary.notePath.split('/').pop() ?? summary.notePath).replace(/\.md$/i, '')}`,
+          category: 'Note',
+          keywords: `assistant agent mcp ai changes diff review accept reject ${summary.agent} ${summary.notePath}`,
+          run: async () => {
+            await getState().selectNote(summary.notePath)
+            requestAgentEditReview(summary.notePath)
+          }
+        })
+      ),
     {
       id: 'app.cloud.reviewVaultRemoval',
       title: 'Review Cloud Vault',

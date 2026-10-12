@@ -5997,3 +5997,51 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   color: rgb(var(--z-green));
   background-color: rgb(var(--z-green) / 0.12);
 }
+
+
+/* Reviewing an assistant's edits (cm-agent-review.ts): the merge view's
+   changes in the theme's own red and green instead of its fixed ones, and its
+   Accept / Reject buttons in the app's button shape. Scoped by the editor's
+   `zen-agent-review` class so they outrank the merge view's injected theme. */
+/* The bands run to the editor's right edge, not just the text column: a
+   border image with `fill`, pushed out to the right by its outset. That is
+   ink overflow, so it adds no horizontal scrolling, and the scroller clips
+   it at the edge of the pane. */
+.cm-editor.zen-agent-review .cm-deletedChunk {
+  background-color: transparent;
+  border-image-source: linear-gradient(rgb(var(--z-red) / 0.07), rgb(var(--z-red) / 0.07));
+  border-image-slice: 0 fill;
+  border-image-outset: 0 100vw 0 0;
+}
+.cm-editor.zen-agent-review .cm-deletedChunk .cm-deletedText {
+  background: rgb(var(--z-red) / 0.24);
+}
+.cm-editor.zen-agent-review .cm-changedLine {
+  background-color: transparent;
+  border-image-source: linear-gradient(rgb(var(--z-green) / 0.08), rgb(var(--z-green) / 0.08));
+  border-image-slice: 0 fill;
+  border-image-outset: 0 100vw 0 0;
+}
+.cm-editor.zen-agent-review .cm-changedText {
+  background: rgb(var(--z-green) / 0.24);
+}
+.cm-editor.zen-agent-review .cm-deletedChunk .zen-review-control {
+  margin: 0 2px;
+  padding: 1px 8px;
+  border: 1px solid theme("colors.paper.300");
+  border-radius: 6px;
+  background: theme("colors.paper.100");
+  color: theme("colors.ink.800");
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.cm-editor.zen-agent-review .cm-deletedChunk .zen-review-accept:hover {
+  border-color: rgb(var(--z-green) / 0.55);
+  background: rgb(var(--z-green) / 0.14);
+}
+.cm-editor.zen-agent-review .cm-deletedChunk .zen-review-reject:hover {
+  border-color: rgb(var(--z-red) / 0.55);
+  background: rgb(var(--z-red) / 0.14);
+}

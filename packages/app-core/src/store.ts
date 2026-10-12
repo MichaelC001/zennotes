@@ -24,6 +24,7 @@ import { normalizeTasksExcludedFolder } from '@shared/tasks-excluded-folders'
 import { cloudSyncPathKey } from '@zennotes/shared-domain/cloud-sync'
 import { useCloudSyncStatusStore } from './lib/cloud-auto-sync'
 import type {
+  AgentEditSummary,
   AssetMeta,
   DateNotePatternSettings,
   DeletedAsset,
@@ -449,7 +450,8 @@ async function refreshVaultIndexes(): Promise<void> {
     state.refreshAssets(),
     state.loadCustomTemplates(),
     state.loadWorkflowIndex(),
-    state.refreshRootContentHidden()
+    state.refreshRootContentHidden(),
+    state.refreshAgentEdits()
   ])
   // A run the app died in the middle of left changes nobody was told about,
   // and this is the first moment anyone is back to be told. Dynamically
@@ -604,6 +606,9 @@ interface Prefs {
    *  so the title line stops drifting from the filename. Never adds a heading
    *  to a note that has none. (#455) */
   syncTitleHeadingOnRename: boolean
+  /** Keep what a note said before an assistant edits it through MCP, so the
+   *  edit can be reviewed. The MCP server reads it from config.toml. */
+  reviewAgentEdits: boolean
   /** Auto-close markdown delimiters while typing: `**`+Space → `**|**`,
    *  ```` ``` ````+Enter expands a fenced block. Off restores plain typing. */
   markdownSnippets: boolean
@@ -1098,6 +1103,7 @@ export const DEFAULT_PREFS: Prefs = {
   persistUndoHistory: false,
   defaultPaneMode: 'edit',
   syncTitleHeadingOnRename: true,
+  reviewAgentEdits: true,
   markdownSnippets: true,
   textReplacementsEnabled: true,
   textReplacements: { '->': '→' },
@@ -1297,6 +1303,8 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
       typeof p.syncTitleHeadingOnRename === 'boolean'
         ? p.syncTitleHeadingOnRename
         : DEFAULT_PREFS.syncTitleHeadingOnRename,
+    reviewAgentEdits:
+      typeof p.reviewAgentEdits === 'boolean' ? p.reviewAgentEdits : DEFAULT_PREFS.reviewAgentEdits,
     markdownSnippets:
       typeof p.markdownSnippets === 'boolean'
         ? p.markdownSnippets
@@ -2355,6 +2363,7 @@ function collectPrefs(s: {
   persistUndoHistory: boolean
   defaultPaneMode: PaneMode
   syncTitleHeadingOnRename: boolean
+  reviewAgentEdits: boolean
   markdownSnippets: boolean
   textReplacementsEnabled: boolean
   textReplacements: TextReplacements
@@ -2466,6 +2475,7 @@ function collectPrefs(s: {
     persistUndoHistory: s.persistUndoHistory,
     defaultPaneMode: s.defaultPaneMode,
     syncTitleHeadingOnRename: s.syncTitleHeadingOnRename,
+    reviewAgentEdits: s.reviewAgentEdits,
     markdownSnippets: s.markdownSnippets,
     textReplacementsEnabled: s.textReplacementsEnabled,
     textReplacements: s.textReplacements,
@@ -3001,6 +3011,8 @@ interface Store {
   defaultPaneMode: PaneMode
   /** Renaming a note rewrites its leading `# Heading` to match. Persisted. (#455) */
   syncTitleHeadingOnRename: boolean
+  /** Record assistant edits made through MCP for review. Persisted (portable). */
+  reviewAgentEdits: boolean
   /** Auto-close markdown delimiters while typing. Persisted. */
   markdownSnippets: boolean
   textReplacementsEnabled: boolean
@@ -3258,6 +3270,10 @@ interface Store {
   noteDirty: Record<string, boolean>
   /** Comment sidecars keyed by note path. Loaded lazily per open note. */
   noteComments: Record<string, NoteComment[]>
+  /** Notes an assistant edited through MCP that the user has not reviewed
+   *  yet, keyed by note path (docs/ideas/agent-edit-review.md). Empty on
+   *  hosts without `supportsAgentEditReview`. */
+  agentEdits: Record<string, AgentEditSummary>
   activeCommentId: string | null
   closedTabStack: ClosedTabEntry[]
 
@@ -3601,6 +3617,7 @@ interface Store {
   setPersistUndoHistory: (on: boolean) => void
   setDefaultPaneMode: (mode: PaneMode) => void
   setSyncTitleHeadingOnRename: (on: boolean) => void
+  setReviewAgentEdits: (on: boolean) => void
   setMarkdownSnippets: (on: boolean) => void
   setTextReplacementsEnabled: (on: boolean) => void
   setTextReplacements: (replacements: TextReplacements) => void
@@ -3833,6 +3850,10 @@ interface Store {
   /** Persist a specific note to disk. */
   persistNote: (path: string, duringFolderMutation?: boolean) => Promise<void>
   loadNoteComments: (path: string) => Promise<NoteComment[]>
+  /** Re-list every note with assistant edits to review. */
+  refreshAgentEdits: () => Promise<void>
+  /** Re-read one note's record after it changed on disk. */
+  refreshAgentEdit: (path: string) => Promise<void>
   addNoteComment: (input: NoteCommentInput) => Promise<NoteComment | null>
   updateNoteComment: (
     path: string,
@@ -4511,6 +4532,7 @@ function rewriteFolderWorkspace(
         : []
     }),
     tasksLoading: false,
+    agentEdits: remap(s.agentEdits, (summary, notePath) => ({ ...summary, notePath })),
     noteComments: remap(s.noteComments, (comments, notePath) =>
       comments.map((comment) => ({ ...comment, notePath }))
     ),
@@ -5798,6 +5820,7 @@ export const useStore = create<Store>((set, get) => {
   persistUndoHistory: loadPrefs().persistUndoHistory,
   defaultPaneMode: loadPrefs().defaultPaneMode,
   syncTitleHeadingOnRename: loadPrefs().syncTitleHeadingOnRename,
+  reviewAgentEdits: loadPrefs().reviewAgentEdits,
   markdownSnippets: loadPrefs().markdownSnippets,
   textReplacementsEnabled: loadPrefs().textReplacementsEnabled,
   textReplacements: loadPrefs().textReplacements,
@@ -5909,6 +5932,7 @@ export const useStore = create<Store>((set, get) => {
   noteContents: {},
   noteDirty: {},
   noteComments: {},
+  agentEdits: {},
   activeCommentId: null,
   closedTabStack: [],
 
@@ -7710,7 +7734,9 @@ export const useStore = create<Store>((set, get) => {
         tasksSurfaceVisible(get()) ? get().refreshTasks() : Promise.resolve(),
         // Templates ride the feed too (scope 'templates'), so a gap may have
         // swallowed a template saved on another device.
-        get().loadCustomTemplates()
+        get().loadCustomTemplates(),
+        // So do agent edit records (scope 'agent-edits').
+        get().refreshAgentEdits()
       ])
       const stateAfter = get()
       const openTabs = [...new Set(allLeaves(stateAfter.paneLayout).flatMap((leaf) => leaf.tabs))]
@@ -7777,6 +7803,11 @@ export const useStore = create<Store>((set, get) => {
     }
     if (ev.scope === 'comments') {
       await get().loadNoteComments(ev.path)
+      return
+    }
+    if (ev.scope === 'agent-edits') {
+      // An assistant edited the note through MCP, or a review moved on.
+      await get().refreshAgentEdit(ev.path)
       return
     }
     if (ev.scope === 'templates') {
@@ -8058,6 +8089,49 @@ export const useStore = create<Store>((set, get) => {
       await run
     } finally {
       if (pathSaveQueues.get(path) === run) pathSaveQueues.delete(path)
+    }
+  },
+
+  refreshAgentEdits: async () => {
+    const list = window.zen.listAgentEdits
+    if (!list || !window.zen.getCapabilities().supportsAgentEditReview) {
+      set({ agentEdits: {} })
+      return
+    }
+    const isCurrent = captureFolderActionContext(get)
+    try {
+      const summaries = await list()
+      if (!isCurrent()) return
+      set({ agentEdits: Object.fromEntries(summaries.map((summary) => [summary.notePath, summary])) })
+    } catch (err) {
+      console.error('listAgentEdits failed', err)
+    }
+  },
+
+  refreshAgentEdit: async (path) => {
+    const read = window.zen.readAgentEdit
+    if (!read || !window.zen.getCapabilities().supportsAgentEditReview) return
+    const isCurrent = captureFolderActionContext(get)
+    try {
+      const record = await read(path)
+      if (!isCurrent()) return
+      set((s) => {
+        const next = { ...s.agentEdits }
+        if (record) {
+          const latest = record.edits.at(-1)
+          next[path] = {
+            notePath: path,
+            agent: latest?.agent ?? 'Assistant',
+            at: latest?.at ?? 0,
+            edits: record.edits.length
+          }
+        } else {
+          delete next[path]
+        }
+        return { agentEdits: next }
+      })
+    } catch (err) {
+      console.error('readAgentEdit failed', err)
     }
   },
 
@@ -8911,6 +8985,10 @@ export const useStore = create<Store>((set, get) => {
   },
   setSyncTitleHeadingOnRename: (on) => {
     set({ syncTitleHeadingOnRename: on })
+    savePrefs(collectPrefs(get()))
+  },
+  setReviewAgentEdits: (on) => {
+    set({ reviewAgentEdits: on })
     savePrefs(collectPrefs(get()))
   },
   setMarkdownSnippets: (on) => {

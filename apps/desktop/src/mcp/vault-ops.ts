@@ -1,5 +1,6 @@
 import { readNoteCreatedAt, prepareNoteCreation, removeNoteCreation, noteMetadataPath } from '../main/note-creation-metadata'
 import { noteCommentsPath, noteCommentsRoot, relocateFolderTrees, relocateNote } from '../main/note-sidecars'
+import { agentEditFolderPath, removeAgentEditRecord } from '../main/agent-edit-files'
 /**
  * Vault operations used by the MCP server. Mirrors the filesystem
  * behavior of src/main/vault.ts, but without Electron dependencies —
@@ -330,7 +331,7 @@ export async function readVaultRootFromConfig(): Promise<string | null> {
  *  in main/app-config.ts, which reaches it through Electron's `app`; this
  *  process has none. Note this is NOT `userDataDir()` above; the portable
  *  prefs live beside it, in an XDG-style location the user can sync. */
-function portableConfigDir(): string {
+export function portableConfigDir(): string {
   const explicit = process.env.ZENNOTES_CONFIG_DIR?.trim()
   if (explicit) return explicit
   const xdg = process.env.XDG_CONFIG_HOME?.trim()
@@ -603,8 +604,8 @@ function resolveSafe(root: string, rel: string): string {
  * Resolve a note an edit is about to write, and refuse anything outside the
  * note folders BEFORE a byte lands. The edits used to write first and check
  * after, so `write_note` on `.zennotes/...` created the file and only then
- * reported an error: an assistant could plant or alter a note's comments,
- * its creation date, or anything else the app keeps there.
+ * reported an error: an assistant could plant comments, creation dates or
+ * agent edit records, the files that say what a note used to be.
  */
 async function noteForWrite(root: string, rel: string): Promise<{ abs: string; folder: NoteFolder }> {
   const abs = resolveSafe(root, rel)
@@ -992,6 +993,8 @@ export async function createNote(
   const abs = path.join(dir, `${finalTitle}.md`)
   const content = body ?? `# ${finalTitle}\n\n`
   await removeNoteCreation(root, toPosix(path.relative(root, abs)))
+  // A record left by an earlier note of this name would offer a bogus review.
+  await removeAgentEditRecord(root, toPosix(path.relative(root, abs)))
   await fs.writeFile(abs, content, 'utf8')
   return await readMeta(root, abs, folder)
 }
@@ -1135,6 +1138,7 @@ export async function deleteNote(root: string, rel: string): Promise<void> {
   // be taken over by the next note created under this name.
   await fs.rm(noteCommentsPath(root, notePath), { force: true })
   await removeNoteCreation(root, notePath)
+  await removeAgentEditRecord(root, notePath)
 }
 
 export async function emptyTrash(root: string): Promise<void> {
@@ -1145,6 +1149,7 @@ export async function emptyTrash(root: string): Promise<void> {
     const trashRel = toPosix(path.relative(root, trashDir))
     await fs.rm(resolveSafe(noteCommentsRoot(root), trashRel), { recursive: true, force: true })
     await removeNoteCreation(root, trashRel, true)
+    await removeAgentEditRecord(root, trashRel, true)
   } catch {
     /* no trash dir */
   }
@@ -1180,13 +1185,15 @@ export async function renameFolder(
   }
   const oldRel = toPosix(path.relative(root, oldAbs))
   const newRel = toPosix(path.relative(root, newAbs))
-  // The folder's comments and creation dates move as one with it, the way the
-  // desktop's renameFolderTrees does; a failure puts all three back.
+  // The folder's comments, creation dates and agent edit records move as one
+  // with it, the way the desktop's renameFolderTrees does; a failure puts all
+  // of them back.
   await relocateFolderTrees(
     [
       [oldAbs, newAbs],
       [resolveSafe(noteCommentsRoot(root), oldRel), resolveSafe(noteCommentsRoot(root), newRel)],
-      [await noteMetadataPath(root, oldRel, true), await noteMetadataPath(root, newRel, true)]
+      [await noteMetadataPath(root, oldRel, true), await noteMetadataPath(root, newRel, true)],
+      [agentEditFolderPath(root, oldRel), agentEditFolderPath(root, newRel)]
     ],
     async () => {}
   )
@@ -1206,6 +1213,7 @@ export async function deleteFolder(
   await fs.rm(abs, { recursive: true, force: true })
   await fs.rm(resolveSafe(noteCommentsRoot(root), rel), { recursive: true, force: true })
   await removeNoteCreation(root, rel, true)
+  await removeAgentEditRecord(root, rel, true)
 }
 
 /* ---------- Text search ---------------------------------------------- */

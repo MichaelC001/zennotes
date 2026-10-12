@@ -39,7 +39,7 @@ interface ScalarFieldMap {
 }
 
 // Order sections are emitted in. Keeps the file stable across rewrites.
-const SECTION_ORDER = ['vim', 'search', 'editor', 'appearance', 'typography', 'view'] as const
+const SECTION_ORDER = ['vim', 'search', 'editor', 'appearance', 'typography', 'view', 'mcp'] as const
 
 // Scalar (string / number / boolean) portable prefs → [section].key (snake_case).
 const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
@@ -116,6 +116,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     section: 'editor',
     tomlKey: 'sync_title_heading_on_rename',
     comment: "renaming a note rewrites its leading '# heading' to match"
+  },
+  reviewAgentEdits: {
+    section: 'mcp',
+    tomlKey: 'review_agent_edits',
+    comment: 'keep what a note said before an assistant edits it through MCP, so you can review the change'
   },
   markdownSnippets: {
     section: 'editor',

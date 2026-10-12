@@ -80,6 +80,8 @@ import type {
   ListNotesPageResponse,
   NoteComment,
   NoteCommentInput,
+  AgentEditRecord,
+  AgentEditSummary,
   NoteContent,
   NoteFolder,
   NoteMeta,
@@ -129,7 +131,8 @@ const DESKTOP_CAPABILITIES: ZenCapabilities = {
   supportsCustomTemplates: true,
   supportsCustomCodeLanguages: true,
   supportsWorkflows: true,
-  supportsUndoFile: true
+  supportsUndoFile: true,
+  supportsAgentEditReview: true
 }
 
 const DESKTOP_APP_INFO: ZenAppInfo = {
@@ -541,6 +544,11 @@ const api: ZenBridge = {
     ipcRenderer.invoke(IPC.VAULT_READ_COMMENTS, relPath),
   writeNoteComments: (relPath: string, comments: NoteCommentInput[]): Promise<NoteComment[]> =>
     ipcRenderer.invoke(IPC.VAULT_WRITE_COMMENTS, relPath, comments),
+  listAgentEdits: (): Promise<AgentEditSummary[]> => ipcRenderer.invoke(IPC.VAULT_LIST_AGENT_EDITS),
+  readAgentEdit: (relPath: string): Promise<AgentEditRecord | null> =>
+    ipcRenderer.invoke(IPC.VAULT_READ_AGENT_EDIT, relPath),
+  writeAgentEdit: (relPath: string, record: AgentEditRecord | null): Promise<void> =>
+    ipcRenderer.invoke(IPC.VAULT_WRITE_AGENT_EDIT, relPath, record),
   scanTasks: (): Promise<VaultTask[]> => ipcRenderer.invoke(IPC.VAULT_SCAN_TASKS),
   scanTasksForPath: (relPath: string): Promise<VaultTask[]> =>
     ipcRenderer.invoke(IPC.VAULT_SCAN_TASKS_FOR, relPath),

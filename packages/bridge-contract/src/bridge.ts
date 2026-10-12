@@ -18,6 +18,8 @@ import type {
   ListNotesPageResponse,
   NoteComment,
   NoteCommentInput,
+  AgentEditRecord,
+  AgentEditSummary,
   NoteContent,
   NoteFolder,
   NoteMeta,
@@ -124,6 +126,11 @@ export interface ZenCapabilities {
    *  machine-local that is not the vault (`readNoteUndoHistory` and friends).
    *  Absent everywhere but the desktop app, which hides the setting. (#793) */
   supportsUndoFile?: boolean
+  /** The host can read and write agent edit records for a local vault
+   *  (`listAgentEdits` and friends), so assistant edits made through MCP can
+   *  be reviewed. Absent where records are not reachable yet (the web client
+   *  and the phones), which hides the review. */
+  supportsAgentEditReview?: boolean
 }
 
 export interface ZenAppInfo {
@@ -338,6 +345,13 @@ export interface ZenBridge {
   readNote(relPath: string): Promise<NoteContent>
   readNoteComments(relPath: string): Promise<NoteComment[]>
   writeNoteComments(relPath: string, comments: NoteCommentInput[]): Promise<NoteComment[]>
+  /** Notes with assistant edits to review, newest first. Only on hosts with
+   *  `supportsAgentEditReview`. */
+  listAgentEdits?(): Promise<AgentEditSummary[]>
+  /** A note's agent edit record, or null when there is none. */
+  readAgentEdit?(relPath: string): Promise<AgentEditRecord | null>
+  /** Save a review's progress, or delete the record with `null`. */
+  writeAgentEdit?(relPath: string, record: AgentEditRecord | null): Promise<void>
   scanTasks(): Promise<VaultTask[]>
   scanTasksForPath(relPath: string): Promise<VaultTask[]>
   /** Resolves to null when the `.csv` no longer exists (e.g. a stale tab). */

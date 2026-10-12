@@ -5542,6 +5542,23 @@ export function SettingsModal(): JSX.Element {
           ],
         },
         {
+          id: "review-agent-edits",
+          title: "Review agent edits",
+          description:
+            "Keep what a note said before an assistant edits it through MCP, so you can accept or reject each change.",
+          keywords: [
+            "review",
+            "agent",
+            "assistant",
+            "ai",
+            "changes",
+            "diff",
+            "accept",
+            "reject",
+            "mcp",
+          ],
+        },
+        {
           id: "mcp-instructions",
           title: "MCP instructions",
           description:
@@ -8953,8 +8970,25 @@ function McpSettings(): JSX.Element {
         )}
       </Section>
 
+      <AgentEditReviewSetting />
+
       <McpInstructionsEditor />
     </div>
+  );
+}
+
+function AgentEditReviewSetting(): JSX.Element {
+  const reviewAgentEdits = useStore((s) => s.reviewAgentEdits);
+  const setReviewAgentEdits = useStore((s) => s.setReviewAgentEdits);
+  return (
+    <Section title="Agent edits" settingId="review-agent-edits">
+      <ToggleRow
+        label="Review agent edits"
+        description="When an assistant edits a note through MCP, keep what the note said before, so the note offers Review changes: each change shown inline with Accept and Reject. The copy is deleted once you have decided every change. Edits to notes in a vault on a self-hosted server are not kept yet."
+        value={reviewAgentEdits}
+        onChange={setReviewAgentEdits}
+      />
+    </Section>
   );
 }
 

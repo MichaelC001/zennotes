@@ -117,6 +117,12 @@ import {
   writeNote,
 } from "./vault";
 import {
+  listAgentEditRecords,
+  readAgentEditRecord,
+  writeAgentEditRecord,
+} from "./agent-edit-files";
+import { parseAgentEditRecord } from "@shared/agent-edits";
+import {
   initAppConfig,
   getPortableConfigSnapshot,
   setPortableConfig,
@@ -3928,6 +3934,35 @@ function registerIpc(): void {
       // stays pristine (they aren't persisted for a temporary browse).
       if (isEphemeralRoot(v.root)) return;
       return await writeNoteComments(v.root, relPath, comments);
+    },
+  );
+
+  // Agent edit records (docs/ideas/agent-edit-review.md), local vaults only: a
+  // remote vault's notes are edited through its server, which does not record
+  // assistant edits yet, so there is nothing to review there.
+  handle(IPC.VAULT_LIST_AGENT_EDITS, async () => {
+    if (isRemoteWorkspaceActive()) return [];
+    return await listAgentEditRecords(requireVault().root);
+  });
+
+  handle(IPC.VAULT_READ_AGENT_EDIT, async (_e, relPath: string) => {
+    if (isRemoteWorkspaceActive() || typeof relPath !== "string") return null;
+    return await readAgentEditRecord(requireVault().root, relPath);
+  });
+
+  handle(
+    IPC.VAULT_WRITE_AGENT_EDIT,
+    async (_e, relPath: string, record: unknown) => {
+      if (isRemoteWorkspaceActive()) return;
+      if (typeof relPath !== "string") throw new Error("A note path is required");
+      const v = requireVault();
+      if (isEphemeralRoot(v.root)) return;
+      // The renderer is not trusted with the shape: only a well-formed record
+      // (or null, which deletes it) reaches the vault, and only inside
+      // .zennotes/agent-edits (agentEditPath refuses anything else).
+      const parsed = record === null ? null : parseAgentEditRecord(record);
+      if (record !== null && !parsed) throw new Error("Not an agent edit record");
+      await writeAgentEditRecord(v.root, relPath, parsed);
     },
   );
 

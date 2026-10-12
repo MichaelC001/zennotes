@@ -5,6 +5,7 @@ import {
   relocateFolderTrees,
   relocateNote
 } from './note-sidecars'
+import { agentEditFolderPath, removeAgentEditRecord } from './agent-edit-files'
 import { promises as fs, type Dirent } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -1610,7 +1611,7 @@ async function typstPreambleFolderFor(root: string): Promise<string> {
  */
 export function vaultChangeAffectsSettings(ev: VaultChangeEvent): boolean {
   if (ev.scope === 'vault-settings') return true
-  if (ev.scope === 'comments' || ev.scope === 'database') return false
+  if (ev.scope === 'comments' || ev.scope === 'agent-edits' || ev.scope === 'database') return false
   // A root-level entry (`Notes.md`, or a directory named `Notes`) is what the
   // inference looks at; anything nested carries a separator.
   return !ev.path.includes('/')
@@ -3499,6 +3500,7 @@ export async function createNote(
   const abs = path.join(dir, `${finalTitle}.md`)
   const body = `# ${finalTitle}\n\n`
   await removeNoteCreation(root, toPosix(path.relative(root, abs)))
+  await removeAgentEditRecord(root, toPosix(path.relative(root, abs)))
   await fs.writeFile(abs, body, 'utf8')
   invalidateNoteMetaCache(root, toPosix(path.relative(root, abs)))
   invalidateVaultTextSearchCache(root)
@@ -3530,6 +3532,7 @@ export async function createExcalidraw(
   }
   const abs = path.join(dir, `${finalTitle}.excalidraw`)
   await removeNoteCreation(root, toPosix(path.relative(root, abs)))
+  await removeAgentEditRecord(root, toPosix(path.relative(root, abs)))
   await fs.writeFile(abs, JSON.stringify(emptyExcalidrawDocument(), null, 2), 'utf8')
   invalidateNoteMetaCache(root, toPosix(path.relative(root, abs)))
   return await readMeta(root, abs, folder)
@@ -3571,6 +3574,7 @@ export async function convertObsidianExcalidraw(root: string, rel: string): Prom
   }
   const destAbs = path.join(dir, `${finalTitle}.excalidraw`)
   await removeNoteCreation(root, toPosix(path.relative(root, destAbs)))
+  await removeAgentEditRecord(root, toPosix(path.relative(root, destAbs)))
   await fs.writeFile(destAbs, JSON.stringify(scene, null, 2), 'utf8')
   invalidateNoteMetaCache(root, toPosix(path.relative(root, destAbs)))
   return await readMeta(root, destAbs, folder)
@@ -3590,6 +3594,7 @@ export async function importExternalNote(root: string, sourceAbsPath: string): P
   const destAbs = path.join(destDir, `${finalTitle}.md`)
   const body = await fs.readFile(source, 'utf8')
   await removeNoteCreation(root, toPosix(path.relative(root, destAbs)))
+  await removeAgentEditRecord(root, toPosix(path.relative(root, destAbs)))
   await fs.writeFile(destAbs, body, 'utf8')
   await fs.rm(source, { force: true })
   const rel = toPosix(path.relative(root, destAbs))
@@ -3742,6 +3747,7 @@ export async function trashNoteToSystem(root: string, rel: string): Promise<Note
   } else {
     await shell.trashItem(abs)
   }
+  await removeAgentEditRecord(root, rel).catch((error) => console.warn('Agent edit cleanup pending', error))
   invalidateNoteMetaCache(root, rel)
   invalidateVaultTextSearchCache(root)
   return meta
@@ -3771,6 +3777,7 @@ export async function emptyTrash(root: string): Promise<void> {
     [await noteMetadataPath(root, trashRel, true), path.join(temporary, 'metadata')]
   ], async () => {})
   await fs.rm(temporary, { recursive: true, force: true }).catch(error => console.warn('Trash cleanup pending', error))
+  await removeAgentEditRecord(root, trashRel, true).catch((error) => console.warn('Agent edit cleanup pending', error))
   invalidateNoteMetaCache(root)
   invalidateVaultTextSearchCache(root)
 }
@@ -3800,6 +3807,9 @@ export async function deleteNote(root: string, rel: string): Promise<void> {
     // Once detached, cleanup cannot attach the old discussion to a new note.
     await fs.rm(temporary, { recursive: true, force: true }).catch(error => console.warn('Note cleanup pending', error))
   }
+  await removeAgentEditRecord(root, toPosix(path.relative(root, abs))).catch((error) =>
+    console.warn('Agent edit cleanup pending', error)
+  )
   invalidateNoteMetaCache(root, rel)
   invalidateVaultTextSearchCache(root)
 }
@@ -4057,7 +4067,8 @@ export async function renameFolderTrees(
   const oldComments = resolveSafe(noteCommentsRoot(root), toPosix(path.relative(root, oldAbs)))
   const newComments = resolveSafe(noteCommentsRoot(root), toPosix(path.relative(root, newAbs)))
   await relocateFolderTrees([[oldAbs, newAbs], [oldComments, newComments],
-    [await noteMetadataPath(root, oldRelative, true), await noteMetadataPath(root, newRelative, true)]], persistSettings)
+    [await noteMetadataPath(root, oldRelative, true), await noteMetadataPath(root, newRelative, true)],
+    [agentEditFolderPath(root, toPosix(path.relative(root, oldAbs))), agentEditFolderPath(root, toPosix(path.relative(root, newAbs)))]], persistSettings)
   invalidateNoteMetaCache(root)
   invalidateVaultTextSearchCache(root)
 }
@@ -4133,6 +4144,7 @@ export async function deleteFolder(
   })
   if (isEphemeralRoot(root) && !hasComments) {
     await fs.rm(abs, { recursive: true, force: true })
+    await removeAgentEditRecord(root, toPosix(path.relative(root, abs)), true)
     invalidateNoteMetaCache(root)
     invalidateVaultTextSearchCache(root)
     return
@@ -4157,6 +4169,9 @@ export async function deleteFolder(
   await fs
     .rm(temporary, { recursive: true, force: true })
     .catch((error) => console.warn('Folder cleanup pending', error))
+  await removeAgentEditRecord(root, toPosix(path.relative(root, abs)), true).catch((error) =>
+    console.warn('Agent edit cleanup pending', error)
+  )
   invalidateNoteMetaCache(root)
   invalidateVaultTextSearchCache(root)
 }
@@ -4399,6 +4414,7 @@ export async function duplicateNote(root: string, rel: string): Promise<NoteMeta
   const destAbs = path.join(dir, `${copyTitle}${ext}`)
   const body = await fs.readFile(abs, 'utf8')
   await removeNoteCreation(root, toPosix(path.relative(root, destAbs)))
+  await removeAgentEditRecord(root, toPosix(path.relative(root, destAbs)))
   await fs.writeFile(destAbs, body, 'utf8')
   const meta = await readMeta(root, destAbs, folder)
   await copyNoteComments(root, rel, meta.path)

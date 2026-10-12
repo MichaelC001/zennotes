@@ -38,6 +38,7 @@ export const PORTABLE_PREF_KEYS = [
   'persistUndoHistory',
   'defaultPaneMode',
   'syncTitleHeadingOnRename',
+  'reviewAgentEdits',
   'markdownSnippets',
   'textReplacementsEnabled',
   'textReplacements',

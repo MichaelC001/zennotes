@@ -20,6 +20,7 @@ import {
 
 import { resolveInstructions } from './instructions-store.js'
 import { createBackend, type VaultBackend } from '../cli/backend.js'
+import { runRecordingAgentEdit } from './agent-edit-recorder.js'
 import { resolveDefaultTarget, sameVault, type VaultTarget } from '../cli/vault-target.js'
 import { RemoteRequestError } from '../main/remote/connection.js'
 import type { NoteFolder } from './vault-ops.js'
@@ -956,7 +957,9 @@ export async function callTool(
 ): Promise<unknown> {
   const tool = TOOLS.find((t) => t.schema.name === name)
   if (!tool) throw new Error(`Unknown tool: ${name}`)
-  return await tool.handler(args, backend)
+  return await runRecordingAgentEdit(name, args, backend, defaultCommentAuthor(), () =>
+    tool.handler(args, backend)
+  )
 }
 
 export function listToolNames(): string[] {
@@ -1125,9 +1128,11 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<void
     }
     try {
       const { backend, previous } = await vaults.backendFor(name === 'vault_info')
-      const result = await tool.handler((args ?? {}) as Record<string, unknown>, backend, {
-        previous
-      })
+      const toolArgs = (args ?? {}) as Record<string, unknown>
+      // An edit to a note is recorded so the user can review it in the app.
+      const result = await runRecordingAgentEdit(name, toolArgs, backend, defaultCommentAuthor(), () =>
+        tool.handler(toolArgs, backend, { previous })
+      )
       const payload =
         typeof result === 'string' ? result : JSON.stringify(result, null, 2)
       return { content: [{ type: 'text', text: payload }] }
