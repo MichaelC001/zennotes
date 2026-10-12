@@ -50,6 +50,9 @@ import type {
   CloudBackupSchedule,
   CloudBackupSnapshot,
   CloudBackupSnapshotItem,
+  CloudEncryptionRecoveryPrompt,
+  CloudEncryptionSecretInput,
+  CloudEncryptionStatus,
   CloudPublishedNote,
   CloudPublishedNoteResult,
   CloudPublishNoteInput,
@@ -175,7 +178,23 @@ export interface ZenBridge {
   listCloudVaults(): Promise<CloudSyncVault[]>
   getCloudVaultLink(): Promise<CloudVaultLink | null>
   linkCloudVault(vaultId: string): Promise<CloudVaultLink>
-  createAndLinkCloudVault(name: string): Promise<CloudVaultLink>
+  createAndLinkCloudVault(name: string, options?: { encrypted?: boolean }): Promise<CloudVaultLink>
+  /** End-to-end encryption; hosts that cannot open encrypted vaults leave these out. */
+  getCloudEncryptionStatus?(): Promise<CloudEncryptionStatus>
+  prepareCloudEncryptionSetup?(passphrase: string): Promise<CloudEncryptionRecoveryPrompt>
+  finishCloudEncryptionSetup?(setupId: string): Promise<void>
+  unlockCloudEncryption?(secret: CloudEncryptionSecretInput): Promise<void>
+  changeCloudEncryptionPassphrase?(
+    current: CloudEncryptionSecretInput,
+    next: string
+  ): Promise<void>
+  prepareNewCloudRecoveryKey?(
+    current: CloudEncryptionSecretInput
+  ): Promise<CloudEncryptionRecoveryPrompt>
+  finishNewCloudRecoveryKey?(setupId: string): Promise<void>
+  lockCloudEncryption?(): Promise<void>
+  /** Moves the linked readable Cloud vault into a new end-to-end encrypted one. */
+  encryptCloudVault?(): Promise<CloudVaultLink>
   unlinkCloudVault(): Promise<void>
   deleteCloudVault(): Promise<void>
   syncCloudVault(): Promise<CloudSyncRunSummary>
