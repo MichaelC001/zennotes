@@ -599,6 +599,20 @@ function resolveSafe(root: string, rel: string): string {
   return abs
 }
 
+/**
+ * Resolve a note an edit is about to write, and refuse anything outside the
+ * note folders BEFORE a byte lands. The edits used to write first and check
+ * after, so `write_note` on `.zennotes/...` created the file and only then
+ * reported an error: an assistant could plant or alter a note's comments,
+ * its creation date, or anything else the app keeps there.
+ */
+async function noteForWrite(root: string, rel: string): Promise<{ abs: string; folder: NoteFolder }> {
+  const abs = resolveSafe(root, rel)
+  const folder = await folderOf(root, abs)
+  if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
+  return { abs, folder }
+}
+
 async function folderOf(root: string, abs: string): Promise<NoteFolder | null> {
   const rel = toPosix(path.relative(root, abs))
   if (!rel || rel.startsWith('..')) return null
@@ -889,12 +903,10 @@ export async function readNote(root: string, rel: string): Promise<NoteContent> 
 }
 
 export async function writeNote(root: string, rel: string, body: string): Promise<NoteMeta> {
-  const abs = resolveSafe(root, rel)
+  const { abs, folder } = await noteForWrite(root, rel)
   await fs.mkdir(path.dirname(abs), { recursive: true })
   await prepareNoteCreation(root, toPosix(path.relative(root, abs)))
   await fs.writeFile(abs, body, 'utf8')
-  const folder = await folderOf(root, abs)
-  if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
 }
 
@@ -1839,12 +1851,10 @@ export function appendToBody(body: string, text: string): string {
 }
 
 export async function appendToNote(root: string, rel: string, text: string): Promise<NoteMeta> {
-  const abs = resolveSafe(root, rel)
+  const { abs, folder } = await noteForWrite(root, rel)
   const body = await fs.readFile(abs, 'utf8')
   await prepareNoteCreation(root, toPosix(path.relative(root, abs)))
   await fs.writeFile(abs, appendToBody(body, text), 'utf8')
-  const folder = await folderOf(root, abs)
-  if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
 }
 
@@ -1858,12 +1868,10 @@ export function prependToBody(body: string, text: string): string {
 }
 
 export async function prependToNote(root: string, rel: string, text: string): Promise<NoteMeta> {
-  const abs = resolveSafe(root, rel)
+  const { abs, folder } = await noteForWrite(root, rel)
   const body = await fs.readFile(abs, 'utf8')
   await prepareNoteCreation(root, toPosix(path.relative(root, abs)))
   await fs.writeFile(abs, prependToBody(body, text), 'utf8')
-  const folder = await folderOf(root, abs)
-  if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
 }
 
@@ -1901,18 +1909,12 @@ export async function replaceInNote(
   replace: string,
   occurrence: 'first' | 'all' = 'first'
 ): Promise<{ meta: NoteMeta; replacements: number }> {
-  const abs = resolveSafe(root, rel)
+  const { abs, folder } = await noteForWrite(root, rel)
   const body = await fs.readFile(abs, 'utf8')
   const { body: next, replacements } = replaceInBody(body, find, replace, occurrence)
-  if (replacements === 0) {
-    const folder = await folderOf(root, abs)
-    if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
-    return { meta: await readMeta(root, abs, folder), replacements: 0 }
-  }
+  if (replacements === 0) return { meta: await readMeta(root, abs, folder), replacements: 0 }
   await prepareNoteCreation(root, toPosix(path.relative(root, abs)))
   await fs.writeFile(abs, next, 'utf8')
-  const folder = await folderOf(root, abs)
-  if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return { meta: await readMeta(root, abs, folder), replacements }
 }
 
@@ -1922,12 +1924,10 @@ export async function insertAtLine(
   lineNumber: number,
   text: string
 ): Promise<NoteMeta> {
-  const abs = resolveSafe(root, rel)
+  const { abs, folder } = await noteForWrite(root, rel)
   const body = await fs.readFile(abs, 'utf8')
   await prepareNoteCreation(root, toPosix(path.relative(root, abs)))
   await fs.writeFile(abs, insertAtLineInBody(body, lineNumber, text), 'utf8')
-  const folder = await folderOf(root, abs)
-  if (!folder) throw new Error(`Note not in a known folder: ${rel}`)
   return await readMeta(root, abs, folder)
 }
 
