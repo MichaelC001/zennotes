@@ -428,6 +428,7 @@ export function VimNav(): JSX.Element | null {
         state.searchOpen ||
         state.vaultTextSearchOpen ||
         state.settingsOpen ||
+        state.whatsNewOpen ||
         state.commandPaletteOpen ||
         state.bufferPaletteOpen
       ) return

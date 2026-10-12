@@ -260,6 +260,7 @@ import { normalizeIgnoredKeys } from './lib/ignored-keys'
 import { normalizeApplicationSchemes } from '@shared/application-links'
 import { normalizeEditorTabSize } from './lib/editor-tab-size'
 import { recentNoteToggleTarget } from './lib/recent-note-toggle'
+import { whatsNewAtLaunch, whatsNewOnDemand, type WhatsNewView } from './lib/whats-new'
 
 import type { NoteSortOrder } from './lib/note-order'
 export type { NoteSortOrder } from './lib/note-order'
@@ -771,6 +772,10 @@ interface Prefs {
   kanbanFolderRoot: string
   /** True once the user has dismissed the first-run onboarding wizard. */
   hasCompletedOnboarding: boolean
+  /** The version whose What’s New this device last showed, or on a fresh
+   *  install the version it started on (lib/whats-new.ts). Machine-local, not
+   *  portable: every copy of the app updates on its own. */
+  lastSeenWhatsNewVersion: string | null
 }
 
 export type TasksViewMode = 'list' | 'calendar' | 'kanban'
@@ -1184,7 +1189,8 @@ export const DEFAULT_PREFS: Prefs = {
   kanbanCardOrder: {},
   kanbanStatuses: [],
   kanbanFolderRoot: '',
-  hasCompletedOnboarding: false
+  hasCompletedOnboarding: false,
+  lastSeenWhatsNewVersion: null
 }
 /** Coerce any loaded prefs blob into a valid Prefs object, dropping
  *  anything unknown (e.g. tokyo-night left over from earlier versions). */
@@ -1539,7 +1545,11 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
     hasCompletedOnboarding:
       typeof p.hasCompletedOnboarding === 'boolean'
         ? p.hasCompletedOnboarding
-        : DEFAULT_PREFS.hasCompletedOnboarding
+        : DEFAULT_PREFS.hasCompletedOnboarding,
+    lastSeenWhatsNewVersion:
+      typeof p.lastSeenWhatsNewVersion === 'string' && p.lastSeenWhatsNewVersion
+        ? p.lastSeenWhatsNewVersion
+        : DEFAULT_PREFS.lastSeenWhatsNewVersion
   }
 }
 // --- Portable config file integration (desktop) -----------------------------
@@ -1549,6 +1559,10 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
 // and the web fallback. `getConfigSync()` returns null on web (and when the
 // bridge is absent, e.g. tests) — we then behave exactly as before.
 let cachedInitialPrefs: Prefs | null = null
+/** Whether this launch began as a returning user's, read with the first
+ *  prefs load: What's New must not greet a fresh install whose user skips
+ *  the onboarding before the window's check runs. */
+let onboardedAtLaunch: boolean | null = null
 // True when a config file is available on this platform (desktop). Gates
 // whether savePrefs mirrors changes out to the file.
 let configFileEnabled = false
@@ -1613,6 +1627,7 @@ function loadPrefs(): Prefs {
   }
 
   cachedInitialPrefs = hadLocalStorage || configFileHadContent ? normalized : DEFAULT_PREFS
+  onboardedAtLaunch ??= cachedInitialPrefs.hasCompletedOnboarding
   return cachedInitialPrefs
 }
 
@@ -1632,6 +1647,25 @@ function pushPortableConfig(p: Prefs): void {
       /* ignore */
     }
   }, CONFIG_PUSH_DEBOUNCE_MS)
+}
+
+/** What's New belongs to the desktop app: the phones announce through their
+ *  stores, and a self-hosted web app updates with its server. */
+function isDesktopHost(): boolean {
+  if (typeof window === 'undefined' || !window.zen) return false
+  const info = window.zen.getAppInfo()
+  return (info.hostKind ?? info.runtime) === 'desktop'
+}
+
+/** Whether ZenNotes Cloud is connected, for leaving the Cloud card out of
+ *  What's New. Asked before the window opens, so the card never flashes and
+ *  vanishes; an answer that never comes counts as not connected. */
+async function cloudConnected(): Promise<boolean> {
+  try {
+    return (await window.zen.getCloudAccountStatus?.())?.state === 'connected'
+  } catch {
+    return false
+  }
 }
 
 function savePrefs(p: Prefs): void {
@@ -2441,6 +2475,7 @@ function collectPrefs(s: {
   /** Folder board root (#730): group by the children of this folder; '' = each note's own folder. */
   kanbanFolderRoot: string
   hasCompletedOnboarding: boolean
+  lastSeenWhatsNewVersion: string | null
 }): Prefs {
   return {
     vimMode: s.vimMode,
@@ -2548,7 +2583,8 @@ function collectPrefs(s: {
     kanbanCardOrder: s.kanbanCardOrder,
     kanbanStatuses: s.kanbanStatuses,
     kanbanFolderRoot: s.kanbanFolderRoot,
-    hasCompletedOnboarding: s.hasCompletedOnboarding
+    hasCompletedOnboarding: s.hasCompletedOnboarding,
+    lastSeenWhatsNewVersion: s.lastSeenWhatsNewVersion
   }
 }
 
@@ -3201,6 +3237,10 @@ interface Store {
   kanbanFolderRoot: string
   /** True once the user has finished or skipped the first-run onboarding. */
   hasCompletedOnboarding: boolean
+  lastSeenWhatsNewVersion: string | null
+  whatsNewOpen: boolean
+  /** What the What’s New window shows while it is open. */
+  whatsNew: WhatsNewView | null
   /** ISO YYYY-MM-DD currently selected in the Calendar view. null = today. */
   tasksCalendarSelectedDate: string | null
   /** First-of-month anchor (ISO YYYY-MM-01) for the Calendar view's grid. */
@@ -3787,6 +3827,12 @@ interface Store {
   }) => Promise<number>
   /** Mark the first-run onboarding as complete (or skipped). Persists. */
   completeOnboarding: () => void
+  /** First launch of a version: record it, and after an update open What’s
+   *  New. Desktop only. */
+  showWhatsNewAfterUpdate: () => Promise<void>
+  /** The palette's What’s New in ZenNotes. */
+  openWhatsNew: () => Promise<void>
+  closeWhatsNew: () => void
   /** Re-open the first-run onboarding wizard. Persists. */
   restartOnboarding: () => void
   setFocusedPanel: (panel: Panel | null) => void
@@ -5898,6 +5944,9 @@ export const useStore = create<Store>((set, get) => {
   kanbanStatuses: loadPrefs().kanbanStatuses,
   kanbanFolderRoot: loadPrefs().kanbanFolderRoot,
   hasCompletedOnboarding: loadPrefs().hasCompletedOnboarding,
+  lastSeenWhatsNewVersion: loadPrefs().lastSeenWhatsNewVersion,
+  whatsNewOpen: false,
+  whatsNew: null,
   vaultTasks: [],
   customThemes: [],
   customCodeLanguages: [],
@@ -9984,6 +10033,36 @@ export const useStore = create<Store>((set, get) => {
     set({ hasCompletedOnboarding: true })
     savePrefs(collectPrefs(get()))
   },
+  showWhatsNewAfterUpdate: async () => {
+    if (!isDesktopHost()) return
+    const current = window.zen.getAppInfo().version
+    const { updated, entries, record } = whatsNewAtLaunch({
+      lastSeen: get().lastSeenWhatsNewVersion,
+      current,
+      returningUser: onboardedAtLaunch ?? get().hasCompletedOnboarding
+    })
+    // Recorded before the window opens, so a second window starting with
+    // this one, or a crash with it open, does not show it twice.
+    if (record) {
+      set({ lastSeenWhatsNewVersion: current })
+      savePrefs(collectPrefs(get()))
+    }
+    if (!updated) return
+    const showCloud = !(await cloudConnected())
+    if (!entries.length && !showCloud) return
+    set({ whatsNewOpen: true, whatsNew: { version: current, entries, showCloud } })
+  },
+  openWhatsNew: async () => {
+    if (!isDesktopHost()) return
+    const current = window.zen.getAppInfo().version
+    const entries = whatsNewOnDemand(current)
+    const showCloud = !(await cloudConnected())
+    set({
+      whatsNewOpen: true,
+      whatsNew: { version: entries[0]?.version ?? current, entries, showCloud }
+    })
+  },
+  closeWhatsNew: () => set({ whatsNewOpen: false, whatsNew: null }),
   restartOnboarding: () => {
     set({ hasCompletedOnboarding: false, settingsOpen: false })
     savePrefs(collectPrefs(get()))

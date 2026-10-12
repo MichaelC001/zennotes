@@ -781,6 +781,10 @@ function registerVimCommands(): void {
     },
   );
 
+  Vim.defineEx("whatsnew", "whatsnew", () => {
+    void useStore.getState().openWhatsNew();
+  });
+
   Vim.defineEx("daily", "daily", () => {
     void useStore.getState().openTodayDailyNote();
   });

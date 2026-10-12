@@ -851,6 +851,14 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       run: () => openExternal(APP_RELEASES_URL)
     },
     {
+      id: 'app.whatsNew',
+      title: 'What’s New in ZenNotes',
+      category: 'App',
+      keywords: "whats what's new release notes changelog update announcement",
+      when: () => window.zen.getAppInfo().runtime === 'desktop',
+      run: () => void getState().openWhatsNew()
+    },
+    {
       id: 'app.report-issue',
       title: 'Report an Issue',
       category: 'App',
