@@ -3678,7 +3678,7 @@ export function SettingsModal(): JSX.Element {
               description="Maximum width for preview and split-preview content."
               value={previewMaxWidth}
               min={640}
-              max={1400}
+              max={1600}
               step={20}
               unit="px"
               settingId="reading-width"
