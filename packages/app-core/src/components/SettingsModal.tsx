@@ -3766,10 +3766,25 @@ export function SettingsModal(): JSX.Element {
                 keywords: ["subscription", "entitlement", "features"],
               },
               {
+                id: "cloud-encryption",
+                title: "End-to-end encryption",
+                description:
+                  "Encrypt Cloud vaults with a passphrase only you know, and unlock this device.",
+                keywords: [
+                  "encryption",
+                  "e2ee",
+                  "passphrase",
+                  "recovery key",
+                  "unlock",
+                  "privacy",
+                  "security",
+                ],
+              },
+              {
                 id: "cloud-vault",
                 title: "Cloud vault link",
                 description: "Link this local vault and run a manual sync.",
-                keywords: ["sync", "link", "create", "conflict"],
+                keywords: ["sync", "link", "create", "conflict", "encrypt"],
               },
             ],
             content: (
