@@ -286,9 +286,11 @@ import {
 } from "../mcp/instructions-store";
 import { recordBootMark, recordMainPerf } from "./perf";
 import {
+  cloudSignInUsesLoopback,
   parseCloudAuthDeepLink,
   parseOpenNoteDeepLink,
   parseQuickCaptureDeepLink,
+  registersDeepLinkSchemeAtLaunch,
   ZENNOTES_DEEP_LINK_SCHEME,
 } from "./deep-links";
 import {
@@ -641,7 +643,7 @@ function openAllowedExternalUrl(url: string): void {
 }
 
 function registerAppDeepLinkProtocol(): void {
-  if (!isMac()) return;
+  if (!registersDeepLinkSchemeAtLaunch(process.platform)) return;
 
   try {
     const defaultApp =
@@ -3095,11 +3097,11 @@ function registerIpc(): void {
         app.isPackaged,
         process.env["ZENNOTES_CLOUD_BASE_URL"],
       );
-      const callbackUrl = app.isPackaged
-        ? undefined
-        : await getCloudAuthLoopbackServer().start(
+      const callbackUrl = cloudSignInUsesLoopback(app.isPackaged, process.platform)
+        ? await getCloudAuthLoopbackServer().start(
             async (request) => await completeCloudAuthCallback(request),
-          );
+          )
+        : undefined;
       let result;
       try {
         result = await getCloudAuthManager().connect(baseUrl, callbackUrl);
