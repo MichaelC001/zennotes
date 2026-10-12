@@ -1585,7 +1585,7 @@ function renderWildmenu(
   // they should type more to filter rather than keep tabbing forever.
   if (matches.length > slice.length) {
     const more = document.createElement("div");
-    more.textContent = `+${matches.length - slice.length} more — type to filter`;
+    more.textContent = `+${matches.length - slice.length} more · type to filter`;
     more.style.cssText =
       "padding: 4px 8px 2px; font-size: 10px; opacity: 0.6; color: rgb(var(--z-fg))";
     menu.list.appendChild(more);

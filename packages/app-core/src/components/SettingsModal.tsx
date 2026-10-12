@@ -1696,7 +1696,7 @@ export function SettingsModal(): JSX.Element {
                 </div>
                 {customThemes.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-paper-300/70 px-3 py-3 text-xs leading-5 text-ink-500">
-                    Create a theme — or drop a folder with a{" "}
+                    Create a theme, or drop a folder with a{" "}
                     <span className="font-mono text-ink-700">
                       manifest.json
                     </span>{" "}
@@ -1812,7 +1812,7 @@ export function SettingsModal(): JSX.Element {
                   )}
                 </div>
                 <p className="mb-2.5 text-xs leading-5 text-ink-500">
-                  Adjust the active theme — colors and a few layout options —
+                  Adjust the active theme (colors and a few layout options)
                   with no CSS. These apply on top of whichever theme is
                   selected; reset any one with ↺.
                 </p>
@@ -2147,7 +2147,7 @@ export function SettingsModal(): JSX.Element {
         {
           id: "scroll-off",
           title: "Scroll offset",
-          description: "Vim scrolloff — lines kept above and below the cursor.",
+          description: "Vim scrolloff: lines kept above and below the cursor.",
           keywords: ["scroll", "scrolloff", "vim", "cursor", "margin"],
         },
         {
@@ -2689,7 +2689,7 @@ export function SettingsModal(): JSX.Element {
                     />
                     <SliderRow
                       label="Scroll offset"
-                      description="Vim scrolloff — lines kept above and below the cursor while scrolling. 0 disables it."
+                      description="Vim scrolloff: lines kept above and below the cursor while scrolling. 0 disables it."
                       value={editorScrollOff}
                       min={0}
                       max={20}
@@ -2898,7 +2898,7 @@ export function SettingsModal(): JSX.Element {
                 )}
                 <SegmentedRow
                   label="Completed task style"
-                  description="How a checked task's text looks in the editor and preview — strike it through, gray it out, or both. The checkbox always shows checked."
+                  description="How a checked task's text looks in the editor and preview: strike it through, gray it out, or both. The checkbox always shows checked."
                   value={completedTaskStyle}
                   settingId="completed-task-style"
                   options={[
@@ -3009,7 +3009,7 @@ export function SettingsModal(): JSX.Element {
                 )}
                 <ToggleRow
                   label="Sync title heading on rename"
-                  description="Renaming a note also rewrites its leading `# heading` to the new name, so the title line stops drifting from the filename. Only an existing top-level heading is rewritten — a note that opens with prose, a list, or a deeper heading is left alone, so deleting the `#` line opts that note out for good."
+                  description="Renaming a note also rewrites its leading `# heading` to the new name, so the title line stops drifting from the filename. Only an existing top-level heading is rewritten: a note that opens with prose, a list, or a deeper heading is left alone, so deleting the `#` line opts that note out for good."
                   value={syncTitleHeadingOnRename}
                   settingId="sync-title-heading-on-rename"
                   onChange={setSyncTitleHeadingOnRename}
@@ -3480,7 +3480,7 @@ export function SettingsModal(): JSX.Element {
         <div className="space-y-6">
           <Section
             title="Kanban statuses"
-            description="Set up the columns for the Tasks Kanban Custom status board. Other @field boards (sprint, area, …) appear automatically as you tag tasks — no setup needed."
+            description="Set up the columns for the Tasks Kanban Custom status board. Other @field boards (sprint, area, …) appear automatically as you tag tasks, with no setup needed."
           >
             <KanbanStatusesRow settingId="kanban-statuses" />
           </Section>
@@ -4796,7 +4796,7 @@ export function SettingsModal(): JSX.Element {
                     />
                     <ToggleRow
                       label="Tasks are due on the note's date"
-                      description="A task written inside a daily note appears on the calendar for that day automatically — no need to type a due date. An explicit `due:YYYY-MM-DD` still wins."
+                      description="A task written inside a daily note appears on the calendar for that day automatically, without typing a due date. An explicit `due:YYYY-MM-DD` still wins."
                       value={
                         vaultSettings.dailyNotes.tasksDueOnNoteDate !== false
                       }
@@ -5215,7 +5215,7 @@ export function SettingsModal(): JSX.Element {
             <div className="space-y-6">
               <Section
                 title="System Folders"
-                description="Customize how the built-in folders and the Tasks view are named in the UI. This changes labels only — the internal folder ids stay `inbox`, `quick`, `archive`, and `trash`, even when primary notes live at the vault root."
+                description="Customize how the built-in folders and the Tasks view are named in the UI. This changes labels only: the internal folder ids stay `inbox`, `quick`, `archive`, and `trash`, even when primary notes live at the vault root."
               >
                 <TextInputRow
                   label="Inbox label"
@@ -5251,7 +5251,7 @@ export function SettingsModal(): JSX.Element {
                 />
                 <TextInputRow
                   label="Tasks label"
-                  description="Display name for the vault-wide Tasks view — sidebar, tab, title bar, and command palette."
+                  description="Display name for the vault-wide Tasks view in the sidebar, tab, title bar, and command palette."
                   value={systemFolderLabels.tasks ?? ""}
                   placeholder={DEFAULT_SYSTEM_FOLDER_LABELS.tasks}
                   settingId="tasks-label"
@@ -5428,7 +5428,7 @@ export function SettingsModal(): JSX.Element {
                 </div>
                 <div className="mt-1 text-xs leading-5 text-ink-500">
                   {hideBuiltinTemplates
-                    ? "The shipped templates are hidden from the picker and palette — your custom ones still show. Restore them anytime."
+                    ? "The shipped templates are hidden from the picker and palette. Your custom ones still show. Restore them anytime."
                     : "Hide every shipped template from the picker and palette. Your custom templates are unaffected."}
                 </div>
               </div>
@@ -5454,7 +5454,7 @@ export function SettingsModal(): JSX.Element {
                   </div>
                   <div className="mt-0.5 truncate text-xs text-ink-500">
                     {template.category}
-                    {template.description ? ` — ${template.description}` : ""}
+                    {template.description ? ` · ${template.description}` : ""}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -6234,7 +6234,7 @@ function KeymapSettings({
                           {conflict && (
                             <span
                               className="rounded-full border border-danger/35 bg-danger/10 px-2 py-0.5 text-2xs font-medium uppercase tracking-[0.14em] text-danger"
-                              title={`Also bound to “${conflict.title}”. Two global shortcuts on one key means one is ignored — reassign one to resolve.`}
+                              title={`Also bound to “${conflict.title}”. Two global shortcuts on one key means one is ignored. Reassign one to resolve.`}
                             >
                               Conflicts with {conflict.title}
                             </span>
@@ -6525,7 +6525,7 @@ function KeymapRecorderModal({
               <span>
                 Already used by{" "}
                 <strong className="font-semibold">{conflict.title}</strong>. Two
-                global shortcuts can’t share a key — reset or reassign that one
+                global shortcuts can’t share a key. Reset or reassign that one
                 first.
               </span>
             </div>
@@ -6743,7 +6743,7 @@ function ConfigFileSection(): JSX.Element {
   return (
     <Section
       title="Configuration file"
-      description="Your preferences — theme, editor, vim, keymaps, and more — are mirrored to a plain-text TOML file. Sync it across machines with git, stow, or chezmoi; edit it by hand and changes apply live."
+      description="Your preferences (theme, editor, vim, keymaps, and more) are mirrored to a plain-text TOML file. Sync it across machines with git, stow, or chezmoi; edit it by hand and changes apply live."
       settingId="config-file"
     >
       <div className="flex flex-col gap-3 px-5 py-4">
@@ -7205,7 +7205,7 @@ function TemplateSelectRow({
   const triggerLabel = missing
     ? "[Missing template]"
     : selected
-      ? `${selected.category} — ${selected.name}`
+      ? `${selected.category} · ${selected.name}`
       : "None (blank note)";
 
   // Custom dropdown (not a native <select>): native popups don't reliably
@@ -7372,7 +7372,7 @@ function TemplateSelectRow({
               {items.map((tpl, idx) => {
                 const isSelected = tpl ? tpl.id === value : !value && !missing;
                 const text = tpl
-                  ? `${tpl.category} — ${tpl.name}`
+                  ? `${tpl.category} · ${tpl.name}`
                   : "None (blank note)";
                 return (
                   <button
@@ -8860,7 +8860,7 @@ function McpSettings(): JSX.Element {
 
   const commandPreview = runtime
     ? `${runtime.command} ${runtime.args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`
-    : "—";
+    : "Checking…";
   const entryMissing = runtime !== null && runtime.entryPath == null;
 
   const serverStatusLabel =
@@ -9144,7 +9144,7 @@ function McpInstructionsEditor(): JSX.Element {
           <span>
             Saved at:{" "}
             <code className="font-mono text-xs text-ink-600">
-              {payload?.filePath ?? "—"}
+              {payload?.filePath ?? "Loading…"}
             </code>
           </span>
           <span>

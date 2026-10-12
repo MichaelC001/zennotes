@@ -3698,7 +3698,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
               onDoubleClick={() => {
                 if (tab.preview) promoteTabInPane(paneId, tab.path)
               }}
-              title={tab.preview ? `${tab.title} — preview (double-click to keep open)` : undefined}
+              title={tab.preview ? `${tab.title} · preview (double-click to keep open)` : undefined}
               className="flex min-w-0 flex-1 items-center gap-1.5 truncate px-1.5 text-left"
             >
               {tab.isTasks && (

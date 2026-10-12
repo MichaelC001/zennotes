@@ -11097,7 +11097,7 @@ export const useStore = create<Store>((set, get) => {
 
       const authToken = await promptApp({
         title: 'Auth Token',
-        description: "The server's auth token — leave blank if it doesn't need one.",
+        description: "The server's auth token. Leave blank if it doesn't need one.",
         placeholder: 'Optional',
         okLabel: 'Connect',
         allowEmptySubmit: true,

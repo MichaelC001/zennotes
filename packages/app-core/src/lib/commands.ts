@@ -46,7 +46,7 @@ import {
   hasPendingCloudReview,
   openPendingCloudReview
 } from './cloud-auto-sync'
-import { DEMO_TOUR_START_PATH } from '@shared/demo-tour'
+import { DEMO_TOUR_START_PATH, isDemoTourStartPath } from '@shared/demo-tour'
 
 const APP_WEBSITE_URL = 'https://zennotes.org'
 const APP_DISCORD_URL = 'https://discord.gg/W4fWzapKS6'
@@ -1731,7 +1731,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       category: 'Tag',
       run: async () => {
         const from = await promptApp({
-          title: 'Rename tag — old name',
+          title: 'Rename tag: old name',
           placeholder: 'tag'
         })
         if (!from) return
@@ -1768,14 +1768,14 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
   cmds.push(
     {
       id: 'demo.generate',
-      title: getState().notes.some((note) => note.path === DEMO_TOUR_START_PATH)
+      title: getState().notes.some((note) => isDemoTourStartPath(note.path))
         ? 'Regenerate Demo Tour Notes'
         : 'Generate Demo Tour Notes',
       category: 'Demo',
       keywords: 'demo onboarding starter tour sample example seed welcome',
       when: () => !!getState().vault,
       run: async () => {
-        const installed = getState().notes.some((note) => note.path === DEMO_TOUR_START_PATH)
+        const installed = getState().notes.some((note) => isDemoTourStartPath(note.path))
         const ok = await confirmApp({
           title: installed
             ? 'Regenerate the built-in demo tour in this vault?'
@@ -1791,7 +1791,10 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
         for (const path of result.notePaths) {
           await getState().applyChange({ kind: 'change', path, folder: 'inbox' })
         }
-        await getState().selectNote(DEMO_TOUR_START_PATH)
+        // A server that still writes the older note names reports them here.
+        await getState().selectNote(
+          result.notePaths.find(isDemoTourStartPath) ?? DEMO_TOUR_START_PATH
+        )
       }
     },
     {
@@ -1799,7 +1802,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       title: 'Remove Demo Tour Notes',
       category: 'Demo',
       keywords: 'demo onboarding starter tour sample example delete clear uninstall',
-      when: () => getState().notes.some((note) => note.path === DEMO_TOUR_START_PATH),
+      when: () => getState().notes.some((note) => isDemoTourStartPath(note.path)),
       run: async () => {
         const ok = await confirmApp({
           title: 'Remove the built-in demo tour from this vault?',
@@ -2146,7 +2149,7 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
         const ok = await confirmApp({
           title: `Remove zn from ${status.installedAt}?`,
           description:
-            'macOS may prompt for an admin password to remove the symlink. The CLI binary inside the app stays bundled — you can reinstall any time.',
+            'macOS may prompt for an admin password to remove the symlink. The CLI binary inside the app stays bundled, so you can reinstall any time.',
           confirmLabel: 'Uninstall',
           danger: true
         })

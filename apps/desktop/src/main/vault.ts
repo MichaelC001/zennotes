@@ -60,7 +60,7 @@ import {
   VaultChangeEvent,
   VaultInfo
 } from '@shared/ipc'
-import { DEMO_TOUR_DIR } from '@shared/demo-tour'
+import { currentDemoTourPath, DEMO_TOUR_DIR } from '@shared/demo-tour'
 import { normalizeNoteComments } from '@shared/note-comments'
 import { FRONTMATTER_BLOCK_RE, frontmatterTags } from '@shared/frontmatter'
 import { rewriteAssetReferences } from '@shared/asset-link-rename'
@@ -4251,8 +4251,28 @@ async function removeDirIfEmpty(abs: string): Promise<void> {
   }
 }
 
+/** Tour notes still on disk under their older names (see currentDemoTourPath). */
+async function olderDemoTourNotePaths(root: string): Promise<string[]> {
+  const current = new Set(DEMO_TOUR_NOTES.map((note) => note.path))
+  let names: string[]
+  try {
+    names = await fs.readdir(resolveSafe(root, DEMO_TOUR_DIR))
+  } catch {
+    return []
+  }
+  return names
+    .map((name) => `${DEMO_TOUR_DIR}/${name}`)
+    .filter((rel) => rel !== currentDemoTourPath(rel) && current.has(currentDemoTourPath(rel)))
+}
+
 export async function generateDemoTour(root: string): Promise<VaultDemoTourResult> {
   await ensureVaultLayout(root)
+
+  // Regenerating replaces a tour seeded under the older names rather than
+  // writing a second copy beside it.
+  for (const rel of await olderDemoTourNotePaths(root)) {
+    await removeFileIfExists(resolveSafe(root, rel))
+  }
 
   for (const note of DEMO_TOUR_NOTES) {
     const abs = resolveSafe(root, note.path)
@@ -4275,8 +4295,12 @@ export async function generateDemoTour(root: string): Promise<VaultDemoTourResul
 }
 
 export async function removeDemoTour(root: string): Promise<VaultDemoTourResult> {
-  for (const note of DEMO_TOUR_NOTES) {
-    await removeFileIfExists(resolveSafe(root, note.path))
+  const notePaths = [
+    ...DEMO_TOUR_NOTES.map((note) => note.path),
+    ...(await olderDemoTourNotePaths(root))
+  ]
+  for (const rel of notePaths) {
+    await removeFileIfExists(resolveSafe(root, rel))
   }
 
   for (const asset of DEMO_TOUR_ASSETS) {
@@ -4288,7 +4312,7 @@ export async function removeDemoTour(root: string): Promise<VaultDemoTourResult>
   invalidateNoteMetaCache(root)
   invalidateVaultTextSearchCache(root)
   return {
-    notePaths: DEMO_TOUR_NOTES.map((note) => note.path),
+    notePaths,
     assetPaths: DEMO_TOUR_ASSETS.map((asset) => asset.path)
   }
 }
@@ -4495,17 +4519,17 @@ export function absolutePath(root: string, rel: string): string {
 
 const WELCOME_NOTE = `# Welcome to ZenNotes
 
-ZenNotes is a **file-based** markdown notes app made for focus and deep work. Every note is a plain \`.md\` file in your vault — yours to keep, sync, and version however you like.
+ZenNotes is a **file-based** markdown notes app made for focus and deep work. Every note is a plain \`.md\` file in your vault, yours to keep, sync, and version however you like.
 
 ## What you get
 
-- **GitHub-flavored markdown** — tables, task lists, footnotes, strikethrough
-- **Wiki links** — jump between notes with [[double brackets]]
-- **Tags** — write a hashtag like \`#project\` in any note and it appears in the sidebar
-- **Math** — inline like $e^{i\\pi}+1=0$ or as blocks
-- **Callouts** — Obsidian-style \`> [!note]\` blocks
-- **Mermaid diagrams** — code-fenced \`\`\`mermaid blocks render inline
-- **Full-text search** — press \`Space s t\` in Vim mode, or run **Search Text in Vault** from the command palette
+- **GitHub-flavored markdown**: tables, task lists, footnotes, strikethrough
+- **Wiki links**: jump between notes with [[double brackets]]
+- **Tags**: write a hashtag like \`#project\` in any note and it appears in the sidebar
+- **Math**: inline like $e^{i\\pi}+1=0$ or as blocks
+- **Callouts**: Obsidian-style \`> [!note]\` blocks
+- **Mermaid diagrams**: code-fenced \`\`\`mermaid blocks render inline
+- **Full-text search**: press \`Space s t\` in Vim mode, or run **Search Text in Vault** from the command palette
 
 ## Try it
 

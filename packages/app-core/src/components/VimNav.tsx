@@ -319,7 +319,7 @@ export function VimNav(): JSX.Element | null {
       {
         keyLabel: getKeymapDisplay(keymapOverrides, 'vim.leaderSearchGroup'),
         label: 'Search…',
-        detail: 'Open the search group — then `t` for vault text search.'
+        detail: 'Open the search group, then `t` for vault text search.'
       },
       {
         keyLabel: getKeymapDisplay(keymapOverrides, 'vim.hintMode'),

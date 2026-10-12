@@ -277,7 +277,7 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     group: "global",
     title: "Open file",
     description:
-      "Open a single markdown file from outside the vault. On macOS the File menu also binds ⌘O. In Vim mode on Windows/Linux the editor keeps Ctrl+O for the jumplist and insert-mode i_CTRL-O, so this fires when focus is outside the editor or with Vim off — rebind either to change that.",
+      "Open a single markdown file from outside the vault. On macOS the File menu also binds ⌘O. In Vim mode on Windows/Linux the editor keeps Ctrl+O for the jumplist and insert-mode i_CTRL-O, so this fires when focus is outside the editor or with Vim off. Rebind either to change that.",
     defaultBinding: "Mod+O",
   },
   {
@@ -1323,7 +1323,7 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     group: "view-actions",
     title: "Hop before previous marker",
     description:
-      "Move the cursor to the near side of the previous inline marker on the line — `**bold**|` becomes `**bold|**`, and again to land before the opening `**`. Works with Vim mode on or off.",
+      "Move the cursor to the near side of the previous inline marker on the line: `**bold**|` becomes `**bold|**`, and again to land before the opening `**`. Works with Vim mode on or off.",
     defaultBinding: "Alt+[",
     defaultBindingMac: "Ctrl+,",
   },
@@ -1388,7 +1388,7 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     group: "view-actions",
     title: "Move line up",
     description:
-      "Move the current line (or selected lines) up in the note editor — reorders the markdown, so it sticks in the file. Works with Vim mode on or off.",
+      "Move the current line (or selected lines) up in the note editor. It reorders the markdown, so it sticks in the file. Works with Vim mode on or off.",
     defaultBinding: "Alt+ArrowUp",
   },
   {
@@ -1398,7 +1398,7 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     group: "view-actions",
     title: "Move line down",
     description:
-      "Move the current line (or selected lines) down in the note editor — reorders the markdown, so it sticks in the file. Works with Vim mode on or off.",
+      "Move the current line (or selected lines) down in the note editor. It reorders the markdown, so it sticks in the file. Works with Vim mode on or off.",
     defaultBinding: "Alt+ArrowDown",
   },
   {
