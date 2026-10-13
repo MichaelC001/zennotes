@@ -73,8 +73,11 @@ function connect(url) {
     const pending = new Map()
     ws.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data))
-      pending.get(message.id)?.(message)
+      // Only answers to calls this script made: a numeric id it handed out.
+      const answer = typeof message.id === 'number' ? pending.get(message.id) : undefined
+      if (typeof answer !== 'function') return
       pending.delete(message.id)
+      answer(message)
     })
     ws.addEventListener('open', () =>
       resolve({
