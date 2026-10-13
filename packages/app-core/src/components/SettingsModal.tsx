@@ -5513,6 +5513,7 @@ export function SettingsModal(): JSX.Element {
         "claude",
         "claude code",
         "claude desktop",
+        "code tab",
         "codex",
         "anthropic",
         "openai",
