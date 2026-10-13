@@ -135,10 +135,12 @@ try {
     ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : 'google-chrome')
   launch('chrome', chrome, [`--remote-debugging-port=${debugPort}`, `--user-data-dir=${join(run, 'chrome-profile')}`,
     '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-extensions', 'about:blank'])
+  // A cold Chrome on a busy CI runner took 26 s to open DevTools (2.69.1's
+  // release PR), so its startup gets more than the 30 s the servers get.
   const page = await until(async () => {
     const pages = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`, { signal: AbortSignal.timeout(1000) })).json()
     return pages.find((page) => page.type === 'page' && page.webSocketDebuggerUrl)
-  }, 'Chrome startup')
+  }, 'Chrome startup', 90000)
   const socket = new WebSocket(page.webSocketDebuggerUrl)
   await new Promise((done, reject) => { socket.addEventListener('open', done, { once: true }); socket.addEventListener('error', reject, { once: true }) })
   client = new CDP(socket)
