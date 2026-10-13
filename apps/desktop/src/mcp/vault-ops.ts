@@ -1,6 +1,7 @@
 import { readNoteCreatedAt, prepareNoteCreation, removeNoteCreation, noteMetadataPath } from '../main/note-creation-metadata'
 import { noteCommentsPath, noteCommentsRoot, relocateFolderTrees, relocateNote } from '../main/note-sidecars'
 import { agentEditFolderPath, removeAgentEditRecord } from '../main/agent-edit-files'
+import { fileIdentity, isSameFile } from '../main/same-file'
 import { readSavedServerToken as readZnSavedServerToken } from '../main/remote/zn-credentials'
 /**
  * Vault operations used by the MCP server. Mirrors the filesystem
@@ -1021,8 +1022,8 @@ export async function renameNote(root: string, rel: string, nextTitle: string): 
   if (target !== abs) {
     try {
       await fs.access(target)
-      const [srcStat, dstStat] = await Promise.all([fs.stat(abs), fs.stat(target)])
-      if (srcStat.ino !== dstStat.ino) {
+      const [srcStat, dstStat] = await Promise.all([fileIdentity(abs), fileIdentity(target)])
+      if (!isSameFile(srcStat, dstStat)) {
         throw new Error(`A note named "${trimmed}" already exists in ${folder}`)
       }
     } catch (e) {
