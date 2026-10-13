@@ -141,6 +141,42 @@ describe('tools run through the backend', () => {
   })
 })
 
+describe('list_tasks', () => {
+  const task = (content: string, extra: Record<string, unknown> = {}): unknown => ({
+    content,
+    noteFolder: 'inbox',
+    checked: false,
+    waiting: false,
+    forwarded: false,
+    cancelled: false,
+    tags: [],
+    ...extra
+  })
+  const tasksBackend = backend({
+    scanAllTasks: async () =>
+      [
+        task('Buy milk', { due: '2026-10-20' }),
+        task('Cancelled plan', { cancelled: true, due: '2026-10-15' }),
+        task('Done thing', { checked: true })
+      ] as never
+  })
+  const contents = (rows: unknown): string[] =>
+    (rows as Array<{ content: string }>).map((t) => t.content)
+
+  it('leaves `[-]` cancelled tasks out of the default open list (#450, #476)', async () => {
+    expect(contents(await callTool('list_tasks', {}, tasksBackend))).toEqual(['Buy milk'])
+    expect(
+      contents(await callTool('list_tasks', { dueBefore: '2026-10-31' }, tasksBackend))
+    ).toEqual(['Buy milk'])
+  })
+
+  it('still returns cancelled tasks for status "all"', async () => {
+    expect(contents(await callTool('list_tasks', { status: 'all' }, tasksBackend))).toContain(
+      'Cancelled plan'
+    )
+  })
+})
+
 describe('describeToolError', () => {
   it('turns a 401 from the server into the token hint', () => {
     const text = describeToolError(
