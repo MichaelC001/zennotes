@@ -79,8 +79,7 @@ import type {
   McpClientId,
   McpClientStatus,
   McpInstructionsPayload,
-  McpServerRuntime,
-  McpServerTokenState
+  McpServerRuntime
 } from '@shared/mcp-clients'
 import type {
   CustomCodeLanguageInstallInput,
@@ -1366,20 +1365,6 @@ async function mcpUninstall(_id: McpClientId): Promise<McpClientStatus> {
   return notImplemented('mcpUninstall')
 }
 
-// The web client is the server's own page: there is no assistant on this
-// machine to hand a token to.
-async function mcpGetServerTokenState(): Promise<McpServerTokenState> {
-  return { kind: 'none', reason: 'local' }
-}
-
-async function mcpShareServerToken(): Promise<McpServerTokenState> {
-  return notImplemented('mcpShareServerToken')
-}
-
-async function mcpRemoveServerToken(): Promise<McpServerTokenState> {
-  return notImplemented('mcpRemoveServerToken')
-}
-
 async function mcpGetInstructions(): Promise<McpInstructionsPayload> {
   return { defaultValue: '', current: '', isCustom: false, filePath: '' }
 }
@@ -1657,9 +1642,6 @@ export const httpBridge: ZenBridge = {
   mcpGetStatuses,
   mcpInstall,
   mcpUninstall,
-  mcpGetServerTokenState,
-  mcpShareServerToken,
-  mcpRemoveServerToken,
   mcpGetInstructions,
   mcpSetInstructions,
   cliGetStatus,

@@ -515,12 +515,14 @@ export interface ZenBridge {
   mcpGetStatuses(): Promise<McpClientStatus[]>
   mcpInstall(id: McpClientId): Promise<McpClientStatus>
   mcpUninstall(id: McpClientId): Promise<McpClientStatus>
-  /** Whether assistants can use the token of the server the app is on (#830). */
-  mcpGetServerTokenState(): Promise<McpServerTokenState>
-  /** Saves the app's token for that server where zn and the MCP servers look. */
-  mcpShareServerToken(): Promise<McpServerTokenState>
-  /** Removes it again, only when it is still the app's token. */
-  mcpRemoveServerToken(): Promise<McpServerTokenState>
+  /** Desktop only: whether assistants can use the token of the server the app
+   *  is on (#830). Optional so the web and phone bridges need no stub. */
+  mcpGetServerTokenState?(): Promise<McpServerTokenState>
+  /** Desktop only: saves the app's token for that server where zn and the MCP
+   *  servers look. */
+  mcpShareServerToken?(): Promise<McpServerTokenState>
+  /** Desktop only: removes it again, only when it is still the app's token. */
+  mcpRemoveServerToken?(): Promise<McpServerTokenState>
   mcpGetInstructions(): Promise<McpInstructionsPayload>
   mcpSetInstructions(next: string | null): Promise<McpInstructionsPayload>
   cliGetStatus(): Promise<CliInstallStatus>

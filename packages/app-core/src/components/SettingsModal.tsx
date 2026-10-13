@@ -9029,6 +9029,8 @@ function UsageCountSetting(): JSX.Element {
   );
 }
 
+const NO_SERVER_TOKEN: McpServerTokenState = { kind: "none", reason: "local" };
+
 /**
  * Settings → MCP → Server token (#830): lets assistants use the token of the
  * ZenNotes Server the app is on, without a terminal. Main reads the server and
@@ -9044,7 +9046,8 @@ function McpServerTokenSetting(): JSX.Element {
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
-      setState(await window.zen.mcpGetServerTokenState());
+      // Desktop only: a bridge without it has no assistants to hand a token to.
+      setState((await window.zen.mcpGetServerTokenState?.()) ?? NO_SERVER_TOKEN);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -9108,7 +9111,9 @@ function McpServerTokenSetting(): JSX.Element {
           variant="primary"
           size="sm"
           disabled={busy}
-          onClick={() => void run(() => window.zen.mcpShareServerToken())}
+          onClick={() =>
+            void run(async () => (await window.zen.mcpShareServerToken?.()) ?? NO_SERVER_TOKEN)
+          }
         >
           Let assistants use it
         </Button>
@@ -9127,7 +9132,9 @@ function McpServerTokenSetting(): JSX.Element {
           variant="secondary"
           size="sm"
           disabled={busy}
-          onClick={() => void run(() => window.zen.mcpRemoveServerToken())}
+          onClick={() =>
+            void run(async () => (await window.zen.mcpRemoveServerToken?.()) ?? NO_SERVER_TOKEN)
+          }
         >
           Stop sharing
         </Button>
@@ -9147,7 +9154,9 @@ function McpServerTokenSetting(): JSX.Element {
           variant="primary"
           size="sm"
           disabled={busy}
-          onClick={() => void run(() => window.zen.mcpShareServerToken())}
+          onClick={() =>
+            void run(async () => (await window.zen.mcpShareServerToken?.()) ?? NO_SERVER_TOKEN)
+          }
         >
           Replace it
         </Button>
