@@ -70,6 +70,7 @@ import {
   getKeymapDisplay,
   isMacPlatform,
   isUnboundBinding,
+  keymapAvailableOnHost,
   sequenceTokenFromEvent,
   shortcutBindingFromEvent,
   UNBOUND_BINDING,
@@ -5998,6 +5999,10 @@ export function SettingsModal(): JSX.Element {
                         key={result.id}
                         ref={selected ? selectedResultRef : undefined}
                         type="button"
+                        // The phone shells hide whole sections (MCP, CLI,
+                        // and Keymap on a phone); this lets them hide the
+                        // search results that would open one.
+                        data-settings-result-category={result.category.id}
                         onClick={() => openSearchResult(result)}
                         className={[
                           "w-full rounded-xl px-3 py-2.5 text-left transition-colors",
@@ -6137,9 +6142,11 @@ function KeymapSettings({
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const capabilities = getZenBridge().getCapabilities();
     return getKeymapDefinitionsByGroup()
       .map((group) => {
         const items = group.items.filter((definition) => {
+          if (!keymapAvailableOnHost(definition.id, capabilities)) return false;
           if (
             definition.vimOnly &&
             !vimMode &&
