@@ -133,7 +133,8 @@ const DESKTOP_CAPABILITIES: ZenCapabilities = {
   supportsCustomCodeLanguages: true,
   supportsWorkflows: true,
   supportsUndoFile: true,
-  supportsAgentEditReview: true
+  supportsAgentEditReview: true,
+  supportsEncryptedBackupArchive: true
 }
 
 const DESKTOP_APP_INFO: ZenAppInfo = {

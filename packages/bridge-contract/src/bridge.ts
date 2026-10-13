@@ -132,6 +132,11 @@ export interface ZenCapabilities {
    *  be reviewed. Absent where records are not reachable yet (the web client
    *  and the phones), which hides the review. */
   supportsAgentEditReview?: boolean
+  /** The host can save a readable archive of an end-to-end encrypted vault's
+   *  backup: the desktop app opens the service's archive item by item. The
+   *  phones refuse it, so where this is absent Settings says where to save
+   *  one instead of offering a button that can only fail. */
+  supportsEncryptedBackupArchive?: boolean
 }
 
 export interface ZenAppInfo {
