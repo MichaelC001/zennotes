@@ -344,6 +344,33 @@ export function portableConfigDir(): string {
 }
 
 /**
+ * The token `zn connect` saved for a server, or null (#830). The Go zn keeps
+ * server tokens in a private credentials.toml beside config.toml, a `[tokens]`
+ * table keyed by the server URL trimmed, without trailing slashes, and
+ * lowercased (ZenNotes/tui, internal/config/workspaces.go), so it is looked
+ * up by exactly that key. A file zn could not read holds no token for zn
+ * either, so a missing or malformed one is simply null here.
+ */
+export async function readSavedServerToken(baseUrl: string): Promise<string | null> {
+  let raw: string
+  try {
+    raw = await fs.readFile(path.join(portableConfigDir(), 'credentials.toml'), 'utf8')
+  } catch {
+    return null
+  }
+  let tokens: unknown
+  try {
+    tokens = (parseToml(raw) as { tokens?: unknown }).tokens
+  } catch {
+    return null
+  }
+  if (!tokens || typeof tokens !== 'object' || Array.isArray(tokens)) return null
+  const key = baseUrl.trim().replace(/\/+$/, '').toLowerCase()
+  const token = (tokens as Record<string, unknown>)[key]
+  return typeof token === 'string' && token.trim() ? token.trim() : null
+}
+
+/**
  * The user's "Sync title heading on rename" preference (#455).
  *
  * The portable config file is the source of truth for this pref, and a vault
@@ -473,7 +500,8 @@ export async function readRemoteProfilesFromConfig(): Promise<KnownRemoteProfile
  * (#688). The app keeps server tokens in the OS secret store, which a plain
  * Node process cannot read, so the token here is only ever the legacy
  * plaintext one a pre-profile config may still carry; callers layer
- * `ZENNOTES_REMOTE_TOKEN` / `--token` on top.
+ * `--token`, `ZENNOTES_REMOTE_TOKEN` and the token `zn connect` saved on top
+ * (`resolveServerToken` in cli/vault-target).
  */
 export type ActiveWorkspace =
   | { kind: 'local'; root: string | null }
