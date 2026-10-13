@@ -1393,6 +1393,7 @@ function CloudVaultPanel({
         <CloudVaultRemovedNotice
           removal={removedVault}
           vaultsToChoose={cloudVaults.length > 0}
+          encryptionReady={encryptionReady}
           onDismiss={onDismissRemoval}
         />
       )}
@@ -2822,16 +2823,28 @@ function revealCloudVault(vault: HTMLElement): void {
 function CloudVaultRemovedNotice({
   removal,
   vaultsToChoose,
+  encryptionReady,
   onDismiss,
 }: {
   removal: CloudVaultRemoval;
   vaultsToChoose: boolean;
+  encryptionReady: boolean;
   onDismiss: () => void;
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.scrollIntoView?.({ block: "nearest" });
   }, []);
+  // A vault replaced by an encrypted one lives on under its old name, which a
+  // locked device cannot read yet, so unlocking comes before choosing.
+  const nextStep =
+    removal.reason === "encrypted"
+      ? encryptionReady
+        ? "Choose the encrypted vault to sync it again."
+        : "Unlock this device under End-to-end encryption, then choose the encrypted vault."
+      : vaultsToChoose
+        ? "Choose a cloud vault or start a new one."
+        : "Create a new cloud vault to sync it again.";
   return (
     <div
       ref={ref}
@@ -2846,10 +2859,7 @@ function CloudVaultRemovedNotice({
           {cloudVaultRemovalLabel(removal)}
         </div>
         <p className="mt-1 break-words text-sm leading-6 text-ink-700">
-          {cloudVaultRemovalMessage(removal)}{" "}
-          {vaultsToChoose
-            ? "Choose a cloud vault or start a new one."
-            : "Create a new cloud vault to sync it again."}
+          {cloudVaultRemovalMessage(removal)} {nextStep}
         </p>
       </div>
       <Button variant="ghost" className="self-start" onClick={onDismiss}>

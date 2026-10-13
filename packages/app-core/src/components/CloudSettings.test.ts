@@ -763,6 +763,57 @@ describe("CloudSettings", () => {
     });
   });
 
+  describe("a vault another device encrypted", () => {
+    const replaced = {
+      phase: "unlinked" as const,
+      removedVault: { vaultName: "Notes", reason: "encrypted" as const },
+    };
+    const renderSettings = () =>
+      act(async () =>
+        root.render(
+          createElement(CloudSettings, {
+            localVaultAvailable: true,
+            localVaultName: "Notes",
+          }),
+        ),
+      );
+
+    beforeEach(() => {
+      mocks.getCloudAccountStatus.mockResolvedValue(connected);
+      mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
+      mocks.getCloudVaultLink.mockResolvedValue(null);
+      mocks.listCloudVaults.mockResolvedValue([]);
+    });
+
+    afterEach(() => {
+      delete (mocks as Record<string, unknown>).getCloudEncryptionStatus;
+    });
+
+    it("says the vault was replaced, not deleted, and asks a locked device to unlock first", async () => {
+      useCloudSyncStatusStore.setState(replaced);
+      await renderSettings();
+
+      const notice = host.querySelector<HTMLElement>("[data-cloud-vault-removed]");
+      expect(notice?.textContent).toContain("Cloud vault now encrypted");
+      expect(notice?.textContent).toContain(
+        "“Notes” was replaced by an end-to-end encrypted Cloud vault, so this vault stopped syncing. Your notes on this device are untouched. Unlock this device under End-to-end encryption, then choose the encrypted vault.",
+      );
+      expect(notice?.textContent).not.toContain("deleted");
+    });
+
+    it("points an unlocked device straight at the encrypted vault", async () => {
+      Object.assign(mocks, {
+        getCloudEncryptionStatus: vi.fn(async () => ({ available: true, keyset: true, unlocked: true })),
+      });
+      useCloudSyncStatusStore.setState(replaced);
+      await renderSettings();
+
+      expect(host.querySelector("[data-cloud-vault-removed]")?.textContent).toContain(
+        "Choose the encrypted vault to sync it again.",
+      );
+    });
+  });
+
   it("presents capacity rejections as queued uploads instead of reviewable conflicts", async () => {
     mocks.getCloudAccountStatus.mockResolvedValue(connected);
     mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
