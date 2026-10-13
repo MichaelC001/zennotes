@@ -679,7 +679,7 @@ const TOOLS: ToolDef[] = [
             type: 'string',
             enum: ['open', 'done', 'waiting', 'all'],
             description:
-              'open = unchecked & not waiting (default). done = checked. waiting = has @waiting. all = everything.'
+              'open = not done, cancelled or waiting (default). done = checked. waiting = has @waiting. all = everything.'
           },
           priority: {
             type: 'string',
@@ -727,7 +727,10 @@ const TOOLS: ToolDef[] = [
         if (folder && t.noteFolder !== folder) return false
         // A `[>]` record's live copy sits in the destination note; listing the
         // record as open doubled every carried task for agents (#611 review).
-        if (status === 'open' && (t.checked || t.waiting || t.forwarded)) return false
+        // A `[-]` cancelled task is abandoned, so it is not open either (#450, #476).
+        if (status === 'open' && (t.checked || t.waiting || t.forwarded || t.cancelled)) {
+          return false
+        }
         if (status === 'done' && !t.checked) return false
         if (status === 'waiting' && !t.waiting) return false
         if (priority && t.priority !== priority) return false
