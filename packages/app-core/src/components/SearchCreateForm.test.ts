@@ -3,7 +3,7 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NoteMeta } from '@shared/ipc'
+import { DEFAULT_VAULT_SETTINGS, type NoteMeta } from '@shared/ipc'
 import { useStore } from '../store'
 import type { SearchCreateDraft } from '../lib/search-create'
 import { SearchCreateForm } from './SearchCreateForm'
@@ -50,7 +50,7 @@ describe('SearchCreateForm: footer hints follow the focused field', () => {
       notes: [note('Alpha', ['alpha', 'beta'])],
       folders: [],
       systemFolderLabels: {},
-      vaultSettings: null,
+      vaultSettings: DEFAULT_VAULT_SETTINGS,
       activeNote: null
     })
   })
@@ -159,6 +159,21 @@ describe('SearchCreateForm: footer hints follow the focused field', () => {
     expect(hints()).toEqual(['↑↓ pick', '↵ add tag', 'tab next field', 'esc back'])
   })
 
+  it('reads the row Enter would pick, not just the index, when the list shrinks under it', () => {
+    render()
+    // The highlight sits on the second of two vault tags, then the vault loses
+    // a tag while the form is open (a sync, another window). The index now
+    // outlives its row, so Enter finds nothing behind it and, with nothing
+    // typed, creates the note.
+    focusField('tags')
+    press('tags', { key: 'ArrowDown' })
+    press('tags', { key: 'ArrowDown' })
+    act(() => {
+      useStore.setState({ notes: [note('Alpha', ['alpha'])] })
+    })
+    expect(hints()).toEqual(['↑↓ pick', '↵ create note', 'tab next field', 'esc back'])
+  })
+
   it('still says add tag once the highlight cycles off the last row', () => {
     render()
     // Two tags in the vault. The highlight wraps from the last row back to the
@@ -174,7 +189,7 @@ describe('SearchCreateForm: footer hints follow the focused field', () => {
 
   it('keeps pick when the typed-tag row is all there is, and still says add tag', () => {
     // A vault with no tags: typing leaves exactly one row, the `Add #…` one.
-    // Moving the highlight off it does not remove the row, so pick stays true —
+    // Moving the highlight off it does not remove the row, so pick stays true;
     // what changes is that Enter now commits the typed text instead.
     useStore.setState({ notes: [note('Alpha')] })
     render()

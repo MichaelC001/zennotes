@@ -157,27 +157,29 @@ export function SearchCreateForm({
   // field is focusable: the system folders guarantee them in Folder, but a
   // typed path matching nothing empties the list, and a vault with no tags
   // leaves Tags empty until something valid is typed.
-  const hasList =
-    focused === 'folder' ? folderRows.length > 0
-    : focused === 'tags' ? tagRows.length > 0
-    : false
+  const focusedRows: readonly unknown[] =
+    focused === 'folder' ? folderRows : focused === 'tags' ? tagRows : []
+  const hasList = focusedRows.length > 0
   // Enter means three different things depending on the field and on whether a
   // row actually stands behind the highlight, and one word cannot cover them.
   // The highlight only counts while a row is behind it: typing in Folder
   // preselects row 0 so Enter picks without an arrow key first (#467), and that
-  // index outlives the row once the text filters the list down to nothing —
+  // index outlives the row once the text filters the list down to nothing:
   // `folderRows[0]` is then `undefined` and Enter falls through to `create()`.
+  // A list can also shrink under the highlight without any typing (the vault's
+  // tags change while the form is open), so the hint reads the row exactly the
+  // way the Enter handlers do, not just whether the index is non-negative.
   //
   // In Tags the third case is a typed tag, which commits as a chip rather than
   // creating anything, so it reads `add tag` too. Typed text that is not a
   // valid tag leaves Enter with nothing to do at all, and offering it any
   // label would be a promise it cannot keep, so the hint is dropped and the
   // reason is left to the status line above.
-  const rowPicked = hasList && activeRow >= 0
+  const rowPicked = activeRow >= 0 && focusedRows[activeRow] !== undefined
   const inTags = focused === 'tags'
   const enterLabel =
     rowPicked ? (inTags ? 'add tag' : 'choose folder')
-    : inTags && typedTag.trim() ? (normalizeTag(typedTag) ? 'add tag' : null)
+    : inTags && typedTag ? (normalizeTag(typedTag) ? 'add tag' : null)
     : 'create note'
 
   const create = (): void => {
