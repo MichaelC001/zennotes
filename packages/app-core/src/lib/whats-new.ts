@@ -40,6 +40,15 @@ export const CLOUD_ANNOUNCEMENT = {
 
 export const WHATS_NEW: readonly WhatsNewEntry[] = [
   {
+    version: '2.69.1',
+    highlights: [
+      {
+        title: 'Renames on Windows',
+        body: 'Renaming a note or an attachment to a name another one already has now always stops and says so on Windows, instead of sometimes replacing the other file.'
+      }
+    ]
+  },
+  {
     version: '2.69.0',
     highlights: [
       {
