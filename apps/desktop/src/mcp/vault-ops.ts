@@ -231,10 +231,12 @@ async function folderRoot(root: string, folder: NoteFolder): Promise<string> {
 }
 
 const FENCE_LINE_RE = /^(\s{0,3})(`{3,}|~{3,})/
-// `>` = forwarded (#316), `-` = cancelled (#450), `/` = in progress (#512) —
-// all recognized so those tasks aren't invisible to the MCP scanner. Kept in
-// sync with @shared/tasklists.
-const TASK_LINE_RE = /^\s*[-*+]\s+\[([ xX>/-])\](.*)$/
+// The task lines @shared/tasklists' TASK_LINE_RE matches, so the MCP scanner
+// lists the tasks the app lists and counts them the same way: bullets,
+// ordered lists (`1.` and `1)`) and quoted tasks (`> - [ ]`). Every state the
+// app knows is recognized: `>` forwarded (#316), `-` cancelled (#450) and `/`
+// in progress (#512). Groups: the state char, then the text after `]`.
+const TASK_LINE_RE = /^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+\[([ xX>/-])\](.*)$/
 
 export interface NoteMeta {
   path: string
