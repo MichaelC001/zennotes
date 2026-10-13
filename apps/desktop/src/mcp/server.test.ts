@@ -162,10 +162,11 @@ describe('describeToolError', () => {
     expect(text).toContain('zn connect <server-url> --no-default')
   })
 
-  it('names the server to run `zn connect` for (#830)', () => {
+  it('points at the app first, then names the server to run `zn connect` for (#830)', () => {
     vi.stubEnv('ZENNOTES_REMOTE_TOKEN', '')
     const text = describeToolError(rejected(), server(null))
     expect(text).toContain('no valid token')
+    expect(text).toContain('Let assistants use it under Settings → MCP → Server token')
     expect(text).toContain('`zn connect https://notes.example.com --no-default`')
     expect(text).toContain('the next call uses it')
   })

@@ -1000,14 +1000,19 @@ export function describeToolError(err: unknown, target: VaultTarget | null = nul
 }
 
 /**
- * How to hand this process a server token. `--no-default` matters: a plain
- * `zn connect` also makes the server zn's own default, and a Go `zn mcp` that
- * does not follow the app would then stop following it.
+ * How to hand this process a server token. This server ships inside the
+ * desktop app, so the app's own way comes first: Settings → MCP → Server token
+ * saves the token where `zn connect` would (#830). `--no-default` matters for
+ * the terminal way: a plain `zn connect` also makes the server zn's own
+ * default, and a Go `zn mcp` that does not follow the app would then stop
+ * following it.
  */
 function tokenHint(serverUrl: string): string {
   return (
-    `run \`zn connect ${serverUrl || '<server-url>'} --no-default\` once in a terminal (it saves the token where zn and this MCP server look, and the next call uses it), ` +
-    'or set ZENNOTES_REMOTE_TOKEN in the MCP server\'s environment.'
+    'in the ZenNotes app, choose Let assistants use it under Settings → MCP → Server token, ' +
+    `or run \`zn connect ${serverUrl || '<server-url>'} --no-default\` once in a terminal. ` +
+    'Either saves the token where zn and this MCP server look, and the next call uses it. ' +
+    'Setting ZENNOTES_REMOTE_TOKEN in the MCP server\'s environment works too.'
   )
 }
 

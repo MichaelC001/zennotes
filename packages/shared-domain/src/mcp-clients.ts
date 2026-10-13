@@ -11,6 +11,7 @@ export type {
   McpClientId,
   McpClientStatus,
   McpServerRuntime,
+  McpServerTokenState,
   McpInstructionsPayload
 } from '@zennotes/bridge-contract/mcp-clients'
 

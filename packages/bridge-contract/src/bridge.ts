@@ -92,7 +92,8 @@ import type {
   McpClientId,
   McpClientStatus,
   McpInstructionsPayload,
-  McpServerRuntime
+  McpServerRuntime,
+  McpServerTokenState
 } from './mcp-clients.js'
 import type { AppConfigPortable } from './app-config.js'
 import type { ExternalUrlResult } from './application-links.js'
@@ -514,6 +515,12 @@ export interface ZenBridge {
   mcpGetStatuses(): Promise<McpClientStatus[]>
   mcpInstall(id: McpClientId): Promise<McpClientStatus>
   mcpUninstall(id: McpClientId): Promise<McpClientStatus>
+  /** Whether assistants can use the token of the server the app is on (#830). */
+  mcpGetServerTokenState(): Promise<McpServerTokenState>
+  /** Saves the app's token for that server where zn and the MCP servers look. */
+  mcpShareServerToken(): Promise<McpServerTokenState>
+  /** Removes it again, only when it is still the app's token. */
+  mcpRemoveServerToken(): Promise<McpServerTokenState>
   mcpGetInstructions(): Promise<McpInstructionsPayload>
   mcpSetInstructions(next: string | null): Promise<McpInstructionsPayload>
   cliGetStatus(): Promise<CliInstallStatus>

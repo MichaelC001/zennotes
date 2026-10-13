@@ -1,6 +1,7 @@
 import { readNoteCreatedAt, prepareNoteCreation, removeNoteCreation, noteMetadataPath } from '../main/note-creation-metadata'
 import { noteCommentsPath, noteCommentsRoot, relocateFolderTrees, relocateNote } from '../main/note-sidecars'
 import { agentEditFolderPath, removeAgentEditRecord } from '../main/agent-edit-files'
+import { readSavedServerToken as readZnSavedServerToken } from '../main/remote/zn-credentials'
 /**
  * Vault operations used by the MCP server. Mirrors the filesystem
  * behavior of src/main/vault.ts, but without Electron dependencies —
@@ -344,30 +345,13 @@ export function portableConfigDir(): string {
 }
 
 /**
- * The token `zn connect` saved for a server, or null (#830). The Go zn keeps
- * server tokens in a private credentials.toml beside config.toml, a `[tokens]`
- * table keyed by the server URL trimmed, without trailing slashes, and
- * lowercased (ZenNotes/tui, internal/config/workspaces.go), so it is looked
- * up by exactly that key. A file zn could not read holds no token for zn
- * either, so a missing or malformed one is simply null here.
+ * The token `zn connect` saved for a server, or null (#830): zn's
+ * credentials.toml beside config.toml, read under zn's rules (see
+ * main/remote/zn-credentials). Settings → MCP can put the app's own token
+ * there too.
  */
 export async function readSavedServerToken(baseUrl: string): Promise<string | null> {
-  let raw: string
-  try {
-    raw = await fs.readFile(path.join(portableConfigDir(), 'credentials.toml'), 'utf8')
-  } catch {
-    return null
-  }
-  let tokens: unknown
-  try {
-    tokens = (parseToml(raw) as { tokens?: unknown }).tokens
-  } catch {
-    return null
-  }
-  if (!tokens || typeof tokens !== 'object' || Array.isArray(tokens)) return null
-  const key = baseUrl.trim().replace(/\/+$/, '').toLowerCase()
-  const token = (tokens as Record<string, unknown>)[key]
-  return typeof token === 'string' && token.trim() ? token.trim() : null
+  return await readZnSavedServerToken(portableConfigDir(), baseUrl)
 }
 
 /**
