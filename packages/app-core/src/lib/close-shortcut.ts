@@ -121,8 +121,17 @@ export function readSavedKeymapOverrides(): KeymapOverrides {
  * layouts and Cmd on macOS but Ctrl elsewhere, and a rebind or an unbind
  * applies here too (#893). A dialog or menu open in the window, or whatever
  * `isBlocked` reports, keeps the key, as it does in the main window.
+ *
+ * `capture` is for windows whose editor swallows the chord first. Quick capture
+ * sets it because codemirror-vim binds Ctrl+W as its window-command prefix and
+ * stops propagation, so the bubble phase never sees it. The main window leaves
+ * it off: it already resolves that chord in its own capture-phase handler, and
+ * listening here in capture too would run both.
  */
-export function useCloseWindowShortcut(isBlocked?: () => boolean): void {
+export function useCloseWindowShortcut(
+  isBlocked?: () => boolean,
+  capture = false
+): void {
   const isBlockedRef = useRef(isBlocked)
   useEffect(() => {
     isBlockedRef.current = isBlocked
@@ -144,10 +153,10 @@ export function useCloseWindowShortcut(isBlocked?: () => boolean): void {
       window.zen.windowClose()
     }
     window.addEventListener('storage', onStorage)
-    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown, capture)
     return () => {
       window.removeEventListener('storage', onStorage)
-      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keydown', onKeyDown, capture)
     }
-  }, [])
+  }, [capture])
 }
