@@ -559,6 +559,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'Mod+P', action: 'Open a note', detail: 'Search the vault and load an existing note into the window to edit it in place.' },
       { keys: 'Shift+Mod+P', action: 'Command palette', detail: 'Run a capture command: save, save without hiding, start a new note, or open another note.' },
       { keys: 'Mod+W', action: 'Hide without saving', detail: 'Hide the window like its close button. Nothing is saved, and the draft is still there the next time you open the window. This is your Close active tab key, so it follows a rebind.' },
+      { keys: 'Ctrl+N / Ctrl+P', action: 'Move in a list', detail: 'With the note picker or the command palette open, move the selection down or up, as the arrow keys do. While no list is open they start a new note and open the picker, as above.' },
       { keys: 'Esc', action: 'Dismiss', detail: 'Close an open overlay; otherwise save and hide the window.' }
     ]
   },

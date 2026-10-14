@@ -88,7 +88,7 @@ import { PinIcon } from './icons'
 import { headingFolding } from '../lib/cm-heading-fold'
 import { editorTabSize, normalizeEditorTabSize } from '../lib/editor-tab-size'
 import { storedCursorDrawSelection } from '../lib/cm-cursor-blink'
-import { useCloseWindowShortcut } from '../lib/close-shortcut'
+import { useCloseShortcutDisplay, useCloseWindowShortcut } from '../lib/close-shortcut'
 
 const PREFS_KEY = 'zen:prefs:v2'
 
@@ -577,6 +577,7 @@ export function QuickCaptureApp(): JSX.Element {
   // the command palette keep it, as palettes do in the main window.
   const overlayOpen = useCallback(() => overlayRef.current !== 'none', [])
   useCloseWindowShortcut(overlayOpen, true)
+  const closeKey = useCloseShortcutDisplay()
   const submitAndCloseRef = useRef(submitAndClose)
   useEffect(() => {
     submitAndCloseRef.current = submitAndClose
@@ -801,9 +802,13 @@ export function QuickCaptureApp(): JSX.Element {
               <span>
                 <kbd className="rounded bg-paper-200 px-1">{modKey}⇧P</kbd> cmd
               </span>
-              <span>
-                <kbd className="rounded bg-paper-200 px-1">{modKey}W</kbd> close
-              </span>
+              {/* Close active tab follows a rebind here, and an unbound key
+                  is not advertised at all. */}
+              {closeKey && (
+                <span>
+                  <kbd className="rounded bg-paper-200 px-1">{closeKey}</kbd> close
+                </span>
+              )}
             </>
           ) : (
             <>
@@ -953,7 +958,7 @@ function NotePickerOverlay({ notes, onPick, onCancel }: NotePickerOverlayProps):
                   dir="rtl"
                   className="min-w-0 flex-1 truncate text-right text-2xs text-ink-400"
                 >
-                  {noteSubpath(note)}
+                  {`\u202A${noteSubpath(note)}\u202C`}
                 </span>
               </button>
             )

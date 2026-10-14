@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
+  getKeymapDisplay,
   matchesSequenceToken,
   matchesShortcut,
   normalizeKeymapOverrides,
@@ -159,4 +160,26 @@ export function useCloseWindowShortcut(
       window.removeEventListener('keydown', onKeyDown, capture)
     }
   }, [capture])
+}
+
+/**
+ * The Close active tab binding as a footer shows it, or the empty string once
+ * it is unbound, so a window that advertises the key can leave the hint out
+ * rather than name a key that does nothing. Read and kept current the way
+ * useCloseWindowShortcut reads its binding.
+ */
+export function useCloseShortcutDisplay(): string {
+  const [display, setDisplay] = useState(() =>
+    getKeymapDisplay(readSavedKeymapOverrides(), 'global.closeActiveTab')
+  )
+  useEffect(() => {
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === null || event.key === PREFS_KEY) {
+        setDisplay(getKeymapDisplay(readSavedKeymapOverrides(), 'global.closeActiveTab'))
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+  return display
 }

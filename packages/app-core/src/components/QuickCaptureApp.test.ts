@@ -7,6 +7,7 @@ import { completionStatus, startCompletion } from '@codemirror/autocomplete'
 import { getCM } from '@replit/codemirror-vim'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QuickCaptureApp } from './QuickCaptureApp'
+import { getKeymapDisplay } from '../lib/keymaps'
 
 describe('Quick Capture Escape handling (#765)', () => {
   let host: HTMLDivElement
@@ -480,6 +481,29 @@ describe('Quick Capture close shortcut (#893)', () => {
     expect(open).not.toContain('cmd')
   })
 
+  it('names the close key the way Close active tab is bound', async () => {
+    localStorage.setItem(
+      'zen:prefs:v2',
+      JSON.stringify({ keymapOverrides: { 'global.closeActiveTab': 'Shift+Mod+W' } })
+    )
+    await mount()
+    const rebound = getKeymapDisplay(
+      { 'global.closeActiveTab': 'Shift+Mod+W' },
+      'global.closeActiveTab'
+    )
+    expect(footerHints()).toContain(`${rebound} close`)
+  })
+
+  it('does not advertise a close key once Close active tab is unbound', async () => {
+    localStorage.setItem(
+      'zen:prefs:v2',
+      JSON.stringify({ keymapOverrides: { 'global.closeActiveTab': '' } })
+    )
+    await mount()
+    expect(footerHints()).toContain('notes')
+    expect(footerHints()).not.toContain('close')
+  })
+
   it('drops the two command hints that no longer run inside the command palette', async () => {
     await mount()
     await onWindow(modShiftP)
@@ -526,12 +550,22 @@ describe('Quick Capture close shortcut (#893)', () => {
     await mount()
     await onWindow(modP)
 
-    const cells = [...rows()[0].querySelectorAll('span')].map((s) => s.textContent?.trim() ?? '')
+    const bidiControls = /[\u202A-\u202E]/g
+    const cells = [...rows()[0].querySelectorAll('span')].map(
+      (s) => s.textContent?.replace(bidiControls, '').trim() ?? ''
+    )
     expect(cells).toContain('Calendar Panel Tasks Placement')
     expect(cells).toContain('ZenNotes/Enhancements')
     // Neither the folder nor the filename is repeated in the path column.
     expect(cells.filter((c) => c === 'inbox')).toHaveLength(1)
     expect(cells.some((c) => c.endsWith('.md'))).toBe(false)
+    // The column is right to left so its ellipsis lands on the left, and the
+    // path inside it is embedded left to right, as in Open Buffers: without
+    // that, a subpath that starts with digits, such as 2026/Planning, displays
+    // as Planning/2026.
+    expect(rows()[0].querySelector('[dir="rtl"]')?.textContent).toBe(
+      '\u202AZenNotes/Enhancements\u202C'
+    )
   })
 
   it('follows a rebind of Close active tab', async () => {
