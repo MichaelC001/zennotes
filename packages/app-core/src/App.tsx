@@ -1033,7 +1033,7 @@ function App(): JSX.Element {
       // `Ctrl+P` on Linux and Windows, which is also the Emacs previous-item
       // chord every palette handles via `isPalettePreviousKey()`. A toggle here
       // ran capture-phase and called `stopImmediatePropagation()`, making that
-      // branch unreachable while the palette was open (#933). Escape dismisses.
+      // branch unreachable while the palette was open (#938). Escape dismisses.
       // Do not reinstate a toggle above the overlay guard.
       if (
         state.settingsOpen ||
