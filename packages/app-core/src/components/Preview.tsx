@@ -82,11 +82,12 @@ import { NoteHoverPreview } from "./NoteHoverPreview";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { ArrowUpRightIcon, MaximizeIcon, MinimizeIcon } from "./icons";
 import { promptApp } from "../lib/prompt-requests";
-import { peekMermaidSvg, renderMermaidSvg } from "../lib/mermaid-render";
+import { renderMermaidSvg } from "../lib/mermaid-render";
 import { confirmApp } from "../lib/confirm-requests";
 
-// Mermaid's lazy loader and theme live in `lib/mermaid-render`, shared with
-// the editor's live preview so both draw the same diagram the same way.
+// The mermaid renderer's lazy loader and options live in `lib/mermaid-render`,
+// shared with the editor's live preview so both draw the same diagram the same
+// way; its colours come from the `.pele` variables in index.css.
 
 type ExpandedDiagramKind = DiagramTabKind;
 
@@ -138,36 +139,18 @@ function prepareMermaidShell(el: HTMLElement, source: string): HTMLDivElement {
 }
 
 // Every preview rebuild hands over fresh DOM, so the diagrams went back
-// through mermaid's parse-and-layout on each keystroke in split view, which
+// through a full parse-and-layout on each keystroke in split view, which
 // is what made typing next to a diagram feel laggy (#184). The rendered SVG
-// only depends on the source and the theme, so it comes from the cache the
-// editor's live widget already keeps in `mermaid-render`; a rebuild costs an
-// innerHTML assignment, and the two surfaces share one render per diagram.
+// only depends on the source and the fonts (colour comes from CSS), so it
+// comes from the cache the editor's live widget already keeps in
+// `mermaid-render`; a rebuild costs an innerHTML assignment, and the two
+// surfaces share one render per diagram. Waiting for a loading font before
+// measuring labels happens there too.
 async function renderMermaidBlocks(
   root: HTMLElement,
-  mode: "light" | "dark",
-  opts: { expanded?: boolean; themeKey?: string } = {},
+  opts: { expanded?: boolean } = {},
 ): Promise<void> {
   const blocks = Array.from(root.querySelectorAll<HTMLElement>(".mermaid"));
-  if (blocks.length === 0) return;
-  const themeKey = opts.themeKey ?? mode;
-  const needsRender = blocks.some((el) => {
-    const source = el.getAttribute("data-mermaid-source") ?? el.textContent ?? "";
-    return source.trim() !== "" && peekMermaidSvg(source, mode, themeKey) === null;
-  });
-  // Mermaid measures text in a temporary element. If the active font is
-  // still loading, metrics are taken against a fallback and the rendered
-  // labels end up clipped once the real font applies. Wait for fonts first
-  // so the measured widths match the final painted text. A cached diagram
-  // was measured already and skips the wait.
-  if (needsRender && typeof document !== "undefined" && document.fonts) {
-    try {
-      await document.fonts.ready;
-    } catch {
-      /* ignore font-api failures and render anyway */
-    }
-  }
-
   for (let i = 0; i < blocks.length; i++) {
     const el = blocks[i];
     if (opts.expanded) el.dataset.zenDiagramExpanded = "true";
@@ -179,14 +162,19 @@ async function renderMermaidBlocks(
     const surface = prepareMermaidShell(el, source);
     // The preview renders into a detached stage and commits afterwards, so
     // the block is not in the document yet: always paint it.
-    const result = await renderMermaidSvg(source, mode, themeKey, "zen-mermaid-preview");
+    const result = await renderMermaidSvg(source, "zen-mermaid-preview");
     if (result.ok) {
       surface.innerHTML = result.svg;
       // Inline pan/zoom (Cmd/Ctrl+wheel, drag, dblclick reset). The
       // expanded modal has its own React pan/zoom frame.
       if (!opts.expanded) attachInlineDiagramPanZoom(surface);
     } else {
-      surface.innerHTML = `<pre class="whitespace-pre-wrap text-xs text-[color:rgb(var(--z-red))]">Mermaid error: ${result.error}</pre>`;
+      // The message quotes the diagram source back, so it is text, never
+      // markup: a note must not be able to inject elements through a typo.
+      const error = document.createElement("pre");
+      error.className = "zen-diagram-error";
+      error.textContent = `Mermaid error: ${result.error}`;
+      surface.replaceChildren(error);
     }
   }
 }
@@ -906,7 +894,7 @@ export const Preview = memo(function Preview({
 
     const applyRenderedDom = async (): Promise<void> => {
       try {
-        await renderMermaidBlocks(stage, diagramTheme.mode, { themeKey: diagramTheme.key });
+        await renderMermaidBlocks(stage);
       } catch {
         /* render errors are surfaced inline per block */
       }
@@ -1422,7 +1410,7 @@ function DiagramPanZoomFrame({
 
     const render = async (): Promise<void> => {
       if (diagram.kind === "mermaid") {
-        await renderMermaidBlocks(host, diagramMode, { expanded: true, themeKey });
+        await renderMermaidBlocks(host, { expanded: true });
       } else {
         await renderDiagrams(host, { themeKey, expanded: true });
       }

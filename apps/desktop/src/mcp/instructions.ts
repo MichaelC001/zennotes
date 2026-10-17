@@ -166,7 +166,9 @@ Pick the renderer by intent:
   vectors over axes.
 - \`\`\`jsxgraph: interactive / draggable constructions.
 - \`\`\`mermaid: flow, sequence, class, state, ER, mindmap,
-  Gantt. NOT for coordinate geometry.
+  Gantt. NOT for coordinate geometry. Labels are plain text plus
+  \`<br>\` breaks: no other HTML and no \`$$\` math inside a label
+  (put the formula in a KaTeX block next to the diagram).
 
 Fence body rules:
 - \`tikz\`: emit the TikZ content itself, usually a bare

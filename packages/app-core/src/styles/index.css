@@ -4025,10 +4025,36 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   color: rgb(var(--z-red));
 }
 
-/* Mermaid diagram container */
-/* Mermaid block chrome — adapts to the current theme via CSS vars so
-   the card never clashes with the active palette. The SVG itself is
-   themed at render time via `buildMermaidTheme()` in Preview.tsx. */
+/* Mermaid diagrams, drawn by Pele (`lib/mermaid-render.ts`). The SVG paints
+   every colour through these variables, so a diagram follows the active theme,
+   a custom CSS theme included, and a theme switch repaints it without drawing
+   it again. The roles mirror the mermaid themeVariables they replace: nodes on
+   bg-2 with a bg-3 border, subgraphs on bg-softer, edges in grey-1, and the
+   chart series in the same order pie slices and git branches used. Fonts are
+   not set here: Pele writes the font it measured with into the SVG. */
+.pele {
+  --pele-bg: rgb(var(--z-bg));
+  --pele-fg: rgb(var(--z-fg-1));
+  --pele-muted: rgb(var(--z-grey-1));
+  --pele-line: rgb(var(--z-grey-1));
+  --pele-surface: rgb(var(--z-bg-2));
+  --pele-surface-alt: rgb(var(--z-bg-softer));
+  --pele-border: rgb(var(--z-bg-3));
+  --pele-accent: rgb(var(--z-accent));
+  --pele-critical: rgb(var(--z-red));
+  --pele-error: rgb(var(--z-red));
+  --pele-series-1: rgb(var(--z-accent));
+  --pele-series-2: rgb(var(--z-blue));
+  --pele-series-3: rgb(var(--z-green));
+  --pele-series-4: rgb(var(--z-purple));
+  --pele-series-5: rgb(var(--z-yellow));
+  --pele-series-6: rgb(var(--z-red));
+  --pele-series-7: rgb(var(--z-aqua));
+  --pele-series-8: rgb(var(--z-fg-1));
+}
+
+/* Mermaid block chrome: adapts to the current theme via CSS vars so the card
+   never clashes with the active palette. */
 .prose-zen .mermaid {
   display: flex;
   flex-direction: column;
@@ -4044,6 +4070,11 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
 .prose-zen .mermaid svg {
   max-width: 100%;
   height: auto;
+}
+/* The error quotes the offending line with a caret row under it, which only
+   points at the right column when the text is not centred like the card. */
+.prose-zen .mermaid .zen-diagram-error {
+  text-align: left;
 }
 
 /* URL embeds (```embed) — a responsive video/iframe card. `aspect-ratio` is set

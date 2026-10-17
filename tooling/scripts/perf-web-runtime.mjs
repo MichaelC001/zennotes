@@ -68,7 +68,10 @@ const deferredNormalFlowChunkPatterns = [
   /^vendor-markdown-/,
   /^vendor-highlight-/,
   /^vendor-d3-/,
-  // mermaid.core is the entry of the mermaid stack: if any of it loads, this does.
+  // Pele draws mermaid fences; its runtime chunk loads before any diagram type.
+  /^pele-runtime-/,
+  // mermaid.core is the entry of the mermaid.js stack (now only Excalidraw's
+  // Mermaid dialog): if any of it loads, this does.
   /^mermaid\.core-/,
   /^vendor-jsxgraph-/,
   /^vendor-function-plot-/

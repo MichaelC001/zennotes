@@ -188,7 +188,7 @@ try {
   await until(() => client.evaluate(`document.querySelector('.cm-content')?.textContent.includes('Read and edit')`), 'editor', 60000)
   assert.equal(await client.evaluate(`document.querySelector('[data-consumer-selection]').textContent`), path)
   assert.equal(await client.evaluate(`getComputedStyle(document.querySelector('#root > *')).display`), 'flex', 'Compiled Tailwind styles did not load')
-  const beforeLazy = requests.filter((url) => /mermaid\.core|typst.*\.wasm|harper.*\.wasm/.test(url))
+  const beforeLazy = requests.filter((url) => /pele-runtime|mermaid\.core|typst.*\.wasm|harper.*\.wasm/.test(url))
   assert.deepEqual(beforeLazy, [], 'Heavy features loaded before requested')
   await client.evaluate(`document.querySelector('.cm-content').focus()`)
   const modifier = process.platform === 'darwin' ? 4 : 2
@@ -212,6 +212,9 @@ try {
   await until(() => client.evaluate(`(() => { const button = [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Preview'); if (!button) return false; button.click(); return true })()`), 'Preview control')
   await until(() => client.evaluate(`!!document.querySelector('[aria-label="Note preview"]')`), 'Preview mode')
   await until(() => client.evaluate(`document.querySelector('.prose-zen .mermaid svg') && document.querySelector('.prose-zen .zen-typst-math svg')`), 'lazy Mermaid and Typst render', 60000)
+  // The deferral check above only means something while the diagram renderer
+  // really ships as a chunk by this name.
+  assert.ok(requests.some((url) => /pele-runtime-/.test(url)), 'Mermaid did not render through the pele-runtime chunk')
   const screenshot = await client.send('Page.captureScreenshot', { format: 'png' })
   await writeFile(join(run, 'lazy-features.png'), Buffer.from(screenshot.data, 'base64'))
   await client.evaluate('window.packageNavigation.goHome()')

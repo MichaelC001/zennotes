@@ -8,11 +8,12 @@
  *
  * Two things make this cheap enough to run on a hot editor:
  *
- *   1. The mermaid module is imported lazily and only when a fence exists, so a
- *      note without diagrams never pulls the heaviest chunk in the renderer.
- *   2. Rendered SVG is cached by (source, full theme identity) in
- *      `mermaid-render`, so a keystroke elsewhere in the note repaints from the
- *      cache, and moving the cursor in and out of a block costs nothing.
+ *   1. The renderer (Pele) is imported lazily and only when a fence exists, so
+ *      a note without diagrams never pulls diagram code into the renderer.
+ *   2. Rendered SVG is cached by (fonts, source) in `mermaid-render`, so a
+ *      keystroke elsewhere in the note repaints from the cache, and moving the
+ *      cursor in and out of a block costs nothing. Once the renderer has
+ *      loaded, a diagram it has not seen draws synchronously in `toDOM`.
  *
  * A diagram mid-edit is usually invalid, so a failed render keeps the LAST good
  * drawing of that block on screen rather than flashing an error at every
@@ -33,9 +34,10 @@ interface DiagramThemeFacetValue {
   key: string
 }
 
-/** Which palette the widgets draw in. The full identity matters because theme
- *  variants, custom CSS, overrides, tweaks, and fonts can change while the
- *  light/dark mode stays the same. */
+/** The theme the widgets were drawn under. Colour no longer needs a redraw (the
+ *  SVG paints through CSS variables), but the identity also carries the text
+ *  font, and a font change must re-measure every label. A palette-only change
+ *  rebuilds the widgets from the cache, which costs an innerHTML each. */
 const diagramThemeFacet = Facet.define<DiagramThemeFacetValue, DiagramThemeFacetValue>({
   combine: (values) => values[values.length - 1] ?? { mode: 'light', key: 'light' }
 })
@@ -84,7 +86,7 @@ class MermaidBlockWidget extends WidgetType {
     el.setAttribute('role', 'img')
     el.setAttribute('aria-label', 'Mermaid diagram')
 
-    const cached = peekMermaidSvg(this.source, this.theme.mode, this.theme.key)
+    const cached = peekMermaidSvg(this.source)
     if (cached?.ok) {
       el.innerHTML = cached.svg
       this.memory.lastGood = { themeKey: this.theme.key, svg: cached.svg }
@@ -99,8 +101,8 @@ class MermaidBlockWidget extends WidgetType {
     if (previous) el.innerHTML = previous
     else el.classList.add('cm-mermaid-pending')
 
-    void renderMermaidSvg(this.source, this.theme.mode, this.theme.key).then((result) => {
-      // The widget may have been replaced while mermaid was working (a
+    void renderMermaidSvg(this.source).then((result) => {
+      // The widget may have been replaced while the renderer loaded (a
       // keystroke, a cursor move). Writing into a detached node is harmless and
       // the live widget renders from the cache, so no check is needed beyond
       // this one for a node that is still ours.
