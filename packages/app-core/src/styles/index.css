@@ -1581,6 +1581,23 @@ textarea,
   text-indent: calc(var(--z-list-hanging-indent, 0) * -1);
   --z-list-guide-color: rgb(var(--z-grey-0) / 0.16);
 }
+/* Each character of the leading whitespace and of a bullet or ordered marker
+ * takes at least its column count in ch (set inline by cm-markdown-list-indent),
+ * and so does the bullet drawn over a `-`, so a proportional font, whose space
+ * is about half a ch, lines the bullet up with its guide and the first line's
+ * text with the hanging indent (#952). A minimum width: with a monospace font
+ * they are already that wide. text-indent is inherited, and here it would pull
+ * the content out of its own box. */
+.cm-editor .cm-markdown-list-line .cm-list-prefix-cell,
+.cm-editor .cm-list-boxed-marker .cm-wq-bullet {
+  display: inline-block;
+  text-indent: 0;
+  white-space: pre;
+}
+
+.cm-editor .cm-list-boxed-marker .cm-wq-bullet {
+  min-width: 1ch;
+}
 .cm-editor .cm-cursor,
 .cm-editor .cm-dropCursor {
   border-left: 2px solid rgb(var(--z-accent));
