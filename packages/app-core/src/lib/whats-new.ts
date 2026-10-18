@@ -40,6 +40,27 @@ export const CLOUD_ANNOUNCEMENT = {
 
 export const WHATS_NEW: readonly WhatsNewEntry[] = [
   {
+    version: '2.71.0',
+    highlights: [
+      {
+        title: 'Diagrams in your theme',
+        body: 'Mermaid diagrams now draw with Pele, about 50 times faster and in your theme’s colours, from the same fences. With live preview on they draw right in the editor, and switching themes repaints them at once.'
+      },
+      {
+        title: 'D2 diagrams',
+        body: 'A d2 fence draws a D2 diagram: boxes inside boxes, labelled connections, data models and sequence diagrams, in your theme. The tour note 05c D2 Diagrams has examples to try.'
+      },
+      {
+        title: 'Keep running in the tray',
+        body: 'Turn it on in Settings → Appearance → Window, and closing the last window hides it instead of quitting: Cloud keeps syncing and the Quick capture hotkey keeps working. The tray icon brings the window back.'
+      },
+      {
+        title: 'A fresh demo tour',
+        body: 'Generate Demo Tour Notes now writes 22 notes, with new ones on task boards, templates, drawings and databases, workflows, and Cloud and the CLI. Regenerate it from the command palette to see what ZenNotes does today.'
+      }
+    ]
+  },
+  {
     version: '2.70.0',
     highlights: [
       {
