@@ -61,7 +61,7 @@ import {
   VaultChangeEvent,
   VaultInfo
 } from '@shared/ipc'
-import { currentDemoTourPath, DEMO_TOUR_DIR } from '@shared/demo-tour'
+import { currentDemoTourPath, DEMO_TOUR_DIR, demoTourNestedDirs } from '@shared/demo-tour'
 import { normalizeNoteComments } from '@shared/note-comments'
 import { FRONTMATTER_BLOCK_RE, frontmatterTags } from '@shared/frontmatter'
 import { rewriteAssetReferences } from '@shared/asset-link-rename'
@@ -4315,6 +4315,9 @@ export async function removeDemoTour(root: string): Promise<VaultDemoTourResult>
     await removeFileIfExists(resolveSafe(root, asset.path))
   }
 
+  for (const dir of demoTourNestedDirs(DEMO_TOUR_ASSETS.map((asset) => asset.path))) {
+    await removeDirIfEmpty(resolveSafe(root, dir))
+  }
   await removeDirIfEmpty(resolveSafe(root, DEMO_TOUR_DIR))
 
   invalidateNoteMetaCache(root)
