@@ -8,7 +8,14 @@ vi.mock('electron', () => ({
   Tray: class {}
 }))
 
-import { parseTraySyncStatus, shouldHideOnClose, traySyncLine, trayTooltip } from './tray'
+import {
+  parseTraySyncStatus,
+  SESSION_END_GRACE_MS,
+  SessionEndWatch,
+  shouldHideOnClose,
+  traySyncLine,
+  trayTooltip
+} from './tray'
 
 const clock = (epochMs: number): string => `T${epochMs}`
 
@@ -16,6 +23,7 @@ describe('close to tray (#947)', () => {
   const base = {
     keepRunningInTray: true,
     quitting: false,
+    sessionEnding: false,
     isWorkspaceWindow: true,
     otherVisibleWorkspaceWindows: 0
   }
@@ -38,6 +46,54 @@ describe('close to tray (#947)', () => {
 
   it('never holds a utility window such as Quick capture', () => {
     expect(shouldHideOnClose({ ...base, isWorkspaceWindow: false })).toBe(false)
+  })
+
+  it('lets windows close while the session ends, or a sign-out would wait on them', () => {
+    expect(shouldHideOnClose({ ...base, sessionEnding: true })).toBe(false)
+  })
+})
+
+describe('Windows ending the session (#947)', () => {
+  const closeHides = (watch: SessionEndWatch, now: number): boolean =>
+    shouldHideOnClose({
+      keepRunningInTray: true,
+      quitting: false,
+      sessionEnding: watch.isEnding(now),
+      isWorkspaceWindow: true,
+      otherVisibleWorkspaceWindows: 0
+    })
+
+  it('hides to the tray when Windows has not asked', () => {
+    expect(closeHides(new SessionEndWatch(), 0)).toBe(true)
+  })
+
+  it('closes for real once Windows asks to sign out', () => {
+    const watch = new SessionEndWatch()
+    watch.query(1_000)
+    expect(closeHides(watch, 1_000)).toBe(false)
+    expect(closeHides(watch, 1_000 + SESSION_END_GRACE_MS - 1)).toBe(false)
+  })
+
+  it('hides to the tray again after a cancelled sign-out, which sends no session-end', () => {
+    const watch = new SessionEndWatch()
+    watch.query(1_000)
+    expect(closeHides(watch, 1_000 + SESSION_END_GRACE_MS)).toBe(true)
+  })
+
+  it('stays closing for real once the session really ends', () => {
+    const watch = new SessionEndWatch()
+    watch.query(1_000)
+    watch.end()
+    expect(closeHides(watch, 1_000 + SESSION_END_GRACE_MS)).toBe(false)
+    expect(closeHides(watch, 1_000 + 100 * SESSION_END_GRACE_MS)).toBe(false)
+  })
+
+  it('counts the grace from the latest question, since every window is asked', () => {
+    const watch = new SessionEndWatch()
+    watch.query(1_000)
+    watch.query(4_000)
+    expect(closeHides(watch, 1_000 + SESSION_END_GRACE_MS)).toBe(false)
+    expect(closeHides(watch, 4_000 + SESSION_END_GRACE_MS)).toBe(true)
   })
 })
 

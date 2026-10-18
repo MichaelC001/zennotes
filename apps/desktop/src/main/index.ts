@@ -284,6 +284,7 @@ import { sendUsageCount } from "./usage-count";
 import {
   hideTray,
   parseTraySyncStatus,
+  SessionEndWatch,
   setTraySyncStatus,
   shouldHideOnClose,
   showTray,
@@ -379,8 +380,11 @@ let creatingMainWindow: Promise<BrowserWindow> | null = null;
 // window's close handler can decide synchronously.
 let keepRunningInTray = false;
 // Set once the app is really exiting, so close-to-tray stands aside: the
-// tray's Quit, Cmd+Q, an update's restart, or the OS ending the session.
+// tray's Quit, Cmd+Q, or an update's restart.
 let appQuitting = false;
+// Windows signing out, restarting or shutting down stands it aside too, but
+// only while the session is really ending: a cancelled sign-out lapses.
+const sessionEnd = new SessionEndWatch();
 // Workspace windows a close hid to the tray, so the tray brings back exactly
 // those and never a window that is still loading behind `show: false`.
 const trayHiddenWindowIds = new Set<number>();
@@ -1844,6 +1848,7 @@ async function createWindow(
     const hide = shouldHideOnClose({
       keepRunningInTray,
       quitting: appQuitting,
+      sessionEnding: sessionEnd.isEnding(performance.now()),
       isWorkspaceWindow: isWorkspaceWindow(win),
       otherVisibleWorkspaceWindows: BrowserWindow.getAllWindows().filter(
         (other) =>
@@ -1858,10 +1863,10 @@ async function createWindow(
     hideWindowToTray(win);
   });
   // Windows asks every window before logging off; a close we prevent there
-  // would hold up the session ending.
-  win.on("query-session-end", () => {
-    appQuitting = true;
-  });
+  // would hold up the session ending. Asking is not ending, so the question
+  // lapses unless `session-end` follows.
+  win.on("query-session-end", () => sessionEnd.query(performance.now()));
+  win.on("session-end", () => sessionEnd.end());
   win.on("closed", () => {
     if (persistWindowStateTimer) clearTimeout(persistWindowStateTimer);
     trayHiddenWindowIds.delete(win.id);

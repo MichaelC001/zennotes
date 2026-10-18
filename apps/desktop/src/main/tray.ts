@@ -65,21 +65,58 @@ export function trayTooltip(syncLine: string | null): string {
 /**
  * Whether a workspace window's close should hide it instead. Only the last
  * visible workspace window hides: closing one of several still closes it, and
- * quitting (the tray's Quit, Cmd+Q, an update's restart, the session ending)
- * always lets windows close, or the app could never exit.
+ * quitting (the tray's Quit, Cmd+Q, an update's restart) or the session
+ * ending always lets windows close, or the app could never exit.
  */
 export function shouldHideOnClose(input: {
   keepRunningInTray: boolean
   quitting: boolean
+  sessionEnding: boolean
   isWorkspaceWindow: boolean
   otherVisibleWorkspaceWindows: number
 }): boolean {
   return (
     input.keepRunningInTray &&
     !input.quitting &&
+    !input.sessionEnding &&
     input.isWorkspaceWindow &&
     input.otherVisibleWorkspaceWindows === 0
   )
+}
+
+/** Long enough to cover the gap between Windows asking every app and telling
+ *  them the answer, short enough that someone who cancelled a sign-out is
+ *  unlikely to close a window inside it. */
+export const SESSION_END_GRACE_MS = 10_000
+
+/**
+ * Windows asks every window before it signs out, restarts or shuts down
+ * (`query-session-end`), and a close turned into a hide from then on would
+ * hold the session up, so windows close for real. The question is not the
+ * answer, though: another app can refuse, or the user can cancel, and then
+ * Electron says nothing more, since it emits `session-end` only when the
+ * session really ends. So a question holds for a grace period and lapses,
+ * and closing hides to the tray again; `session-end` is final. Times come
+ * from a monotonic clock the caller passes in.
+ */
+export class SessionEndWatch {
+  private queriedAt: number | null = null
+  private ended = false
+
+  constructor(private readonly graceMs = SESSION_END_GRACE_MS) {}
+
+  query(now: number): void {
+    this.queriedAt = now
+  }
+
+  end(): void {
+    this.ended = true
+  }
+
+  isEnding(now: number): boolean {
+    if (this.ended) return true
+    return this.queriedAt !== null && now - this.queriedAt < this.graceMs
+  }
 }
 
 let tray: Tray | null = null
