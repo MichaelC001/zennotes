@@ -222,6 +222,22 @@ describe('previewVisibleSourceLines (what the reader has on screen, #822)', () =
     expect(previewVisibleSourceLines(null)).toBeNull()
   })
 
+  it('reads a long list as the item at the top of the view, not as its start (#953)', () => {
+    // A list from line 5 fills the view; item 37 starts above the top edge
+    // and its child 38 covers it, while 39 starts inside the view.
+    const list = [
+      { line: 5, top: 0, bottom: 2000 },
+      { line: 5, top: 0, bottom: 160 },
+      { line: 37, top: 200, bottom: 360 },
+      { line: 38, top: 230, bottom: 260 },
+      { line: 39, top: 260, bottom: 300 },
+      { line: 41, top: 700, bottom: 860 }
+    ]
+    expect(previewVisibleSourceLines(renderedPreview(list, 250, 650))).toEqual({ top: 38, end: 41 })
+    // Scrolled so item 37 starts exactly at the top: that item, not its child.
+    expect(previewVisibleSourceLines(renderedPreview(list, 200, 650))).toEqual({ top: 37, end: 41 })
+  })
+
   it('treats the line range as half open', () => {
     const visible = { top: 5, end: 30 }
     expect(previewShowsSourceLine(visible, 5)).toBe(true)
@@ -249,6 +265,16 @@ describe('previewEditRequestForTarget (double-click in the reading view, #822)',
     ].join('')
     return root
   }
+
+  it('opens the list item that was double-clicked, not the start of its list (#953)', () => {
+    const root = document.createElement('article')
+    root.innerHTML =
+      '<ul data-source-line="5"><li data-source-line="37"><p><strong>Task 9</strong></p>' +
+      '<ul><li data-source-line="39">Detail <em>9b</em></li></ul></li></ul>'
+    const item = root.querySelector<HTMLElement>('[data-source-line="39"]')!
+    item.getBoundingClientRect = () => ({ top: 410 } as DOMRect)
+    expect(previewEditRequestForTarget(root.querySelector('em'))).toEqual({ sourceLine: 39, blockClientTop: 410 })
+  })
 
   it('resolves inline content to its top-level block and reports where the block is', () => {
     const root = article()

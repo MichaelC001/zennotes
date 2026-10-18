@@ -12,7 +12,7 @@ import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeStringify from 'rehype-stringify'
 import { visit, SKIP } from 'unist-util-visit'
-import type { Root as MdRoot } from 'mdast'
+import type { ListItem, Root as MdRoot } from 'mdast'
 import type { Root as HastRoot, Element as HastElement } from 'hast'
 import type { VFile } from 'vfile'
 import { recordRendererPerf } from './perf'
@@ -894,14 +894,23 @@ function rehypeTableColWidths() {
  * Applied via `data.hProperties` so `remarkRehype` carries it onto the element.
  */
 function remarkSourceLines() {
+  const stamp = (node: MdRoot['children'][number] | ListItem): void => {
+    const line = node.position?.start?.line
+    if (line == null) return
+    const data = (node.data ??= {})
+    const hProperties = ((data.hProperties ??= {}) as Record<string, unknown>)
+    hProperties['data-source-line'] = line
+  }
   return (tree: MdRoot): void => {
-    for (const node of tree.children) {
-      const line = node.position?.start?.line
-      if (line == null) continue
-      const data = (node.data ??= {})
-      const hProperties = ((data.hProperties ??= {}) as Record<string, unknown>)
-      hProperties['data-source-line'] = line
-    }
+    for (const node of tree.children) stamp(node)
+    // A list is one top-level block, so a note that is mostly one long list
+    // resolved every double-click and every return from Preview to the list's
+    // first line (#953). Each item, nested ones included, carries its own
+    // line; readers that want blocks only (split scroll sync) still select
+    // direct children of the content root.
+    visit(tree, 'listItem', (node: ListItem) => {
+      stamp(node)
+    })
   }
 }
 

@@ -124,6 +124,21 @@ describe('renderMarkdown', () => {
     expect(html).toContain('graph TD; A--&gt;B')
   })
 
+  it('stamps every list item with its own source line, nested ones included (#953)', () => {
+    const html = renderMarkdown('Intro\n\n- [ ] Task 1\n    - Detail 1a\n- [ ] Task 2\n    - Detail 2a\n    - Detail 2b')
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const items = [...doc.querySelectorAll('li')].map((li) => [li.getAttribute('data-source-line'), li.textContent?.trim().split('\n')[0]])
+    expect(items).toEqual([
+      ['3', 'Task 1'],
+      ['4', 'Detail 1a'],
+      ['5', 'Task 2'],
+      ['6', 'Detail 2a'],
+      ['7', 'Detail 2b']
+    ])
+    // The list itself keeps the line it starts on, as every top-level block does.
+    expect(doc.querySelector('ul')?.getAttribute('data-source-line')).toBe('3')
+  })
+
   it('turns a d2 fence into a placeholder that keeps its source for the renderer', () => {
     const html = renderMarkdown('```d2\nserver -> db: query\n```')
 

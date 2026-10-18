@@ -67,6 +67,10 @@ export function previewVisibleSourceLines(
   if (!previewScrollEl) return null
   const viewport = previewScrollEl.getBoundingClientRect()
   let top: number | null = null
+  // Stamps nest: a list carries its first line and every item inside it its
+  // own (#953). They come in document order, so a later stamp that still
+  // covers the top edge sits inside the earlier one, and the innermost wins:
+  // a long list reads as the item at the top of the view, not as its start.
   for (const block of previewScrollEl.querySelectorAll<HTMLElement>('[data-source-line]')) {
     const line = Number(block.dataset.sourceLine)
     if (!Number.isFinite(line)) continue
@@ -75,6 +79,8 @@ export function previewVisibleSourceLines(
       if (rect.bottom > viewport.top + 1) top = line
     } else if (rect.top >= viewport.bottom) {
       return { top, end: line }
+    } else if (rect.top <= viewport.top + 1 && rect.bottom > viewport.top + 1) {
+      top = line
     }
   }
   return top == null ? null : { top, end: null }
