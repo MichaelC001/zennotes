@@ -7,6 +7,7 @@ import {
   completeStatusOrder,
   cursorAfterCardMove,
   dropMutationsFor,
+  fieldColumns,
   IN_PROGRESS_COLUMN_ID,
   kanbanGroupByKeyPlan,
   kanbanPendingGroupByPlan,
@@ -498,6 +499,62 @@ describe('forwarded and cancelled records stay off every board (#786)', () => {
       'inbox/Note 3.md › Still open',
       'inbox/Note 3.md › Shipped'
     ])
+  })
+})
+
+// #949: a task note's `status: done` both closes it and names its column, so a
+// Custom status board with a configured `done` column must keep it there.
+describe('closed task notes on the Custom status board (#949)', () => {
+  const taskNote = (content: string, status: string): VaultTask =>
+    card({
+      content,
+      kind: 'file',
+      sourcePath: `inbox/${content}.md`,
+      taskIndex: -1,
+      status,
+      fields: { status },
+      checked: status === 'done',
+      cancelled: status === 'cancelled',
+      inProgress: status === 'in-progress'
+    })
+  // A note with frontmatter `status: in-progress` lends that status to its
+  // checkboxes, and a checked box keeps its own explicit `@status:done`.
+  const checkbox = (content: string, status: string, checked: boolean, taskIndex: number): VaultTask =>
+    card({ content, sourcePath: 'inbox/Checklist.md', taskIndex, status, fields: { status }, checked })
+  const tasks = [
+    taskNote('Completed demo task', 'done'),
+    taskNote('Active demo task', 'in-progress'),
+    taskNote('Dropped demo task', 'cancelled'),
+    checkbox('Finished step', 'in-progress', true, 0),
+    checkbox('Next step', 'in-progress', false, 1),
+    checkbox('Shipped step', 'done', true, 2)
+  ]
+  const statuses = ['open', 'in-progress', 'waiting', 'done']
+
+  it('keeps a done task note in the configured Done column, still checked', () => {
+    const columns = fieldColumns(tasks, 'status', statuses)
+    expect(ids(columns)).toEqual(['open', 'in-progress', 'waiting', 'done', NO_VALUE_COLUMN_ID])
+    expect(columnIds(columns, 'done')).toEqual(['Completed demo task'])
+    expect(columns.find((c) => c.id === 'done')!.tasks[0].checked).toBe(true)
+    expect(columnIds(columns, 'in-progress')).toEqual(['Active demo task', 'Next step'])
+  })
+
+  it('leaves closed task notes off when their status has no configured column', () => {
+    const columns = fieldColumns(tasks, 'status', ['open', 'in-progress'])
+    expect(ids(columns)).toEqual(['open', 'in-progress', NO_VALUE_COLUMN_ID])
+    expect(columns.flatMap((c) => c.tasks.map((t) => t.content))).toEqual(['Active demo task', 'Next step'])
+  })
+
+  it('shows a cancelled task note once a cancelled column is configured', () => {
+    const columns = fieldColumns(tasks, 'status', [...statuses, 'cancelled'])
+    expect(columnIds(columns, 'cancelled')).toEqual(['Dropped demo task'])
+  })
+
+  it('keeps checked checkbox tasks off, whatever status they carry or inherit', () => {
+    const columns = fieldColumns(tasks, 'status', statuses)
+    const shown = columns.flatMap((c) => c.tasks.map((t) => t.content))
+    expect(shown).not.toContain('Finished step')
+    expect(shown).not.toContain('Shipped step')
   })
 })
 

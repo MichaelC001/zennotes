@@ -336,13 +336,23 @@ function fieldKeyOf(groupBy: KanbanGroupBy): string | null {
 /** Columns for a free-form `@<key>:<value>` field board. Configured values come
  *  first in order, then any value found on tasks but not configured (sorted, so
  *  nothing is hidden), then a trailing "No <key>" column. Completed and
- *  forwarded tasks are left off, matching the priority/folder boards. (#354) */
-function fieldColumns(tasks: VaultTask[], fieldKey: string, order: string[]): Column[] {
+ *  forwarded tasks are left off, matching the priority/folder boards. (#354)
+ *
+ *  One exception (#949): a task note whose value names a configured column
+ *  stays in it, done or cancelled. A task note's `status:` is its one state,
+ *  so `status: done` both closes it and names its column, and a `done` column
+ *  someone listed in `kanban_statuses` is a request to see that work. Only a
+ *  configured column counts: a discovered one would turn every finished note in
+ *  the vault into a column. Checkbox tasks keep the live-work rule, because
+ *  their box and their `@status:` are separate, and a status they inherit from
+ *  the note's frontmatter would pull every checked subtask into that column. */
+export function fieldColumns(tasks: VaultTask[], fieldKey: string, order: string[]): Column[] {
   const byValue = new Map<string, VaultTask[]>()
   const noValue: VaultTask[] = []
+  const configured = new Set(order)
   for (const task of tasks) {
-    if (!isBoardCard(task)) continue
     const value = task.fields?.[fieldKey]
+    if (!isBoardCard(task) && !(task.kind === 'file' && value && configured.has(value))) continue
     if (value) {
       const list = byValue.get(value)
       if (list) list.push(task)
