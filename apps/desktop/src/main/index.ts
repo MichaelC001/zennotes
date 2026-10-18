@@ -843,10 +843,10 @@ function applyKeepRunningInTray(enabled: boolean): void {
   keepRunningInTray = enabled;
   if (!enabled) {
     hideTray();
-    // Nothing would bring a held window back once the icon is gone.
-    if (!hasVisibleWorkspaceWindow() && trayHiddenWindowIds.size > 0) {
-      revealTrayHiddenWindows();
-    }
+    // Nothing would bring a held window back once the icon is gone, even
+    // with another window still open: closing that one later would leave
+    // the app running with no window and no icon.
+    if (trayHiddenWindowIds.size > 0) revealTrayHiddenWindows();
     return;
   }
   showTray({
