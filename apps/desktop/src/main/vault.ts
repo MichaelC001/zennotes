@@ -316,6 +316,10 @@ export interface PersistedConfig {
    *  Kept here, not in the portable config.toml, because it governs this
    *  machine's managed copy under userData, like the install location. */
   cliAutoUpdate: boolean
+  /** Closing the last window hides it to the tray instead (#947). Kept here,
+   *  not in the portable config.toml: main needs it before any renderer runs,
+   *  and whether a tray exists at all depends on this machine's desktop. */
+  keepRunningInTray: boolean
 }
 
 export const DEFAULT_QUICK_CAPTURE_HOTKEY = 'CommandOrControl+Shift+Space'
@@ -331,7 +335,8 @@ const DEFAULT_CONFIG: PersistedConfig = {
   zoomFactor: 1,
   quickCaptureHotkey: DEFAULT_QUICK_CAPTURE_HOTKEY,
   quickCapturePinned: false,
-  cliAutoUpdate: true
+  cliAutoUpdate: true,
+  keepRunningInTray: false
 }
 
 let configWriteQueue = Promise.resolve()
@@ -464,6 +469,7 @@ function normalizePersistedConfig(value: unknown): PersistedConfig {
       : DEFAULT_QUICK_CAPTURE_HOTKEY
   const quickCapturePinned = candidate.quickCapturePinned === true
   const cliAutoUpdate = candidate.cliAutoUpdate !== false
+  const keepRunningInTray = candidate.keepRunningInTray === true
   return {
     workspaceMode: candidate.workspaceMode === 'remote' ? 'remote' : 'local',
     vaultRoot: typeof candidate.vaultRoot === 'string' ? candidate.vaultRoot : null,
@@ -481,7 +487,8 @@ function normalizePersistedConfig(value: unknown): PersistedConfig {
     zoomFactor,
     quickCaptureHotkey,
     quickCapturePinned,
-    cliAutoUpdate
+    cliAutoUpdate,
+    keepRunningInTray
   }
 }
 

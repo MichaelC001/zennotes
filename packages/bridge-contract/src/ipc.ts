@@ -174,6 +174,11 @@ export const IPC = {
   APP_SET_QUICK_CAPTURE_HOTKEY: 'app:set-quick-capture-hotkey',
   APP_GET_QUICK_CAPTURE_PINNED: 'app:get-quick-capture-pinned',
   APP_SET_QUICK_CAPTURE_PINNED: 'app:set-quick-capture-pinned',
+  APP_GET_KEEP_RUNNING_IN_TRAY: 'app:get-keep-running-in-tray',
+  APP_SET_KEEP_RUNNING_IN_TRAY: 'app:set-keep-running-in-tray',
+  APP_TRAY_SYNC_STATUS: 'app:tray-sync-status',
+  WINDOW_HIDE_TO_TRAY: 'window:hide-to-tray',
+  APP_QUIT: 'app:quit',
   APP_READ_EXTERNAL_FILE: 'app:read-external-file',
   APP_WRITE_EXTERNAL_FILE: 'app:write-external-file',
   APP_MOVE_EXTERNAL_FILE_TO_VAULT: 'app:move-external-file-to-vault',
@@ -256,6 +261,18 @@ export type AppUpdatePhase =
    */
   | 'offline'
   | 'error'
+
+/** What a window reports about its Cloud sync for the tray icon (#947). Only
+ *  a connected, linked vault has a state worth showing; anything else is
+ *  reported as null and leaves the tray without a sync line. */
+export type TraySyncState = 'idle' | 'syncing' | 'attention' | 'error'
+
+export interface TraySyncStatus {
+  state: TraySyncState
+  vaultName: string | null
+  /** Epoch milliseconds of the last finished sync, when there was one. */
+  lastSyncedAt: number | null
+}
 
 export interface CliInstallRequest {
   /** Main-issued approval for a specific dangling historical shortcut. */

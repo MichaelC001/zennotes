@@ -572,3 +572,48 @@ describe('checkForAppUpdates with no network (issue #812)', () => {
   })
 })
 
+
+// #947: a process kept in the tray runs for days, so the background check
+// repeats instead of running once at launch.
+describe('background update checks repeat while the app runs (#947)', () => {
+  const original = { format: process.env.ZENNOTES_UPDATER_FORMAT, feed: process.env.ZENNOTES_UPDATE_FEED_URL }
+
+  afterEach(() => {
+    vi.useRealTimers()
+    restoreUpdaterEnv(original)
+  })
+
+  it('checks again every six hours until a newer version turns up', async () => {
+    vi.useFakeTimers()
+    let latest = '2.0.2'
+    const { mod, fetchMock } = await loadManagedUpdater(() => FEED(latest))
+
+    mod.scheduleBackgroundAppUpdateCheck(0)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(mod.getAppUpdateState().phase).toBe('not-available')
+
+    await vi.advanceTimersByTimeAsync(mod.BACKGROUND_UPDATE_RECHECK_MS - 1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    latest = '2.0.3'
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(mod.getAppUpdateState().phase).toBe('available')
+    expect(mod.getAppUpdateState().availableVersion).toBe('2.0.3')
+
+    // Found: the person owns it from here, so the repeats stand aside.
+    await vi.advanceTimersByTimeAsync(mod.BACKGROUND_UPDATE_RECHECK_MS * 2)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('repeats only from a settled state', async () => {
+    const { mod } = await loadManagedUpdater(FEED('2.0.2'))
+    for (const phase of ['idle', 'not-available', 'error'] as const) {
+      expect(mod.canRecheckInBackground(phase)).toBe(true)
+    }
+    for (const phase of ['checking', 'available', 'downloading', 'downloaded', 'installing', 'offline', 'unsupported'] as const) {
+      expect(mod.canRecheckInBackground(phase)).toBe(false)
+    }
+  })
+})

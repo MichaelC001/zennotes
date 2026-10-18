@@ -21,6 +21,7 @@ import {
 import type { VimWrappedLineMotionMode } from "@shared/app-config";
 import { HARPER_DIALECTS } from "@shared/harper-settings";
 import { harperSupported } from "../lib/harper-runtime";
+import { setKeepRunningInTray, useTrayStore } from "../lib/tray-runtime";
 import type {
   AppUpdateState,
   CliInstallStatus,
@@ -935,6 +936,7 @@ export function SettingsModal(): JSX.Element {
   const setSystemFolderLabel = useStore((s) => s.setSystemFolderLabel);
   const darkSidebar = useStore((s) => s.darkSidebar);
   const showWindowTitleBar = useStore((s) => s.showWindowTitleBar);
+  const keepRunningInTray = useTrayStore((s) => s.keepRunningInTray);
   const setShowWindowTitleBar = useStore((s) => s.setShowWindowTitleBar);
   const setDarkSidebar = useStore((s) => s.setDarkSidebar);
   const showSidebarChevrons = useStore((s) => s.showSidebarChevrons);
@@ -1569,6 +1571,14 @@ export function SettingsModal(): JSX.Element {
           available: appInfo.runtime === "desktop",
         },
         {
+          id: "keep-running-in-tray",
+          title: "Keep running in the tray",
+          description:
+            "Closing the last window hides it to the tray, so Cloud sync and the Quick capture hotkey keep working.",
+          keywords: ["tray", "system tray", "menu bar", "background", "close", "quit", "minimize", "hide", "tiling", "waybar"],
+          available: appInfo.runtime === "desktop",
+        },
+        {
           id: "sidebar-arrows",
           title: "Sidebar arrows",
           description:
@@ -2019,6 +2029,21 @@ export function SettingsModal(): JSX.Element {
               onChange={setNestedTags}
             />
           </Section>
+
+          {appInfo.runtime === "desktop" && (
+            <Section
+              title="Window"
+              description="What closing the window does."
+            >
+              <ToggleRow
+                label="Keep running in the tray"
+                description={keepRunningInTrayDescription(zenBridge.platformSync())}
+                value={keepRunningInTray}
+                settingId="keep-running-in-tray"
+                onChange={(next) => void setKeepRunningInTray(next)}
+              />
+            </Section>
+          )}
 
           <Section
             title="PDF export"
@@ -7798,6 +7823,21 @@ function NumberRow({
       </div>
     </div>
   );
+}
+
+/** The tray setting's description, in the platform's own words: macOS keeps
+ *  the app alive without windows anyway and calls the tray the menu bar, while
+ *  Linux and Windows quit on close and have no Ctrl+Q of their own. */
+function keepRunningInTrayDescription(platform: string): string {
+  const mac = platform === "darwin";
+  return [
+    `Closing the last window hides it instead of ${mac ? "closing it" : "quitting"}, and a ZenNotes icon in the ${mac ? "menu bar" : "system tray"} brings it back.`,
+    "Cloud sync and the Quick capture hotkey keep working meanwhile, and the icon shows the sync state.",
+    mac
+      ? "Quit from the icon's menu or with Cmd+Q."
+      : "Quit from the icon's menu, or with Quit ZenNotes in the command palette.",
+    "If your desktop has no tray, open ZenNotes again to bring the window back.",
+  ].join(" ");
 }
 
 function ToggleRow({

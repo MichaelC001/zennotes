@@ -140,6 +140,10 @@
         "to": "icon.png"
       },
       {
+        "from": "build/tray",
+        "to": "tray"
+      },
+      {
         "from": "build/zen",
         "to": "zen"
       },

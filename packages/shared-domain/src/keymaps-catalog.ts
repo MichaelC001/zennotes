@@ -99,6 +99,7 @@ export const KEYMAP_CATALOG: KeymapCatalogEntry[] = [
   { id: "vim.leaderToggleFavorite", group: "vim", defaultBinding: "s", title: "Leader note action: toggle favorite" },
   { id: "vim.leaderTableToDatabase", group: "vim", defaultBinding: "d", title: "Leader note action: convert table to database" },
   { id: "vim.leaderQuickCapture", group: "vim", defaultBinding: "q", title: "Leader: open quick capture" },
+  { id: "vim.leaderHideToTray", group: "vim", defaultBinding: "b", title: "Leader: hide window to tray" },
   { id: "vim.leaderTemplatePicker", group: "vim", defaultBinding: "t", title: "Leader: new from template" },
   { id: "vim.leaderInsertTemplate", group: "vim", defaultBinding: "i", title: "Leader: insert template into note" },
   { id: "vim.leaderDailyNote", group: "vim", defaultBinding: "d", title: "Leader: today's daily note" },

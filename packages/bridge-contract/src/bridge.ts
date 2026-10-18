@@ -33,6 +33,7 @@ import type {
   ServerSessionStatus,
   VaultSettings,
   TikzRenderResponse,
+  TraySyncStatus,
   VaultChangeEvent,
   VaultDemoTourResult,
   VaultInfo,
@@ -514,6 +515,19 @@ export interface ZenBridge {
   /** Whether the quick-capture window stays pinned on top (won't hide on blur). */
   getQuickCapturePinned(): Promise<boolean>
   setQuickCapturePinned(pinned: boolean): Promise<boolean>
+  /** Desktop only (#947): whether closing the last window hides it to the
+   *  tray instead. Optional so the web and phone bridges need no stub. */
+  getKeepRunningInTray?(): Promise<boolean>
+  /** Resolves to the setting now in effect. */
+  setKeepRunningInTray?(enabled: boolean): Promise<boolean>
+  /** Hide this window to the tray. Resolves false, and leaves the window
+   *  alone, while the tray is off: a hidden window would be unreachable. */
+  hideWindowToTray?(): Promise<boolean>
+  /** This window's Cloud sync state for the tray; null when there is none. */
+  reportTraySyncStatus?(status: TraySyncStatus | null): void
+  /** Quit the app for real. Linux and Windows have no app menu, so with the
+   *  tray holding the window this is the way out besides the icon's menu. */
+  quitApp?(): void
   renderTikz(source: string): Promise<TikzRenderResponse>
 
   mcpGetRuntime(): Promise<McpServerRuntime>

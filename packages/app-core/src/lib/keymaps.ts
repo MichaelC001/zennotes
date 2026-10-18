@@ -67,6 +67,7 @@ export type KeymapId =
   | "vim.leaderToggleFavorite"
   | "vim.leaderTableToDatabase"
   | "vim.leaderQuickCapture"
+  | "vim.leaderHideToTray"
   | "vim.leaderTemplatePicker"
   | "vim.leaderInsertTemplate"
   | "vim.leaderDailyNote"
@@ -698,6 +699,18 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
     title: "Leader: open quick capture",
     description: "Open the floating quick capture window.",
     defaultBinding: "q",
+    vimOnly: true,
+    maxTokens: 1,
+  },
+  {
+    id: "vim.leaderHideToTray",
+    kind: "sequence",
+    scope: "leader",
+    group: "vim",
+    title: "Leader: hide window to tray",
+    // `b` for background: the window steps away and the app keeps running.
+    description: "Hide this window to the tray, with Keep running in the tray on.",
+    defaultBinding: "b",
     vimOnly: true,
     maxTokens: 1,
   },

@@ -63,6 +63,7 @@ import {
   useAppUpdateState
 } from './lib/app-update-state'
 import { ensureCloudAutoSyncStarted, stopCloudAutoSync } from './lib/cloud-auto-sync'
+import { loadKeepRunningInTray, startTraySyncStatusReporter } from './lib/tray-runtime'
 import { installHarperRuntime } from './lib/harper-runtime'
 import { installIgnoredKeysGuard } from './lib/ignored-keys'
 
@@ -441,6 +442,19 @@ function App(): JSX.Element {
     ensureCloudAutoSyncStarted(vault.root)
     return stopCloudAutoSync
   }, [vault?.root])
+  // Keep running in the tray (#947): the setting for the palette and leader,
+  // and this window's sync state for the tray icon.
+  useEffect(() => {
+    void loadKeepRunningInTray()
+    // Another window's Settings may have changed it meanwhile.
+    const refresh = (): void => void loadKeepRunningInTray()
+    window.addEventListener('focus', refresh)
+    const stopReporting = startTraySyncStatusReporter()
+    return () => {
+      window.removeEventListener('focus', refresh)
+      stopReporting()
+    }
+  }, [])
   useEffect(() => installHarperRuntime(), [])
 
   useEffect(() => {

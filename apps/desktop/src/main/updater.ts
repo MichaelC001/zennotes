@@ -16,6 +16,9 @@ const execFileAsync = promisify(execFile)
 const UPDATE_CHECK_MAX_ATTEMPTS = 3
 const UPDATE_CHECK_RETRY_DELAY_MS = 1500
 const BACKGROUND_UPDATE_CHECK_DELAY_MS = 8000
+/** A process kept in the tray can run for days (#947), and one check at
+ *  launch would leave it silent about every release after that. */
+export const BACKGROUND_UPDATE_RECHECK_MS = 6 * 60 * 60_000
 /** How often a check that found no network looks at the link again. */
 export const OFFLINE_POLL_MS = 15_000
 /** First wait before re-checking when the link is up but GitHub still could
@@ -573,6 +576,20 @@ export function scheduleBackgroundAppUpdateCheck(
     // A manual check/download/install owns its result once the user starts it.
     if (updateState.phase === 'idle') void checkForAppUpdates()
   }, Math.max(0, delayMs))
+  setInterval(() => {
+    if (canRecheckInBackground(updateState.phase)) void checkForAppUpdates()
+  }, BACKGROUND_UPDATE_RECHECK_MS)
+}
+
+/**
+ * Whether a periodic check may run. Not while a check, download or install is
+ * under way or waiting on the person ('available', 'downloaded'); not while
+ * offline either, since that state already watches the link and checks again
+ * the moment it is back. A repeat never notifies twice: notices are kept per
+ * version.
+ */
+export function canRecheckInBackground(phase: AppUpdateState['phase']): boolean {
+  return phase === 'idle' || phase === 'not-available' || phase === 'error'
 }
 
 export async function downloadAppUpdate(): Promise<AppUpdateState> {

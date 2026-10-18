@@ -10,6 +10,7 @@ import { requestAgentEditReview } from './agent-review-runtime'
 import { isTagsViewActive, isTasksViewActive, isTrashViewActive, useStore } from '../store'
 import { confirmApp } from './confirm-requests'
 import { requestSettingsTarget } from './settings-navigation'
+import { hideWindowToTray, useTrayStore } from './tray-runtime'
 import { promptApp } from './prompt-requests'
 import { captureNavigationContext } from './navigation-context'
 import { buildMoveNotePrompt, moveNoteVocabulary, parseMoveNoteTarget } from './move-note'
@@ -857,6 +858,24 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       keywords: "whats what's new release notes changelog update announcement",
       when: () => window.zen.getAppInfo().runtime === 'desktop',
       run: () => void getState().openWhatsNew()
+    },
+    {
+      id: 'app.hideToTray',
+      title: 'Hide Window to Tray',
+      category: 'App',
+      keywords: 'tray menu bar background hide window close minimize keep running',
+      shortcut: getState().vimMode ? leaderShortcut('vim.leaderHideToTray') : undefined,
+      when: () =>
+        window.zen.getAppInfo().runtime === 'desktop' && useTrayStore.getState().keepRunningInTray,
+      run: () => void hideWindowToTray()
+    },
+    {
+      id: 'app.quit',
+      title: 'Quit ZenNotes',
+      category: 'App',
+      keywords: 'quit exit close app tray background stop',
+      when: () => window.zen.getAppInfo().runtime === 'desktop' && !!window.zen.quitApp,
+      run: () => window.zen.quitApp?.()
     },
     {
       id: 'app.report-issue',

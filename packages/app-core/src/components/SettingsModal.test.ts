@@ -126,6 +126,7 @@ vi.mock("../lib/app-update-state", () => ({
 
 vi.mock("@zennotes/bridge-contract/bridge", () => ({
   getZenBridge: () => ({
+    platformSync: () => "linux",
     getAppInfo: () => ({
       runtime: mocks.runtime,
       version: "2.4.0",

@@ -56,6 +56,7 @@ import {
   useCloudSyncStatusStore
 } from '../lib/cloud-auto-sync'
 import { requestSettingsTarget } from '../lib/settings-navigation'
+import { hideWindowToTray, useTrayStore } from '../lib/tray-runtime'
 import { EXCALIDRAW_SURFACE, SELF_KEYED_SURFACES } from '../lib/self-keyed-surfaces'
 import { isWorkspaceVirtualTabPath } from '../lib/workspace-tabs'
 import {
@@ -204,6 +205,7 @@ export function VimNav(): JSX.Element | null {
     setHint(false)
     focusEditor()
   }, [focusEditor, setHint])
+  const keepRunningInTray = useTrayStore((s) => s.keepRunningInTray)
   // The calendar toggle only works when the active pane holds a note (it can't
   // render in the note-less Tasks/Tags views), so its leader hint is hidden
   // there rather than shown as a dead key. (#413)
@@ -350,6 +352,15 @@ export function VimNav(): JSX.Element | null {
         label: 'Quick capture',
         detail: 'Open the floating capture window.'
       },
+      ...(keepRunningInTray
+        ? [
+            {
+              keyLabel: getKeymapDisplay(keymapOverrides, 'vim.leaderHideToTray'),
+              label: 'Hide to tray',
+              detail: 'Hide this window. ZenNotes keeps running, and its tray icon brings the window back.'
+            }
+          ]
+        : []),
       {
         keyLabel: getKeymapDisplay(keymapOverrides, 'vim.leaderTemplatePicker'),
         label: 'New from template',
@@ -1016,6 +1027,16 @@ export function VimNav(): JSX.Element | null {
           e.stopImmediatePropagation()
           resetLeader()
           void window.zen.toggleQuickCapture()
+          return
+        }
+        if (
+          useTrayStore.getState().keepRunningInTray &&
+          matchesSequenceToken(e, overrides, 'vim.leaderHideToTray')
+        ) {
+          e.preventDefault()
+          e.stopImmediatePropagation()
+          resetLeader()
+          void hideWindowToTray()
           return
         }
         if (matchesSequenceToken(e, overrides, 'vim.leaderTemplatePicker')) {

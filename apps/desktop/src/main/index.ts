@@ -1,5 +1,6 @@
 import {
   app,
+  autoUpdater as nativeAutoUpdater,
   BrowserWindow,
   dialog,
   globalShortcut,
@@ -281,6 +282,13 @@ import {
 } from "./raycast-integration";
 import { sendUsageCount } from "./usage-count";
 import {
+  hideTray,
+  parseTraySyncStatus,
+  setTraySyncStatus,
+  shouldHideOnClose,
+  showTray,
+} from "./tray";
+import {
   checkForAppUpdates,
   describeInstall,
   downloadAppUpdate,
@@ -367,6 +375,15 @@ const installedBundle = createInstalledBundleGuard(
 let mainWindow: BrowserWindow | null = null;
 let mainWindowReadyForAppEvents = false;
 let creatingMainWindow: Promise<BrowserWindow> | null = null;
+// "Keep running in the tray" (#947), mirrored from the persisted config so a
+// window's close handler can decide synchronously.
+let keepRunningInTray = false;
+// Set once the app is really exiting, so close-to-tray stands aside: the
+// tray's Quit, Cmd+Q, an update's restart, or the OS ending the session.
+let appQuitting = false;
+// Workspace windows a close hid to the tray, so the tray brings back exactly
+// those and never a window that is still loading behind `show: false`.
+const trayHiddenWindowIds = new Set<number>();
 let currentVault: VaultInfo | null = null;
 let currentWorkspaceMode: "local" | "remote" = "local";
 let remoteWorkspaceConfig: PersistedRemoteWorkspaceConfig | null = null;
@@ -786,6 +803,60 @@ function focusWindow(win: BrowserWindow): void {
     win.focus();
     win.setAlwaysOnTop(false);
   }
+}
+
+// A real hide, not a minimise: a tiling window manager has nowhere to
+// minimise to, which is the case the tray exists for (#947).
+function hideWindowToTray(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  trayHiddenWindowIds.add(win.id);
+  win.hide();
+}
+
+function hasVisibleWorkspaceWindow(): boolean {
+  return BrowserWindow.getAllWindows().some(
+    (win) => !win.isDestroyed() && isWorkspaceWindow(win) && win.isVisible(),
+  );
+}
+
+/** Bring back every window the tray is holding, the main one in front. With
+ *  none held and none open, open the main window. */
+function revealTrayHiddenWindows(): void {
+  const held = BrowserWindow.getAllWindows().filter(
+    (win) => !win.isDestroyed() && trayHiddenWindowIds.has(win.id),
+  );
+  trayHiddenWindowIds.clear();
+  for (const win of held) if (win !== mainWindow) win.show();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    focusWindow(mainWindow);
+    return;
+  }
+  const last = held.at(-1);
+  if (last) {
+    focusWindow(last);
+    return;
+  }
+  void ensureMainWindow();
+}
+
+function applyKeepRunningInTray(enabled: boolean): void {
+  keepRunningInTray = enabled;
+  if (!enabled) {
+    hideTray();
+    // Nothing would bring a held window back once the icon is gone.
+    if (!hasVisibleWorkspaceWindow() && trayHiddenWindowIds.size > 0) {
+      revealTrayHiddenWindows();
+    }
+    return;
+  }
+  showTray({
+    showWindows: revealTrayHiddenWindows,
+    openQuickCapture: () => void toggleQuickCaptureWindow(),
+    quit: () => {
+      appQuitting = true;
+      app.quit();
+    },
+  });
 }
 
 // Dispatch a note-open to a specific window, deferring until that
@@ -1769,8 +1840,31 @@ async function createWindow(
   win.on("maximize", scheduleWindowStatePersist);
   win.on("unmaximize", scheduleWindowStatePersist);
   win.on("close", flushWindowStatePersist);
+  win.on("close", (event) => {
+    const hide = shouldHideOnClose({
+      keepRunningInTray,
+      quitting: appQuitting,
+      isWorkspaceWindow: isWorkspaceWindow(win),
+      otherVisibleWorkspaceWindows: BrowserWindow.getAllWindows().filter(
+        (other) =>
+          other !== win &&
+          !other.isDestroyed() &&
+          isWorkspaceWindow(other) &&
+          other.isVisible(),
+      ).length,
+    });
+    if (!hide) return;
+    event.preventDefault();
+    hideWindowToTray(win);
+  });
+  // Windows asks every window before logging off; a close we prevent there
+  // would hold up the session ending.
+  win.on("query-session-end", () => {
+    appQuitting = true;
+  });
   win.on("closed", () => {
     if (persistWindowStateTimer) clearTimeout(persistWindowStateTimer);
+    trayHiddenWindowIds.delete(win.id);
     workspaceWindowIds.delete(win.id);
     windowVaults.clearWindow(win.id);
     readyWindowIds.delete(win.id);
@@ -4953,6 +5047,35 @@ function registerIpc(): void {
     return { ok: result.ok, hotkey: trimmed, error: result.error };
   });
 
+  handle(IPC.APP_GET_KEEP_RUNNING_IN_TRAY, () => keepRunningInTray);
+
+  handle(IPC.APP_SET_KEEP_RUNNING_IN_TRAY, async (_e, enabled: unknown) => {
+    const next = enabled === true;
+    await updateConfig((cfg) => ({ ...cfg, keepRunningInTray: next }));
+    applyKeepRunningInTray(next);
+    return keepRunningInTray;
+  });
+
+  handle(IPC.WINDOW_HIDE_TO_TRAY, (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!keepRunningInTray || !win || !isWorkspaceWindow(win)) return false;
+    hideWindowToTray(win);
+    return true;
+  });
+
+  on(IPC.APP_QUIT, () => {
+    appQuitting = true;
+    app.quit();
+  });
+
+  on(IPC.APP_TRAY_SYNC_STATUS, (event, raw: unknown) => {
+    // One line for one app: the main window speaks for the tray, and a
+    // second window's vault does not overwrite it.
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win !== mainWindow) return;
+    setTraySyncStatus(parseTraySyncStatus(raw));
+  });
+
   handle(IPC.APP_GET_QUICK_CAPTURE_PINNED, async () => {
     const cfg = await loadConfig();
     quickCapturePinned = cfg.quickCapturePinned;
@@ -6004,6 +6127,13 @@ app.whenReady().then(async () => {
   scheduleCliUpdateChecks();
 
   try {
+    const { keepRunningInTray: trayOn } = await loadConfig();
+    if (trayOn) applyKeepRunningInTray(true);
+  } catch (err) {
+    console.warn("Tray setup failed", err);
+  }
+
+  try {
     const cfg = await loadConfig();
     // loadConfig always yields a normalized string here, and empty string is
     // the user's explicit "disabled" choice — registerQuickCaptureHotkey("")
@@ -6018,8 +6148,10 @@ app.whenReady().then(async () => {
   }
 
   app.on("activate", () => {
-    // A dock click must bring back a usable window when none is left.
+    // A dock click must bring back a usable window when none is left, and
+    // the windows the tray is holding when only those are left.
     if (!hasWorkspaceWindow()) void ensureMainWindow();
+    else if (!hasVisibleWorkspaceWindow()) revealTrayHiddenWindows();
   });
 
   app.on("new-window-for-tab", () => {
@@ -6072,11 +6204,15 @@ app.on("second-instance", (_event, argv) => {
     // window is left to show.
     void settleFileOpens().then(() => {
       if (!hasWorkspaceWindow()) return ensureMainWindow();
+      // A path the opener ignored (not markdown, gone) leaves the windows
+      // the tray holds out of sight; opening ZenNotes again must show one.
+      if (!hasVisibleWorkspaceWindow()) revealTrayHiddenWindows();
     });
     return;
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
-    focusWindow(mainWindow);
+    // Focuses the main window, and shows any the tray is holding (#947).
+    revealTrayHiddenWindows();
     return;
   }
   void ensureMainWindow();
@@ -6088,7 +6224,16 @@ app.on("window-all-closed", () => {
   if (!isMac()) app.quit();
 });
 
+// Squirrel.Mac closes every window before `before-quit` fires when it
+// installs an update, and a close hidden to the tray would stall that install.
+if (process.platform === "darwin") {
+  nativeAutoUpdater.on("before-quit-for-update", () => {
+    appQuitting = true;
+  });
+}
+
 app.on("before-quit", () => {
+  appQuitting = true;
   cloudSyncService?.stop();
   void cloudAuthLoopbackServer?.stop();
   windowVaults.stopAll();

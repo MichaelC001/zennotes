@@ -99,7 +99,8 @@ import type {
   VaultTextSearchBackendPreference,
   VaultTextSearchCapabilities,
   VaultTextSearchMatch,
-  VaultTextSearchToolPaths
+  VaultTextSearchToolPaths,
+  TraySyncStatus
 } from '@shared/ipc'
 import type { VaultTask } from '@shared/tasks'
 import type {
@@ -755,6 +756,15 @@ const api: ZenBridge = {
     ipcRenderer.invoke(IPC.APP_GET_QUICK_CAPTURE_PINNED),
   setQuickCapturePinned: (pinned: boolean): Promise<boolean> =>
     ipcRenderer.invoke(IPC.APP_SET_QUICK_CAPTURE_PINNED, pinned),
+  getKeepRunningInTray: (): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.APP_GET_KEEP_RUNNING_IN_TRAY),
+  setKeepRunningInTray: (enabled: boolean): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.APP_SET_KEEP_RUNNING_IN_TRAY, enabled),
+  hideWindowToTray: (): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.WINDOW_HIDE_TO_TRAY),
+  reportTraySyncStatus: (status: TraySyncStatus | null): void =>
+    ipcRenderer.send(IPC.APP_TRAY_SYNC_STATUS, status),
+  quitApp: (): void => ipcRenderer.send(IPC.APP_QUIT),
   renderTikz: (source: string): Promise<{ ok: boolean; svg?: string; error?: string }> =>
     ipcRenderer.invoke(IPC.TIKZ_RENDER, source),
 
