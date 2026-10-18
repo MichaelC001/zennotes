@@ -98,6 +98,7 @@ interface ExpandedDiagram {
 
 const DIAGRAM_CLASS_BY_KIND: Record<ExpandedDiagramKind, string> = {
   mermaid: "mermaid",
+  d2: "zen-d2",
   tikz: "zen-tikz",
   jsxgraph: "zen-jsxgraph",
   "function-plot": "zen-function-plot",
@@ -105,6 +106,7 @@ const DIAGRAM_CLASS_BY_KIND: Record<ExpandedDiagramKind, string> = {
 
 const DIAGRAM_SOURCE_ATTR_BY_KIND: Record<ExpandedDiagramKind, string> = {
   mermaid: "data-mermaid-source",
+  d2: "data-d2-source",
   tikz: "data-tikz-source",
   jsxgraph: "data-jsxgraph-source",
   "function-plot": "data-function-plot-source",

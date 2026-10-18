@@ -92,6 +92,8 @@ const deferredNormalFlowChunkPatterns = [
   /^vendor-d3-/,
   // Pele draws mermaid fences; its runtime chunk loads before any diagram type.
   /^pele-runtime-/,
+  // D2 draws ```d2 fences; its runtime chunk carries the WebAssembly compiler.
+  /^d2-runtime-/,
   // mermaid.core is the entry of the mermaid.js stack (now only Excalidraw's
   // Mermaid dialog): if any of it loads, this does.
   /^mermaid\.core-/,

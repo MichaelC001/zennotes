@@ -208,6 +208,9 @@ function isDeferredRendererPreload(dep: string): boolean {
     // Pele, the mermaid-fence renderer: its runtime chunk, after which each
     // diagram type fetches a chunk of its own on first use.
     dep.includes('pele-runtime') ||
+    // D2, the ```d2 renderer: one chunk of about 8 MB with its WebAssembly
+    // compiler inside, fetched only when a note holds a d2 fence.
+    dep.includes('d2-runtime') ||
     // mermaid.js (Excalidraw's Mermaid dialog only) splits into mermaid.core plus
     // a chunk per diagram type, with cytoscape/dagre alongside.
     dep.includes('mermaid') ||

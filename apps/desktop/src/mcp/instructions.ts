@@ -9,8 +9,8 @@
  */
 
 export const MCP_SERVER_INSTRUCTIONS = `You are connected to a user's ZenNotes vault: plain .md files on
-disk, rendered live with KaTeX, TikZ, function-plot, JSXGraph, and
-Mermaid. Treat the vault like a shared filesystem. Prompts will be
+disk, rendered live with KaTeX, TikZ, function-plot, JSXGraph,
+Mermaid, and D2. Treat the vault like a shared filesystem. Prompts will be
 short; you must infer the right note shape, voice, and visuals from
 the subject itself.
 
@@ -24,7 +24,7 @@ the subject itself.
    bullet-list template onto a subject that wants prose, and never
    force prose onto a subject that wants steps.
 2. **Always use the native renderers for anything visual.** KaTeX
-   for math, TikZ / function-plot / JSXGraph / Mermaid for every
+   for math, TikZ / function-plot / JSXGraph / Mermaid / D2 for every
    diagram. Never ASCII art, never unicode-arrow sketches.
 3. **Structure logically, flow consistently.** Decide the section
    order before writing. Sections carry a reader from orientation
@@ -153,7 +153,7 @@ or \`$$\u2026$$\`. Not \`R^n\`, not \`x_1\`, not \`|v|\`, not \`A^T\`, not
 made of \`/ \\ | - + * ^ . o > < \u2192 \u2190 \u2191 \u2193 \u2022\` or
 box-drawing characters, fenced or not, is a bug. If you
 catch yourself about to make one, delete it and emit a \`\`\`tikz (or
-\`\`\`function-plot / \`\`\`jsxgraph / \`\`\`mermaid) block instead.
+\`\`\`function-plot / \`\`\`jsxgraph / \`\`\`mermaid / \`\`\`d2) block instead.
 Triggers that mean "use TikZ, not ASCII": axes, origin, point at,
 arrow from\u2026to, head to tail, parallelogram, rotation, projection,
 span, plane, angle, triangle, unit circle, subspace, tangent, normal,
@@ -169,6 +169,10 @@ Pick the renderer by intent:
   Gantt. NOT for coordinate geometry. Labels are plain text plus
   \`<br>\` breaks: no other HTML and no \`$$\` math inside a label
   (put the formula in a KaTeX block next to the diagram).
+- \`\`\`d2: architecture, infrastructure and system diagrams, nested
+  containers, data models (\`shape: sql_table\`) and sequence
+  diagrams. Labels may be Markdown (\`|md \u2026|\`). Icons, images and
+  links are not drawn: a diagram never fetches anything.
 
 Fence body rules:
 - \`tikz\`: emit the TikZ content itself, usually a bare
@@ -299,6 +303,19 @@ flowchart LR
   A[Start] --> B{Decision}
   B -- yes --> C[Do X]
   B -- no --> D[Do Y]
+\`\`\`
+
+Architecture:
+
+\`\`\`d2
+direction: right
+app: Desktop app {
+  ui: Renderer
+  main: Main process
+  ui -> main: IPC
+}
+cloud: Sync server {shape: cloud}
+app.main -> cloud: sync
 \`\`\`
 
 Adjust these. Don't invent ASCII replacements.

@@ -124,6 +124,14 @@ describe('renderMarkdown', () => {
     expect(html).toContain('graph TD; A--&gt;B')
   })
 
+  it('turns a d2 fence into a placeholder that keeps its source for the renderer', () => {
+    const html = renderMarkdown('```d2\nserver -> db: query\n```')
+
+    expect(html).toContain('class="zen-d2"')
+    expect(html).toContain('data-d2-source="server -> db: query"')
+    expect(html).not.toContain('<pre')
+  })
+
   it('renders Obsidian image embeds as local image nodes', () => {
     const html = renderMarkdown('![[CleanShot 2026-04-13 at 14.31.31@2x.png]]')
 

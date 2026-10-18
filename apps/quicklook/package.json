@@ -22,6 +22,7 @@
     "@codemirror/view": "^6.35.3",
     "@lezer/highlight": "^1.2.1",
     "@replit/codemirror-vim": "^6.3.0",
+    "@terrastruct/d2": "0.1.33",
     "@zennotes/app-core": "*",
     "@zennotes/bridge-contract": "*",
     "@zennotes/shared-domain": "*",

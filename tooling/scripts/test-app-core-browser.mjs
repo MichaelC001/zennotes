@@ -188,7 +188,7 @@ try {
   await until(() => client.evaluate(`document.querySelector('.cm-content')?.textContent.includes('Read and edit')`), 'editor', 60000)
   assert.equal(await client.evaluate(`document.querySelector('[data-consumer-selection]').textContent`), path)
   assert.equal(await client.evaluate(`getComputedStyle(document.querySelector('#root > *')).display`), 'flex', 'Compiled Tailwind styles did not load')
-  const beforeLazy = requests.filter((url) => /pele-runtime|mermaid\.core|typst.*\.wasm|harper.*\.wasm/.test(url))
+  const beforeLazy = requests.filter((url) => /pele-runtime|d2-runtime|mermaid\.core|typst.*\.wasm|harper.*\.wasm/.test(url))
   assert.deepEqual(beforeLazy, [], 'Heavy features loaded before requested')
   await client.evaluate(`document.querySelector('.cm-content').focus()`)
   const modifier = process.platform === 'darwin' ? 4 : 2

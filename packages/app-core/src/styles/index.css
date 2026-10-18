@@ -2463,8 +2463,9 @@ html[data-completed-task-style="gray-strikethrough"] .cm-editor .cm-task-done * 
   text-underline-offset: 2px;
 }
 
-/* --- Math diagrams (TikZ / JSXGraph / function-plot) ------------------ */
+/* --- Diagrams (TikZ / D2 / JSXGraph / function-plot) ------------------ */
 .zen-tikz,
+.zen-d2,
 .zen-jsxgraph,
 .zen-function-plot {
   display: flex;
@@ -2564,7 +2565,8 @@ html[data-completed-task-style="gray-strikethrough"] .cm-editor .cm-task-done * 
   border-color: rgb(var(--z-bg-3));
   color: rgb(var(--z-fg-1));
 }
-.zen-tikz svg {
+.zen-tikz svg,
+.zen-d2 svg {
   max-width: 100%;
   height: auto;
 }
@@ -2610,7 +2612,8 @@ html[data-completed-task-style="gray-strikethrough"] .cm-editor .cm-task-done * 
   border-radius: 6px;
   margin: 0;
 }
-.zen-tikz-loading {
+.zen-tikz-loading,
+.zen-d2-loading {
   font-size: 11px;
   color: rgb(var(--z-fg-2));
   font-style: italic;
@@ -4053,6 +4056,161 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   --pele-series-8: rgb(var(--z-fg-1));
 }
 
+/* D2 diagrams (```d2) paint through theme classes (`fill-N1`, `stroke-B1`,
+   `color-N2` and so on) that D2 defines in a stylesheet inside each SVG. With
+   `zen-d2-themed` on the block (a diagram that picked no D2 theme of its own),
+   these rules outrank that stylesheet and map the classes onto the app theme,
+   in the roles the Pele rule above uses: text in fg-1, borders and edges in
+   grey-1, shapes on bg-1 and bg-2, accents in the accent colour. A colour the
+   author wrote (`style.fill`) is an attribute without a class and stays as
+   written. A theme switch repaints without drawing again. */
+/* D2 marks a shape with `link:` or `tooltip:` with a badge. Both are switched
+   off here (a diagram never navigates), so the badge would promise a click that
+   does nothing. */
+:is(.zen-d2, .cm-d2-block) .d2-svg .appendix-icon {
+  display: none;
+}
+.zen-d2-themed .d2-svg > rect:first-child {
+  /* D2's canvas: let the card or the note show through. */
+  fill: transparent;
+}
+.zen-d2-themed .d2-svg .fill-N1 {
+  fill: rgb(var(--z-fg-1));
+}
+.zen-d2-themed .d2-svg .stroke-N1 {
+  stroke: rgb(var(--z-fg-1));
+}
+.zen-d2-themed .d2-svg .color-N1 {
+  color: rgb(var(--z-fg-1));
+}
+.zen-d2-themed .d2-svg .background-color-N1 {
+  background-color: rgb(var(--z-fg-1));
+}
+.zen-d2-themed .d2-svg .fill-N2 {
+  fill: rgb(var(--z-fg-2));
+}
+.zen-d2-themed .d2-svg .stroke-N2 {
+  stroke: rgb(var(--z-fg-2));
+}
+.zen-d2-themed .d2-svg .color-N2 {
+  color: rgb(var(--z-fg-2));
+}
+.zen-d2-themed .d2-svg .background-color-N2 {
+  background-color: rgb(var(--z-fg-2));
+}
+.zen-d2-themed .d2-svg .fill-N3,
+.zen-d2-themed .d2-svg .fill-B1,
+.zen-d2-themed .d2-svg .fill-B2 {
+  fill: rgb(var(--z-grey-1));
+}
+.zen-d2-themed .d2-svg .stroke-N3,
+.zen-d2-themed .d2-svg .stroke-B1,
+.zen-d2-themed .d2-svg .stroke-B2 {
+  stroke: rgb(var(--z-grey-1));
+}
+.zen-d2-themed .d2-svg .color-N3,
+.zen-d2-themed .d2-svg .color-B1,
+.zen-d2-themed .d2-svg .color-B2 {
+  color: rgb(var(--z-grey-1));
+}
+.zen-d2-themed .d2-svg .background-color-N3,
+.zen-d2-themed .d2-svg .background-color-B1,
+.zen-d2-themed .d2-svg .background-color-B2 {
+  background-color: rgb(var(--z-grey-1));
+}
+.zen-d2-themed .d2-svg .fill-N4,
+.zen-d2-themed .d2-svg .fill-N5 {
+  fill: rgb(var(--z-bg-3));
+}
+.zen-d2-themed .d2-svg .stroke-N4,
+.zen-d2-themed .d2-svg .stroke-N5 {
+  stroke: rgb(var(--z-bg-3));
+}
+.zen-d2-themed .d2-svg .color-N4,
+.zen-d2-themed .d2-svg .color-N5 {
+  color: rgb(var(--z-bg-3));
+}
+.zen-d2-themed .d2-svg .background-color-N4,
+.zen-d2-themed .d2-svg .background-color-N5 {
+  background-color: rgb(var(--z-bg-3));
+}
+.zen-d2-themed .d2-svg .fill-N6,
+.zen-d2-themed .d2-svg .fill-B3,
+.zen-d2-themed .d2-svg .fill-B4 {
+  fill: rgb(var(--z-bg-2));
+}
+.zen-d2-themed .d2-svg .stroke-N6,
+.zen-d2-themed .d2-svg .stroke-B3,
+.zen-d2-themed .d2-svg .stroke-B4 {
+  stroke: rgb(var(--z-bg-2));
+}
+.zen-d2-themed .d2-svg .color-N6,
+.zen-d2-themed .d2-svg .color-B3,
+.zen-d2-themed .d2-svg .color-B4 {
+  color: rgb(var(--z-bg-2));
+}
+.zen-d2-themed .d2-svg .background-color-N6,
+.zen-d2-themed .d2-svg .background-color-B3,
+.zen-d2-themed .d2-svg .background-color-B4 {
+  background-color: rgb(var(--z-bg-2));
+}
+.zen-d2-themed .d2-svg .fill-B5,
+.zen-d2-themed .d2-svg .fill-AA4,
+.zen-d2-themed .d2-svg .fill-AB4 {
+  fill: rgb(var(--z-bg-1));
+}
+.zen-d2-themed .d2-svg .stroke-B5,
+.zen-d2-themed .d2-svg .stroke-AA4,
+.zen-d2-themed .d2-svg .stroke-AB4 {
+  stroke: rgb(var(--z-bg-1));
+}
+.zen-d2-themed .d2-svg .color-B5,
+.zen-d2-themed .d2-svg .color-AA4,
+.zen-d2-themed .d2-svg .color-AB4 {
+  color: rgb(var(--z-bg-1));
+}
+.zen-d2-themed .d2-svg .background-color-B5,
+.zen-d2-themed .d2-svg .background-color-AA4,
+.zen-d2-themed .d2-svg .background-color-AB4 {
+  background-color: rgb(var(--z-bg-1));
+}
+.zen-d2-themed .d2-svg .fill-N7,
+.zen-d2-themed .d2-svg .fill-B6,
+.zen-d2-themed .d2-svg .fill-AA5,
+.zen-d2-themed .d2-svg .fill-AB5 {
+  fill: rgb(var(--z-bg));
+}
+.zen-d2-themed .d2-svg .stroke-N7,
+.zen-d2-themed .d2-svg .stroke-B6,
+.zen-d2-themed .d2-svg .stroke-AA5,
+.zen-d2-themed .d2-svg .stroke-AB5 {
+  stroke: rgb(var(--z-bg));
+}
+.zen-d2-themed .d2-svg .color-N7,
+.zen-d2-themed .d2-svg .color-B6,
+.zen-d2-themed .d2-svg .color-AA5,
+.zen-d2-themed .d2-svg .color-AB5 {
+  color: rgb(var(--z-bg));
+}
+.zen-d2-themed .d2-svg .background-color-N7,
+.zen-d2-themed .d2-svg .background-color-B6,
+.zen-d2-themed .d2-svg .background-color-AA5,
+.zen-d2-themed .d2-svg .background-color-AB5 {
+  background-color: rgb(var(--z-bg));
+}
+.zen-d2-themed .d2-svg .fill-AA2 {
+  fill: rgb(var(--z-accent));
+}
+.zen-d2-themed .d2-svg .stroke-AA2 {
+  stroke: rgb(var(--z-accent));
+}
+.zen-d2-themed .d2-svg .color-AA2 {
+  color: rgb(var(--z-accent));
+}
+.zen-d2-themed .d2-svg .background-color-AA2 {
+  background-color: rgb(var(--z-accent));
+}
+
 /* Mermaid block chrome: adapts to the current theme via CSS vars so the card
    never clashes with the active palette. */
 .prose-zen .mermaid {
@@ -4469,6 +4627,7 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   color: rgb(var(--z-fg-1));
 }
 .zen-diagram-modal-host .zen-tikz,
+.zen-diagram-modal-host .zen-d2,
 .zen-diagram-modal-host .zen-jsxgraph,
 .zen-diagram-modal-host .zen-function-plot,
 .zen-diagram-modal-host .mermaid {
@@ -4567,6 +4726,7 @@ html[data-completed-task-style="gray-strikethrough"] .prose-zen li.task-list-ite
   width: 100%;
 }
 .zen-diagram-pan-content .zen-tikz,
+.zen-diagram-pan-content .zen-d2,
 .zen-diagram-pan-content .zen-jsxgraph,
 .zen-diagram-pan-content .zen-function-plot,
 .zen-diagram-pan-content .mermaid {

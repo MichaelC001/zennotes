@@ -728,7 +728,7 @@ function rehypeMermaid() {
 }
 
 /**
- * Rehype plugin: replace fenced blocks tagged `tikz`, `jsxgraph`, and
+ * Rehype plugin: replace fenced blocks tagged `tikz`, `d2`, `jsxgraph`, and
  * `function-plot` with placeholder divs. Each placeholder keeps the raw
  * source in a `data-*-source` attribute so the runtime side (Preview.tsx)
  * can render and re-render on demand — the same pattern as
@@ -737,6 +737,8 @@ function rehypeMermaid() {
 function rehypeMathDiagrams() {
   const map: Record<string, { className: string; sourceAttr: string }> = {
     'language-tikz': { className: 'zen-tikz', sourceAttr: 'data-tikz-source' },
+    // D2 (d2lang.com) architecture and flow diagrams; drawn by `renderDiagrams`.
+    'language-d2': { className: 'zen-d2', sourceAttr: 'data-d2-source' },
     'language-jsxgraph': {
       className: 'zen-jsxgraph',
       sourceAttr: 'data-jsxgraph-source'
