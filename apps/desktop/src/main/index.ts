@@ -289,6 +289,7 @@ import {
   shouldHideOnClose,
   showTray,
 } from "./tray";
+import { shouldQuitWithOnlyQuickCaptureLeft } from "./last-window";
 import {
   checkForAppUpdates,
   describeInstall,
@@ -5450,6 +5451,9 @@ async function ensureQuickCaptureWindow(): Promise<BrowserWindow> {
     if (quickCaptureWindow === win) quickCaptureWindow = null;
     windowVaults.clearWindow(win.id);
   });
+  // A panel left on screen after the last window closed holds the app only
+  // until it hides.
+  win.on("hide", scheduleQuitIfOnlyQuickCaptureLeft);
   win.on("blur", () => {
     // Focus-out hides the panel so the user's flow snaps back to whatever
     // they were doing — same UX as Spotlight / Raycast. When pinned, the
@@ -6227,6 +6231,42 @@ app.on("window-all-closed", () => {
   windowVaults.stopAll();
   stopRemoteWatch();
   if (!isMac()) app.quit();
+});
+
+// Electron counts the hidden Quick capture panel as an open window, so
+// `window-all-closed` above never fires once the panel has been used.
+let windowClosedThisRun = false;
+
+// Deferred so the closed window's own handlers finish and the panel's
+// visibility settles before the windows are counted.
+function scheduleQuitIfOnlyQuickCaptureLeft(): void {
+  setImmediate(() => {
+    const capture =
+      quickCaptureWindow && !quickCaptureWindow.isDestroyed()
+        ? quickCaptureWindow
+        : null;
+    const otherWindows = BrowserWindow.getAllWindows().filter(
+      (win) => !win.isDestroyed() && win !== capture,
+    ).length;
+    let quickCapture: "none" | "hidden" | "visible" = "none";
+    if (capture) quickCapture = capture.isVisible() ? "visible" : "hidden";
+    const quit = shouldQuitWithOnlyQuickCaptureLeft({
+      isMac: isMac(),
+      keepRunningInTray,
+      quitting: appQuitting,
+      windowClosed: windowClosedThisRun,
+      otherWindows,
+      quickCapture,
+    });
+    if (quit) app.quit();
+  });
+}
+
+app.on("browser-window-created", (_event, win) => {
+  win.once("closed", () => {
+    windowClosedThisRun = true;
+    scheduleQuitIfOnlyQuickCaptureLeft();
+  });
 });
 
 // Squirrel.Mac closes every window before `before-quit` fires when it
