@@ -91,6 +91,7 @@ const FIELD_LABELS: Record<string, string> = {
   systemFolderLabels: "Label",
   unifiedSidebar: "Unified sidebar",
   excludedFolders: "Folders left out of Tasks",
+  includedFolders: "Task folders",
   words: "Words",
   ignoredLints: "Ignored suggestions",
 };

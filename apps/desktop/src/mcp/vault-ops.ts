@@ -24,7 +24,8 @@ export type { NoteComment, NoteCommentInput }
 import { inlineTaskField, noteTasksMode, type NoteTasksMode } from '@shared/tasks'
 import {
   isPathExcludedFromTasks,
-  normalizeTasksExcludedFolders
+  normalizeTasksExcludedFolders,
+  normalizeTasksIncludedFolders
 } from '@shared/tasks-excluded-folders'
 import {
   DEFAULT_TYPST_PREAMBLE_FOLDER,
@@ -1398,8 +1399,9 @@ function parseNoteDefaults(body: string): {
 }
 
 interface ParseTasksOptions {
-  /** Scan past the note-level `tasks:` opt-out (#458): the `list_tasks`
-   *  includeExcluded / `zn task list --include-excluded` escape hatch. */
+  /** Scan past the note-level `tasks:` opt-out (#458) and the vault's folder
+   *  lists (#962): the `list_tasks` includeExcluded /
+   *  `zn task list --include-excluded` escape hatch. */
   includeExcluded?: boolean
 }
 
@@ -1664,10 +1666,7 @@ function todayIsoLocal(): string {
   return `${y}-${mo}-${day}`
 }
 
-/** The vault's `tasks.excludedFolders` list (#458), read straight off
- *  vault.json like readSystemFolderPaths above; validation comes from the
- *  shared normalizer, so the rules cannot drift from the other runtimes. */
-/** The vault's Typst preamble folder (#562), read the same way. Preamble notes
+/** The vault's Typst preamble folder (#562), read straight off vault.json. Preamble notes
  *  are Typst source, so an agent asking for a note's tags must not be handed
  *  `let` and a pile of variable names. */
 async function readTypstPreambleFolder(root: string): Promise<string> {
@@ -1683,28 +1682,40 @@ async function readTypstPreambleFolder(root: string): Promise<string> {
   return resolveTypstPreambleFolder((preambles as { folder?: unknown }).folder)
 }
 
-async function readTasksExcludedFolders(root: string): Promise<string[]> {
+/** The vault's Tasks folder lists, `tasks.excludedFolders` (#458) and the
+ *  Task folders in `tasks.includedFolders` (#962), read straight off
+ *  vault.json like readSystemFolderPaths above; validation comes from the
+ *  shared normalizers, so the rules cannot drift from the other runtimes. */
+async function readTasksFolderLists(
+  root: string
+): Promise<{ excluded: string[]; included: string[] }> {
+  const none = { excluded: [], included: [] }
   const settingsPath = path.join(root, INTERNAL_VAULT_DIR, VAULT_SETTINGS_FILE)
   let raw: Record<string, unknown>
   try {
     raw = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as Record<string, unknown>
   } catch {
-    return []
+    return none
   }
   const tasks = raw['tasks']
-  if (!tasks || typeof tasks !== 'object') return []
-  return normalizeTasksExcludedFolders(
-    (tasks as { excludedFolders?: unknown }).excludedFolders
-  )
+  if (!tasks || typeof tasks !== 'object') return none
+  const lists = tasks as { excludedFolders?: unknown; includedFolders?: unknown }
+  return {
+    excluded: normalizeTasksExcludedFolders(lists.excludedFolders),
+    included: normalizeTasksIncludedFolders(lists.includedFolders)
+  }
 }
 
 export async function scanAllTasks(
   root: string,
   opts?: ParseTasksOptions
 ): Promise<VaultTask[]> {
-  const excluded = opts?.includeExcluded ? [] : await readTasksExcludedFolders(root)
+  // The escape hatch scans past both lists: "everything" means every note.
+  const { excluded, included } = opts?.includeExcluded
+    ? { excluded: [], included: [] }
+    : await readTasksFolderLists(root)
   const metas = (await listNotes(root)).filter(
-    (m) => m.folder !== 'trash' && !isPathExcludedFromTasks(m.path, excluded)
+    (m) => m.folder !== 'trash' && !isPathExcludedFromTasks(m.path, excluded, included)
   )
   const out: VaultTask[] = []
   await Promise.all(

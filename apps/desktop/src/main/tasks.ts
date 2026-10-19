@@ -43,11 +43,15 @@ async function readOne(
 /** Walk the whole vault and parse every task out of every live (non-trash)
  *  note. Parallelized with `Promise.all` so a 500-note vault is IO-bound,
  *  not sequentially latent. Folders on the vault's `tasks.excludedFolders`
- *  list (#458) are skipped before any file is read. */
+ *  list (#458), and every folder outside its Task folders once
+ *  `tasks.includedFolders` names any (#962), are skipped before any file is
+ *  read. */
 export async function scanAllTasks(root: string): Promise<VaultTask[]> {
-  const excluded = (await getVaultSettings(root)).tasks?.excludedFolders ?? []
+  const tasksSettings = (await getVaultSettings(root)).tasks
+  const excluded = tasksSettings?.excludedFolders ?? []
+  const included = tasksSettings?.includedFolders ?? []
   const metas = (await listNotes(root)).filter(
-    (m) => includesFolder(m.folder) && !isPathExcludedFromTasks(m.path, excluded)
+    (m) => includesFolder(m.folder) && !isPathExcludedFromTasks(m.path, excluded, included)
   )
   const batches = await Promise.all(metas.map((m) => readOne(root, m)))
   const out: VaultTask[] = []
@@ -72,9 +76,17 @@ export async function scanTasksForPath(
   const settings = await getVaultSettings(root)
   const folder = folderForRelativePath(posix, settings)
   if (!folder || !LIVE_FOLDERS.has(folder)) return []
-  // Same exclusion the full scan applies (#458), or a single-note rescan
-  // would resurrect an excluded folder's tasks on every edit.
-  if (isPathExcludedFromTasks(posix, settings.tasks?.excludedFolders ?? [])) return []
+  // Same folder lists the full scan applies (#458, #962), or a single-note
+  // rescan would resurrect a left-out folder's tasks on every edit.
+  if (
+    isPathExcludedFromTasks(
+      posix,
+      settings.tasks?.excludedFolders ?? [],
+      settings.tasks?.includedFolders ?? []
+    )
+  ) {
+    return []
+  }
 
   const abs = path.join(root, posix.split('/').join(path.sep))
   let body: string

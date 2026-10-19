@@ -25,7 +25,10 @@ import {
   resolveFolderPath,
   systemFolderForDirName
 } from '@shared/system-folder-paths'
-import { normalizeTasksExcludedFolders } from '@shared/tasks-excluded-folders'
+import {
+  normalizeTasksExcludedFolders,
+  normalizeTasksIncludedFolders
+} from '@shared/tasks-excluded-folders'
 import { normalizeTypstPreambleSettings } from '@shared/typst-preamble-folder'
 import { normalizeHarperVaultState } from '@shared/harper-settings'
 import { normalizeVaultDisplayName } from '@shared/vault-display-name'
@@ -617,6 +620,9 @@ export function normalizeVaultSettings(
   const normalizedTasksExcluded = normalizeTasksExcludedFolders(
     settings?.tasks?.excludedFolders
   )
+  const normalizedTasksIncluded = normalizeTasksIncludedFolders(
+    settings?.tasks?.includedFolders
+  )
   const normalizedTypstPreambles = normalizeTypstPreambleSettings(settings?.typstPreambles)
   const normalizedHarper = normalizeHarperVaultState(settings?.harper)
   const displayName = normalizeVaultDisplayName(settings?.displayName)
@@ -686,8 +692,17 @@ export function normalizeVaultSettings(
     // Per-vault view overrides (#292): passed through as-is; the store validates
     // each value when it overlays them onto the live prefs.
     ...(settings?.view ? { view: settings.view } : {}),
-    ...(normalizedTasksExcluded.length > 0
-      ? { tasks: { excludedFolders: normalizedTasksExcluded } }
+    ...(normalizedTasksExcluded.length > 0 || normalizedTasksIncluded.length > 0
+      ? {
+          tasks: {
+            ...(normalizedTasksExcluded.length > 0
+              ? { excludedFolders: normalizedTasksExcluded }
+              : {}),
+            ...(normalizedTasksIncluded.length > 0
+              ? { includedFolders: normalizedTasksIncluded }
+              : {})
+          }
+        }
       : {}),
     ...(normalizedTypstPreambles ? { typstPreambles: normalizedTypstPreambles } : {}),
     ...(normalizedHarper ? { harper: normalizedHarper } : {}),

@@ -20,7 +20,12 @@ import {
   type HarperLintConfig,
   type HarperVaultState
 } from '@shared/harper-settings'
-import { normalizeTasksExcludedFolder } from '@shared/tasks-excluded-folders'
+import {
+  normalizeTasksExcludedFolder,
+  normalizeTasksIncludedFolder,
+  rewriteTasksFoldersForRename
+} from '@shared/tasks-excluded-folders'
+import { toggleTasksFolder } from './lib/tasks-folder-lists'
 import { cloudSyncPathKey } from '@zennotes/shared-domain/cloud-sync'
 import { useCloudSyncStatusStore } from './lib/cloud-auto-sync'
 import type {
@@ -3356,6 +3361,12 @@ interface Store {
    */
   toggleTasksExcludedFolder: (relDir: string) => Promise<void>
   /**
+   * Toggle a folder on the vault's Task folders list (`tasks.includedFolders`,
+   * #962) and rescan. Once the list names folders, only the notes inside them
+   * feed Tasks; the excluded list still applies within them.
+   */
+  toggleTasksIncludedFolder: (relDir: string) => Promise<void>
+  /**
    * Point the vault at a different Typst preamble folder (#562). Empty or
    * invalid input restores the default (`typst`). Notes in the folder are
    * preambles AND are left out of the tag index, so this moves both at once;
@@ -5087,6 +5098,13 @@ export const useStore = create<Store>((set, get) => {
             folder,
             oldSubpath,
             newSubpath
+          ),
+          // Main rewrote the Tasks folder lists on disk; mirror that here, or
+          // the next toggle would write the old paths back.
+          tasks: rewriteTasksFoldersForRename(
+            s.vaultSettings.tasks,
+            oldPrefix.replace(/\/$/, ''),
+            newPrefix.replace(/\/$/, '')
           )
         }
       }))
@@ -6073,16 +6091,22 @@ export const useStore = create<Store>((set, get) => {
     const cleaned = normalizeTasksExcludedFolder(relDir)
     if (!cleaned) return
     const settings = get().vaultSettings
-    const current = settings.tasks?.excludedFolders ?? []
-    const next = current.includes(cleaned)
-      ? current.filter((f) => f !== cleaned)
-      : [...current, cleaned]
     await get().setVaultSettings({
       ...settings,
-      tasks: next.length > 0 ? { excludedFolders: next } : undefined
+      tasks: toggleTasksFolder(settings.tasks, 'excludedFolders', cleaned)
     })
     // Rescan immediately: the Tasks view, boards, and calendars should reflect
     // the exclusion without waiting for the next natural refresh.
+    await get().refreshTasks()
+  },
+  toggleTasksIncludedFolder: async (relDir) => {
+    const cleaned = normalizeTasksIncludedFolder(relDir)
+    if (!cleaned) return
+    const settings = get().vaultSettings
+    await get().setVaultSettings({
+      ...settings,
+      tasks: toggleTasksFolder(settings.tasks, 'includedFolders', cleaned)
+    })
     await get().refreshTasks()
   },
   setTypstPreambleFolder: async (folder) => {

@@ -608,11 +608,14 @@ export interface VaultSettings {
   /**
    * Tasks-system settings (#458). `excludedFolders` lists vault-relative
    * directory paths (as they exist on disk) whose notes never feed the Tasks
-   * surfaces, on any runtime. Absent means nothing is excluded. An object
-   * rather than a bare list so the deferred per-vault `mode: all | tagged`
-   * can land beside it without another migration.
+   * surfaces, on any runtime. Absent means nothing is excluded.
+   * `includedFolders`, the Task folders (#962), narrows Tasks to the notes
+   * inside the folders it lists; absent or empty means the whole vault, and
+   * `excludedFolders` still applies inside them. An object rather than a bare
+   * list so the deferred per-vault `mode: all | tagged` can land beside it
+   * without another migration.
    */
-  tasks?: { excludedFolders?: string[] }
+  tasks?: { excludedFolders?: string[]; includedFolders?: string[] }
   /**
    * Typst preamble settings (#486, #562). `folder` names the directory whose
    * notes are Typst preambles, matched at any depth; absent means `typst`.

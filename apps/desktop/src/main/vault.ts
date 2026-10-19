@@ -93,7 +93,11 @@ import {
   systemFolderForDirName,
   type SystemFolderPaths
 } from '@shared/system-folder-paths'
-import { normalizeTasksExcludedFolders } from '@shared/tasks-excluded-folders'
+import {
+  normalizeTasksExcludedFolders,
+  normalizeTasksIncludedFolders,
+  rewriteTasksFoldersForRename
+} from '@shared/tasks-excluded-folders'
 import { normalizeVaultDisplayName, resolveVaultName } from '@shared/vault-display-name'
 import {
   isTypstPreamblePath,
@@ -895,6 +899,9 @@ function cloneVaultSettings(settings: VaultSettings): VaultSettings {
             ...settings.tasks,
             ...(settings.tasks.excludedFolders
               ? { excludedFolders: [...settings.tasks.excludedFolders] }
+              : {}),
+            ...(settings.tasks.includedFolders
+              ? { includedFolders: [...settings.tasks.includedFolders] }
               : {})
           }
         }
@@ -1216,15 +1223,20 @@ function normalizeVaultSettings(
   }
 }
 
-/** Carry the Tasks-system settings (#458) through the round-trip: a validated
- *  excludedFolders list, or undefined when nothing survives so vault.json
- *  stays free of empty stubs. */
+/** Carry the Tasks-system settings through the round-trip: validated
+ *  excludedFolders (#458) and includedFolders (#962) lists, each left out when
+ *  empty, or undefined when nothing survives so vault.json stays free of empty
+ *  stubs. */
 function normalizeTasksSettings(raw: unknown): VaultSettings['tasks'] | undefined {
   if (!raw || typeof raw !== 'object') return undefined
-  const excluded = normalizeTasksExcludedFolders(
-    (raw as { excludedFolders?: unknown }).excludedFolders
-  )
-  return excluded.length > 0 ? { excludedFolders: excluded } : undefined
+  const lists = raw as { excludedFolders?: unknown; includedFolders?: unknown }
+  const excluded = normalizeTasksExcludedFolders(lists.excludedFolders)
+  const included = normalizeTasksIncludedFolders(lists.includedFolders)
+  if (excluded.length === 0 && included.length === 0) return undefined
+  return {
+    ...(excluded.length > 0 ? { excludedFolders: excluded } : {}),
+    ...(included.length > 0 ? { includedFolders: included } : {})
+  }
 }
 
 /** Carry the per-vault view overrides (#292) through the round-trip, keeping
@@ -4124,12 +4136,16 @@ export async function renameFolder(
   }
 
   const settings = await getVaultSettings(root)
+  const oldRel = toPosix(path.relative(root, oldAbs))
+  const newRel = toPosix(path.relative(root, newAbs))
   const nextSettings: VaultSettings = {
     ...settings,
     folderIcons: rewriteFolderIconsForRename(settings.folderIcons, topFolder, oldClean, newClean),
-    folderColors: rewriteFolderColorsForRename(settings.folderColors, topFolder, oldClean, newClean)
+    folderColors: rewriteFolderColorsForRename(settings.folderColors, topFolder, oldClean, newClean),
+    // The Tasks folder lists name on-disk paths, so they follow the folder too.
+    tasks: rewriteTasksFoldersForRename(settings.tasks, oldRel, newRel)
   }
-  await renameFolderTrees(root, toPosix(path.relative(root, oldAbs)), toPosix(path.relative(root, newAbs)), () => setVaultSettings(root, nextSettings))
+  await renameFolderTrees(root, oldRel, newRel, () => setVaultSettings(root, nextSettings))
   return newClean
 }
 

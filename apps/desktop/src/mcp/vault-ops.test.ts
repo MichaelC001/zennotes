@@ -340,3 +340,40 @@ describe('primary notes location follows vault.json (#745)', () => {
     expect(await readPrimaryNotesLocation(root)).toBe('root')
   })
 })
+
+// #962: the Task folders narrow every Tasks surface, MCP's list_tasks and the
+// Node zn included, to the notes inside them.
+describe('mcp tasks honor the Task folders (#962)', () => {
+  async function seedTaskFolders(tasks: Record<string, unknown>): Promise<void> {
+    await mkdir(path.join(root, 'Tasks', 'Work'), { recursive: true })
+    await mkdir(path.join(root, 'Tasks', 'Someday'), { recursive: true })
+    await writeFile(path.join(root, 'Tasks', 'Today.md'), '# Today\n\n- [ ] ship it\n')
+    await writeFile(path.join(root, 'Tasks', 'Work', 'Q4.md'), '# Q4\n\n- [ ] plan\n')
+    await writeFile(path.join(root, 'Tasks', 'Someday', 'Maybe.md'), '# Maybe\n\n- [ ] later\n')
+    await mkdir(path.join(root, '.zennotes'), { recursive: true })
+    await writeFile(path.join(root, '.zennotes', 'vault.json'), JSON.stringify({ tasks }))
+  }
+  const sources = (tasks: { sourcePath: string }[]): string[] =>
+    [...new Set(tasks.map((t) => t.sourcePath))].sort()
+
+  it('lists only the tasks inside the Task folders', async () => {
+    await seedTaskFolders({ includedFolders: ['Tasks'] })
+    expect(sources(await scanAllTasks(root))).toEqual([
+      'Tasks/Someday/Maybe.md',
+      'Tasks/Today.md',
+      'Tasks/Work/Q4.md'
+    ])
+  })
+
+  it('still leaves out an excluded folder inside a Task folder', async () => {
+    await seedTaskFolders({ includedFolders: ['Tasks'], excludedFolders: ['Tasks/Someday'] })
+    expect(sources(await scanAllTasks(root))).toEqual(['Tasks/Today.md', 'Tasks/Work/Q4.md'])
+  })
+
+  it('scans every note again with includeExcluded', async () => {
+    await seedTaskFolders({ includedFolders: ['Tasks'], excludedFolders: ['Tasks/Someday'] })
+    const all = sources(await scanAllTasks(root, { includeExcluded: true }))
+    expect(all).toContain('Tasks/Someday/Maybe.md')
+    expect(all.some((p) => p.includes('Rename'))).toBe(true)
+  })
+})

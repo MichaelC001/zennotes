@@ -297,6 +297,7 @@ describe("SettingsModal date note directories", () => {
       ["tasks folder", "Default tasks location", "tasks-location"],
       ["task folder", "Default tasks location", "tasks-location"],
       ["new task", "Default tasks location", "tasks-location"],
+      ["task folders", "Task folders", "tasks-task-folders"],
       ["drawings folder", "Default drawings location", "drawings-location"],
       ["database location", "Default databases location", "databases-location"],
     ] as const;

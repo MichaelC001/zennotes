@@ -496,6 +496,7 @@ export function Sidebar(): JSX.Element {
   const newDatabase = useStore((s) => s.newDatabase);
   const toggleFavorite = useStore((s) => s.toggleFavorite);
   const toggleTasksExcludedFolder = useStore((s) => s.toggleTasksExcludedFolder);
+  const toggleTasksIncludedFolder = useStore((s) => s.toggleTasksIncludedFolder);
   const createDatabase = useStore((s) => s.createDatabase);
   const createNoteInChosenFolder = useStore((s) => s.createNoteInChosenFolder);
   const openTemplatePaletteForFolder = useStore((s) => s.openTemplatePaletteForFolder);
@@ -1998,19 +1999,28 @@ export function Sidebar(): JSX.Element {
       },
     });
 
-    // Vault-level Tasks exclusion (#458). The list stores on-disk relative
-    // paths, so a root-primary inbox's top level resolves to "": no valid
-    // entry to toggle, hide the item there.
+    // Vault-level Task folders (#962) and Tasks exclusion (#458). Both lists
+    // store on-disk relative paths, so a root-primary inbox's top level
+    // resolves to "": no valid entry to toggle, hide the items there.
     const tasksExcludeRelDir = vaultRelativeFolderPath(
       folder,
       subpath,
       vaultSettings,
     );
     if (tasksExcludeRelDir) {
+      const taskFolder = (
+        vaultSettings.tasks?.includedFolders ?? []
+      ).includes(tasksExcludeRelDir);
       const tasksExcluded = (
         vaultSettings.tasks?.excludedFolders ?? []
       ).includes(tasksExcludeRelDir);
       items.push({ kind: "separator" });
+      items.push({
+        label: taskFolder ? "Stop Using as Task Folder" : "Use as Task Folder",
+        onSelect: async () => {
+          await toggleTasksIncludedFolder(tasksExcludeRelDir);
+        },
+      });
       items.push({
         label: tasksExcluded ? "Include in Tasks" : "Exclude from Tasks",
         onSelect: async () => {
@@ -2104,6 +2114,7 @@ export function Sidebar(): JSX.Element {
     openColorPicker,
     toggleFavorite,
     toggleTasksExcludedFolder,
+    toggleTasksIncludedFolder,
     bulkSelectionMenuItems,
     selectedSidebarKeys,
   ]);
