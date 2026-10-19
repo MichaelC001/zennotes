@@ -108,7 +108,9 @@ const CONTENT_UNAVAILABLE =
 const RESOURCE_BUSY = 'ZenNotes Cloud is busy with this vault, usually making a backup. Try again in a minute.'
 const SUSPENDED =
   "This ZenNotes Cloud account is suspended, so it can't sync. Your notes stay on this device. Choose Report an Issue if you need help."
-const ACCESS_NOT_ENABLED = "ZenNotes Cloud isn't turned on for this account yet. Choose a plan under Billing on zennotes.org."
+// Only in invite-only mode, where buying a plan does not open Cloud.
+const ACCESS_NOT_ENABLED =
+  "ZenNotes Cloud is invite-only right now, and this account hasn't been invited yet. Your notes stay on this device."
 const VAULT_LIMIT =
   "Your plan's limit on Cloud vaults is reached. Delete a Cloud vault you no longer need, or change your plan under Billing on zennotes.org."
 const CAPACITY_FULL =
@@ -200,7 +202,7 @@ const NETWORK_TEXT =
 const TIMEOUT_TEXT = /operation was aborted due to timeout|request timed out|signal timed out/i
 
 /** Server codes whose own sentence is already written for people. */
-const PLAIN_SERVER_CODES = new Set(['VAULT_CHANGED', 'BACKUP_QUOTA_EXCEEDED', 'RESTORE_ACCESS_REVOKED'])
+const PLAIN_SERVER_CODES = new Set(['VAULT_CHANGED', 'BACKUP_QUOTA_EXCEEDED', 'RESTORE_ACCESS_REVOKED', 'GONE'])
 
 interface RawCloudError {
   name: string
@@ -305,6 +307,7 @@ function issueMessage(issue: CloudIssue, path: string | null): string {
 function serviceMessage(raw: RawCloudError): { message: string; kind: CloudErrorKind } | null {
   const status = raw.status ?? 0
   const code = raw.code
+  const dimension = typeof raw.details?.dimension === 'string' ? raw.details.dimension : ''
   const other = (message: string) => ({ message, kind: 'other' as const })
 
   if (
@@ -325,16 +328,22 @@ function serviceMessage(raw: RawCloudError): { message: string; kind: CloudError
       return other(SUSPENDED)
     case 'CLOUD_ACCESS_NOT_ENABLED':
       return other(ACCESS_NOT_ENABLED)
+    // The limit's dimension says which one; the sentences are the fallback for a
+    // service that sent none, in its old words and its current ones.
     case 'SYNC_QUOTA_EXCEEDED':
     case 'QUOTA_EXCEEDED':
     case 'CAPACITY_EXCEEDED':
-      if (/vault limit/i.test(raw.text)) return other(VAULT_LIMIT)
-      if (/publish/i.test(raw.text) || raw.details?.dimension === 'publish') return other(PUBLISH_FULL)
-      if (/^Restoring this note/i.test(raw.text)) return null
+      if (dimension === 'sync_active_vaults' || raw.details?.limit === 'max_vaults' || /vault limit|limit on Cloud vaults/i.test(raw.text)) {
+        return other(VAULT_LIMIT)
+      }
+      if (dimension.startsWith('publish') || /publish/i.test(raw.text)) return other(PUBLISH_FULL)
+      if (/^Restoring this (note|backup)/i.test(raw.text)) return null
       return other(CAPACITY_FULL)
     case 'FILE_SIZE_LIMIT_EXCEEDED':
-      if (/published asset/i.test(raw.text)) return other(PUBLISH_FILE_TOO_LARGE)
-      if (/^This backup note/i.test(raw.text)) return null
+      if (dimension === 'publish_max_asset_bytes' || /published asset|publishing size limit/i.test(raw.text)) {
+        return other(PUBLISH_FILE_TOO_LARGE)
+      }
+      if (/^(This backup note|A file in this backup)/i.test(raw.text)) return null
       return other(FILE_TOO_LARGE)
     case 'RESOURCE_BUSY':
       return other(RESOURCE_BUSY)

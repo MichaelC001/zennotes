@@ -98,6 +98,22 @@ describe('describeCloudError', () => {
       .toMatch(/^Your ZenNotes Cloud plan is full/)
   })
 
+  it('reads which limit from its dimension, and the service\'s current sentences too', () => {
+    expect(describeCloudError(serviceError('Your plan\'s limit on Cloud vaults is reached.', 409, 'CAPACITY_EXCEEDED', { dimension: 'sync_active_vaults' })).message)
+      .toMatch(/limit on Cloud vaults/)
+    expect(describeCloudError(serviceError('An attachment in this note is larger than the publishing size limit.', 409, 'FILE_SIZE_LIMIT_EXCEEDED', { dimension: 'publish_max_asset_bytes' })).message)
+      .toMatch(/^An attachment in this note/)
+    const restoreLimit = 'Restoring this backup would go over your plan\'s Cloud storage.'
+    expect(describeCloudError(serviceError(restoreLimit, 409, 'CAPACITY_EXCEEDED')).message).toBe(restoreLimit)
+    const restoreFile = 'A file in this backup is larger than your plan\'s file-size limit, so the backup can\'t be restored to Cloud.'
+    expect(describeCloudError(serviceError(restoreFile, 409, 'FILE_SIZE_LIMIT_EXCEEDED')).message).toBe(restoreFile)
+  })
+
+  it('treats a 403 asking to sign in again as signed out', () => {
+    expect(describeCloudError(serviceError("This device's sign-in to ZenNotes Cloud is out of date.", 403, 'UNAUTHENTICATED')).kind)
+      .toBe('signed-out')
+  })
+
   it('words server trouble, rate limits and maintenance without a code', () => {
     expect(describeCloudError(serviceError('Server Error', 500, null)).message).toMatch(/having trouble right now/)
     expect(describeCloudError(serviceError('Service Unavailable', 503, null)).message).toMatch(/having trouble right now/)
