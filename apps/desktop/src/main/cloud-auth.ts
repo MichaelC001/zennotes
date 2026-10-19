@@ -11,6 +11,7 @@ import {
   CLOUD_SIGN_IN_EXPIRED_MESSAGE,
   CLOUD_SIGN_IN_REFUSED_MESSAGE,
   CLOUD_SIGN_IN_UNEXPECTED_MESSAGE,
+  cloudSignInExchangeError,
   encodeCloudErrorMessage,
 } from "@zennotes/shared-domain/cloud-error-copy";
 import { CloudServiceRequestError } from "./cloud-sync-client";
@@ -160,34 +161,41 @@ export class CloudAuthManager {
     pending: PendingCloudAuth,
     request: CloudAuthDeepLinkRequest,
   ): Promise<CloudAccountStatus> {
-    const response = await this.fetchImplementation(
-      `${pending.base_url}/api/v1/app/exchange`,
-      {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
+    let response: Response;
+    try {
+      response = await this.fetchImplementation(
+        `${pending.base_url}/api/v1/app/exchange`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            code: request.code,
+            state: request.state,
+            code_verifier: pending.code_verifier,
+            device_name: this.dependencies.deviceName,
+            platform: "desktop",
+            app_version: this.dependencies.appVersion,
+          }),
+          signal: AbortSignal.timeout(30_000),
         },
-        body: JSON.stringify({
-          code: request.code,
-          state: request.state,
-          code_verifier: pending.code_verifier,
-          device_name: this.dependencies.deviceName,
-          platform: "desktop",
-          app_version: this.dependencies.appVersion,
-        }),
-        signal: AbortSignal.timeout(30_000),
-      },
-    );
+      );
+    } catch (error) {
+      throw cloudSignInExchangeError(error);
+    }
     const payload = await parseExchangeResponse(response);
     if (!response.ok) {
       const refusal = exchangeRefusal(payload);
-      // Busy or broken service: worded like any other Cloud answer.
+      // Busy or broken service: "connect again", since sign-in never retries.
       if (response.status === 429 || response.status >= 500) {
-        throw new CloudServiceRequestError(
-          refusal.message ?? `ZenNotes Cloud sign-in failed (${response.status}).`,
-          response.status,
-          refusal.code,
+        throw cloudSignInExchangeError(
+          new CloudServiceRequestError(
+            refusal.message ?? `ZenNotes Cloud sign-in failed (${response.status}).`,
+            response.status,
+            refusal.code,
+          ),
         );
       }
       throw new Error(

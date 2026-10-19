@@ -3,7 +3,11 @@ import type {
   CloudAccountConnectResult,
   CloudAccountStatus
 } from '@zennotes/bridge-contract/cloud-sync'
-import { CLOUD_SIGN_IN_EXPIRED_MESSAGE, CLOUD_SIGN_IN_UNEXPECTED_MESSAGE } from './cloud-error-copy'
+import {
+  CLOUD_SIGN_IN_EXPIRED_MESSAGE,
+  CLOUD_SIGN_IN_UNEXPECTED_MESSAGE,
+  cloudSignInExchangeError
+} from './cloud-error-copy'
 
 const AUTH_LIFETIME_MS = 5 * 60 * 1000
 const REVOKE_TIMEOUT_MS = 5_000
@@ -143,14 +147,19 @@ export class CloudAuthFlow {
       throw new Error(CLOUD_SIGN_IN_EXPIRED_MESSAGE)
     }
 
-    const response = await this.dependencies.exchange(pending.base_url, {
-      code: callback.code,
-      state: callback.state,
-      code_verifier: pending.code_verifier,
-      device_name: this.dependencies.deviceName,
-      platform: this.dependencies.platform,
-      app_version: this.dependencies.appVersion
-    })
+    let response: unknown
+    try {
+      response = await this.dependencies.exchange(pending.base_url, {
+        code: callback.code,
+        state: callback.state,
+        code_verifier: pending.code_verifier,
+        device_name: this.dependencies.deviceName,
+        platform: this.dependencies.platform,
+        app_version: this.dependencies.appVersion
+      })
+    } catch (error) {
+      throw cloudSignInExchangeError(error)
+    }
     if (!isExchangeResponse(response, this.dependencies.platform)) {
       throw new Error(CLOUD_SIGN_IN_UNEXPECTED_MESSAGE)
     }

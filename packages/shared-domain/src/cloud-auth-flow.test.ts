@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { CloudAccount } from '@zennotes/bridge-contract/cloud-sync'
+import { CLOUD_SIGN_IN_TROUBLE_MESSAGE, describeCloudError } from './cloud-error-copy'
 import {
   CloudAuthFlow,
   createCloudAuthChallenge,
@@ -143,6 +144,16 @@ describe('CloudAuthFlow', () => {
       'unexpected answer while signing you in'
     )
     expect(storage.credential).toBeNull()
+  })
+
+  it('words a busy or broken service during the exchange as connect again', async () => {
+    const { exchange, flow } = setup()
+    await flow.connect('https://zennotes.org')
+    exchange.mockRejectedValueOnce(
+      Object.assign(new Error('Server Error'), { name: 'CloudServiceRequestError', status: 503, code: null })
+    )
+    const failure = await flow.complete({ code: 'OneTimeCode', state: 'fixed-state' }).catch((error: unknown) => error)
+    expect(describeCloudError(failure).message).toBe(CLOUD_SIGN_IN_TROUBLE_MESSAGE)
   })
 
   it('clears pending state if the external browser cannot open and clears credentials on logout', async () => {

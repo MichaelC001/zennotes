@@ -138,6 +138,12 @@ export const CLOUD_SIGN_IN_REFUSED_MESSAGE =
   "This sign-in didn't go through, usually because it took longer than five minutes or the approval page was used twice. Choose Connect ZenNotes Cloud to start again."
 export const CLOUD_SIGN_IN_UNEXPECTED_MESSAGE =
   'ZenNotes Cloud sent an unexpected answer while signing you in. Try again in a few minutes.'
+export const CLOUD_SIGN_IN_OFFLINE_MESSAGE =
+  "ZenNotes couldn't reach ZenNotes Cloud to finish signing in. Check that this device is online, then choose Connect ZenNotes Cloud again."
+export const CLOUD_SIGN_IN_BUSY_MESSAGE =
+  'ZenNotes Cloud asked for a pause after several sign-in attempts. Wait a minute, then choose Connect ZenNotes Cloud again.'
+export const CLOUD_SIGN_IN_TROUBLE_MESSAGE =
+  "ZenNotes Cloud is having trouble right now, so sign-in didn't finish. This is on our side, not yours. Choose Connect ZenNotes Cloud again in a few minutes."
 
 const KEYSET_CHANGED = 'Your encryption settings just changed on another device. Try again.'
 const KEYSET_NOT_FOUND =
@@ -278,6 +284,29 @@ export function describeCloudError(error: unknown, fallback = CLOUD_UNEXPECTED_M
 }
 
 /**
+ * A failed sign-in exchange, in sign-in words. Sign-in never retries by itself
+ * and the request it answered is spent, so the sync sentences ("sync will try
+ * again in a few minutes") would promise something that does not happen.
+ * Unreachable, busy and broken service become "connect again"; anything else
+ * (a refused code, an unexpected answer) is returned unchanged for the host to
+ * word.
+ */
+export function cloudSignInExchangeError(error: unknown): unknown {
+  const raw = rawCloudError(error)
+  const copy = describeCloudError(error)
+  const message =
+    copy.kind === 'offline'
+      ? CLOUD_SIGN_IN_OFFLINE_MESSAGE
+      : raw.status === 429 || raw.code === 'RATE_LIMITED'
+        ? CLOUD_SIGN_IN_BUSY_MESSAGE
+        : raw.status !== null && raw.status >= 500
+          ? CLOUD_SIGN_IN_TROUBLE_MESSAGE
+          : null
+  if (message === null) return error
+  return new Error(encodeCloudErrorMessage({ message, detail: copy.detail, kind: 'other' }))
+}
+
+/**
  * The message the desktop main process throws across IPC: the sentence, then
  * the technical line after a marker app-core splits off again.
  */
@@ -313,14 +342,7 @@ function serviceMessage(raw: RawCloudError): { message: string; kind: CloudError
   const dimension = typeof raw.details?.dimension === 'string' ? raw.details.dimension : ''
   const other = (message: string) => ({ message, kind: 'other' as const })
 
-  if (
-    code === 'UNAUTHENTICATED' ||
-    code === 'ACTIVE_DEVICE_REQUIRED' ||
-    status === 401 ||
-    (status === 403 && raw.text === 'Invalid ability provided.')
-  ) {
-    return { message: CLOUD_SIGNED_OUT_MESSAGE, kind: 'signed-out' }
-  }
+  if (isRefusedSignIn(raw)) return { message: CLOUD_SIGNED_OUT_MESSAGE, kind: 'signed-out' }
 
   switch (code) {
     case 'RATE_LIMITED':
@@ -398,10 +420,31 @@ function serviceMessage(raw: RawCloudError): { message: string; kind: CloudError
 
   if (status === 429) return other(SLOW_DOWN)
   if (status >= 500) return other(SERVER_TROUBLE)
-  if (/invalid JSON response/i.test(raw.text)) return other(NOT_CLOUD_ANSWER)
+  if (!isCloudApiAnswer(raw)) return other(NOT_CLOUD_ANSWER)
   if (status === 404) return other(NOT_FOUND)
   if (status === 403) return other(NOT_ALLOWED)
   return other(CLOUD_UNEXPECTED_ANSWER_MESSAGE)
+}
+
+/**
+ * Cloud's API refusing this device's sign-in. Only that answer signs the
+ * device out, and signing out revokes the device on the service: a storage
+ * host's 401 on a presigned upload (DIRECT_UPLOAD_FAILED) or a proxy's 401
+ * page once revoked a device whose sign-in was fine.
+ */
+function isRefusedSignIn(raw: RawCloudError): boolean {
+  if (raw.code === 'UNAUTHENTICATED' || raw.code === 'ACTIVE_DEVICE_REQUIRED') return true
+  if (raw.code !== null || !isCloudApiAnswer(raw)) return false
+  return raw.status === 401 || (raw.status === 403 && raw.text === 'Invalid ability provided.')
+}
+
+/** The clients' own words for a body that was not Cloud's JSON: a proxy or
+ *  captive-portal page, an empty body, or a cut-off one. */
+const NOT_CLOUD_BODY =
+  /^ZenNotes Cloud request failed \(\d+\)\.$|invalid JSON response|returned an unexpected response/i
+
+function isCloudApiAnswer(raw: RawCloudError): boolean {
+  return raw.text !== '' && !NOT_CLOUD_BODY.test(raw.text)
 }
 
 function featureMessage(feature: unknown): string {

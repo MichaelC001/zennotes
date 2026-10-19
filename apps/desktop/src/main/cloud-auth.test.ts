@@ -7,7 +7,11 @@ import {
   normalizeCloudBaseUrl,
   resolveCloudBaseUrl,
 } from "./cloud-auth";
-import { describeCloudError } from "@zennotes/shared-domain/cloud-error-copy";
+import {
+  CLOUD_SIGN_IN_OFFLINE_MESSAGE,
+  CLOUD_SIGN_IN_TROUBLE_MESSAGE,
+  describeCloudError,
+} from "@zennotes/shared-domain/cloud-error-copy";
 
 const temporaryDirectories: string[] = [];
 
@@ -175,6 +179,34 @@ describe("CloudAuthManager", () => {
       detail: "HTTP 422 · Invalid or expired code.",
       kind: "other",
     });
+    expect(await manager.status()).toEqual({ state: "disconnected", account: null });
+  });
+
+  it("asks to connect again when Cloud is busy or unreachable during sign-in, never promising a retry", async () => {
+    const { manager, fetchImplementation } = await setup();
+    await manager.connect("https://zennotes.org");
+    fetchImplementation.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "Server Error" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const trouble = await manager
+      .complete({ code: "OneTimeCode", state: "fixed-state" })
+      .catch((error: unknown) => error);
+    expect(describeCloudError(trouble)).toEqual({
+      message: CLOUD_SIGN_IN_TROUBLE_MESSAGE,
+      detail: "HTTP 503 · Server Error",
+      kind: "other",
+    });
+    expect(await manager.status()).toEqual({ state: "disconnected", account: null });
+
+    await manager.connect("https://zennotes.org");
+    fetchImplementation.mockRejectedValueOnce(new TypeError("fetch failed"));
+    const offline = await manager
+      .complete({ code: "OneTimeCode", state: "fixed-state" })
+      .catch((error: unknown) => error);
+    expect(describeCloudError(offline).message).toBe(CLOUD_SIGN_IN_OFFLINE_MESSAGE);
     expect(await manager.status()).toEqual({ state: "disconnected", account: null });
   });
 
