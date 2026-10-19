@@ -2954,6 +2954,76 @@ describe('CloudSyncCoordinator: a cursor older than the change log (CURSOR_EXPIR
     expect(states.current?.items).toEqual({ 'new-plan': tracked('new-plan', 'Plan.md', 1, 'same words') })
   })
 
+  it('lands a chain of renames in the order that frees each path', async () => {
+    // Cloud renamed B to C, then A to B. Tracked order puts A first, which
+    // used to find B still taken and queue a false conflict whose local side
+    // later matched C by hash; choosing Cloud then removed C.
+    const fs = memoryFileSystem({ 'A.md': 'x', 'B.md': 'y' })
+    const states = memoryState(awayState(tracked('x', 'A.md', 1, 'x'), tracked('y', 'B.md', 1, 'y')))
+    const server = prunedServer([['x', 'B.md', 2, 'x'], ['y', 'C.md', 2, 'y']])
+    const coordinator = new CloudSyncCoordinator('vault-1', server, new PortableCloudSyncRepository(fs), states, ids())
+
+    const result = await coordinator.sync()
+
+    expect(Object.fromEntries(fs.files)).toEqual({ 'B.md': 'x', 'C.md': 'y' })
+    expect(result).toMatchObject({ pendingConflicts: [], localConflicts: [] })
+    expect(server.mutations).toEqual([])
+    await expect(coordinator.sync()).resolves.toMatchObject({ pushed: 0, pendingConflicts: [] })
+    expect(server.mutations).toEqual([])
+  })
+
+  it('lands a longer chain, a rename with new bytes in the middle, without a conflict', async () => {
+    const fs = memoryFileSystem({ 'A.md': 'w', 'B.md': 'x', 'C.md': 'y' })
+    const states = memoryState(awayState(
+      tracked('w', 'A.md', 1, 'w'),
+      tracked('x', 'B.md', 1, 'x'),
+      tracked('y', 'C.md', 1, 'y')
+    ))
+    // C to D first, then B to C with an edit, then A to B.
+    const server = prunedServer([['w', 'B.md', 2, 'w'], ['x', 'C.md', 3, 'x, edited in Cloud'], ['y', 'D.md', 2, 'y']])
+
+    const result = await new CloudSyncCoordinator(
+      'vault-1', server, new PortableCloudSyncRepository(fs), states, ids()
+    ).sync()
+
+    expect(Object.fromEntries(fs.files)).toEqual({ 'B.md': 'w', 'C.md': 'x, edited in Cloud', 'D.md': 'y' })
+    expect(result).toMatchObject({ pulled: 3, pendingConflicts: [], localConflicts: [] })
+    expect(server.mutations).toEqual([])
+  })
+
+  it('queues a ring of renames instead of moving anything, and settles it on Cloud', async () => {
+    // A to B, B to C, C to A cannot be ordered without a temporary name.
+    const fs = memoryFileSystem({ 'A.md': 'x', 'B.md': 'y', 'C.md': 'z' })
+    const states = memoryState(awayState(
+      tracked('x', 'A.md', 1, 'x'),
+      tracked('y', 'B.md', 1, 'y'),
+      tracked('z', 'C.md', 1, 'z')
+    ))
+    const server = prunedServer([['x', 'B.md', 2, 'x'], ['y', 'C.md', 2, 'y'], ['z', 'A.md', 2, 'z']])
+    const coordinator = new CloudSyncCoordinator('vault-1', server, new PortableCloudSyncRepository(fs), states, ids())
+
+    const result = await coordinator.sync()
+
+    expect(Object.fromEntries(fs.files)).toEqual({ 'A.md': 'x', 'B.md': 'y', 'C.md': 'z' })
+    expect(result.pendingConflicts.map((conflict) => [conflict.item_id, conflict.kind]).sort()).toEqual([
+      ['x', 'move'], ['y', 'move'], ['z', 'move']
+    ])
+    expect(server.mutations).toEqual([])
+
+    for (const id of ['x', 'y', 'z']) {
+      const details = await coordinator.getConflict(id)
+      await coordinator.resolveConflict({
+        conflict_id: id,
+        choice: 'cloud',
+        expected_local_sha256: details.local.sha256,
+        expected_cloud_revision: details.cloud.revision
+      })
+    }
+    expect(Object.fromEntries(fs.files)).toEqual({ 'A.md': 'z', 'B.md': 'x', 'C.md': 'y' })
+    await expect(coordinator.sync()).resolves.toMatchObject({ pushed: 0, pendingConflicts: [] })
+    expect(server.mutations).toEqual([])
+  })
+
   it('keeps what landed when a file fails midway, so a retry does not redo it (#813)', async () => {
     const fs = memoryFileSystem({ 'A.md': 'a1', 'B.md': 'b1' })
     const writeText = fs.writeText

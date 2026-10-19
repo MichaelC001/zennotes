@@ -102,7 +102,9 @@ const DOWNLOAD_INCOMPLETE =
   "A file from ZenNotes Cloud didn't finish downloading. Nothing on this device was changed. Sync will try again."
 const REMOTE_CHANGED =
   'Files in Cloud changed while this device was syncing. Choose Sync now to try again.'
-// Sync rebuilds from the full list by itself; this shows only when that was cut short.
+// A current sync never shows this: the coordinator rebuilds from the manifest
+// on this answer, and its next pull starts at a cursor Cloud still keeps. The
+// words are for anything else that meets the code.
 const CATCHING_UP =
   "This device was away longer than ZenNotes Cloud keeps its list of changes, so sync is catching up by comparing every file with Cloud. Edits made on this device are kept. Choose Sync now if it hasn't finished."
 const CONTENT_UNAVAILABLE =

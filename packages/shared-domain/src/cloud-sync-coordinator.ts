@@ -635,9 +635,9 @@ export class CloudSyncCoordinator {
    * the change feed would have queued it.
    *
    * The order is the only thing lost: deletes go first so the paths they free
-   * are free, then renames, then edits, then files new to this device. A chain
-   * of renames through each other's paths can come out as conflicts, never as
-   * an overwrite.
+   * are free, then renames and edits, each rename after whatever is leaving
+   * its destination, then files new to this device. Only a ring of renames
+   * through each other's paths comes out as conflicts, never as an overwrite.
    */
   private async rebuildFromManifest(previous: CloudSyncState): Promise<CloudSyncPull> {
     const manifest = await this.stableManifest(!this.referencesEnabled && !this.remote.revision)
@@ -706,17 +706,50 @@ export class CloudSyncCoordinator {
           revision: previous.items[id]?.revision ?? pending[id]?.cloud.revision ?? 0
         }, undefined)
       }
-      for (const id of moves) {
-        const cloud = listed.get(id)!
-        await land({
-          sequence: manifest.cursor, item_id: id, type: 'move', path: cloud.path,
-          previous_path: previous.items[id]!.path, revision: cloud.revision,
-          ...(cloud.content_ref ? { content_ref: cloud.content_ref } : {})
-        }, cloud)
+      // A rename, with or without new bytes, lands only once no other file
+      // still waiting to leave holds its destination. Cloud renamed B to C and
+      // then A to B: moving A first found B taken, queued a false conflict
+      // whose local side later matched the note at C by hash, and choosing
+      // Cloud there removed it. Renames that wait on each other in a ring
+      // cannot be ordered without a temporary name; they land as they are,
+      // and the repository queues each one without moving anything.
+      const leaving = new Map<string, string>()
+      const destination = new Map<string, string>()
+      for (const id of [...moves, ...edits]) {
+        const tracked = previous.items[id]
+        const target = cloudSyncPathKey(listed.get(id)!.path)
+        // A queued decision never moves its file, so it frees nothing.
+        if (pending[id] || !tracked || cloudSyncPathKey(tracked.path) === target) continue
+        leaving.set(cloudSyncPathKey(tracked.path), id)
+        destination.set(id, target)
       }
-      for await (const item of this.bootstrapItems(manifest, (candidate) => edits.has(candidate.item_id))) {
-        const before = previous.items[item.item_id]
-        await land(manifestUpsert(item, manifest.cursor, before && before.path !== item.path ? before.path : null), item)
+      const waiting = new Set([...moves, ...edits])
+      const blocked = (id: string) => {
+        const occupant = leaving.get(destination.get(id) ?? '')
+        return occupant !== undefined && occupant !== id
+      }
+      while (waiting.size > 0) {
+        const ready = [...waiting].filter((id) => !blocked(id))
+        const now = new Set(ready.length > 0 ? ready : waiting)
+        for (const id of moves) {
+          if (!now.has(id)) continue
+          const cloud = listed.get(id)!
+          await land({
+            sequence: manifest.cursor, item_id: id, type: 'move', path: cloud.path,
+            previous_path: previous.items[id]!.path, revision: cloud.revision,
+            ...(cloud.content_ref ? { content_ref: cloud.content_ref } : {})
+          }, cloud)
+        }
+        const editing = (candidate: CloudSyncManifestItem) => now.has(candidate.item_id) && edits.has(candidate.item_id)
+        for await (const item of this.bootstrapItems(manifest, editing)) {
+          const before = previous.items[item.item_id]
+          await land(manifestUpsert(item, manifest.cursor, before && before.path !== item.path ? before.path : null), item)
+        }
+        for (const id of now) {
+          waiting.delete(id)
+          const tracked = previous.items[id]
+          if (tracked && leaving.get(cloudSyncPathKey(tracked.path)) === id) leaving.delete(cloudSyncPathKey(tracked.path))
+        }
       }
       // A file new to this device may already be here, but only the vault as
       // it is now can say: a delete or rename above may have just taken away
