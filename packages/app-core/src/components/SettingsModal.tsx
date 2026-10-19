@@ -4419,8 +4419,10 @@ export function SettingsModal(): JSX.Element {
                   settingId="saved-remote-workspaces"
                 >
                   <div className="space-y-3 px-5 py-5">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="text-xs text-ink-500">
+                    {/* New Remote wraps under the intro on a narrow card
+                        instead of squeezing it to a word per line. */}
+                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+                      <div className="min-w-0 flex-1 basis-56 text-xs text-ink-500">
                         Saved connections can point at different servers or
                         different vaults on the same server.
                       </div>
@@ -6914,15 +6916,26 @@ function DateNotePatternSupportRow({
         </code>
         .
       </div>
-      <dl className="mt-4 grid grid-cols-1 gap-x-5 gap-y-2 text-xs sm:grid-cols-2">
+      {/* Two columns only while the card itself has room for them, and the
+          meaning drops under its token when a column is too narrow. A
+          viewport breakpoint kept two columns in a tablet-width Settings
+          pane, where the meanings shrank to a word per line and ran past
+          the card. */}
+      <dl className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs">
         {DATE_NOTE_PATTERN_TOKENS.map((item) => (
           <div
             key={item.token}
-            className="grid grid-cols-[5rem_4.5rem_1fr] items-baseline gap-3"
+            className="flex min-w-0 flex-1 basis-72 flex-wrap items-baseline gap-x-3 gap-y-0.5"
           >
-            <dt className="font-mono text-ink-900">{item.token}</dt>
-            <dd className="font-mono text-ink-600">{item.output}</dd>
-            <dd className="text-ink-500">{item.meaning}</dd>
+            <dt className="w-20 shrink-0 font-mono text-ink-900">
+              {item.token}
+            </dt>
+            <dd className="w-[4.5rem] shrink-0 font-mono text-ink-600">
+              {item.output}
+            </dd>
+            <dd className="min-w-0 flex-1 basis-24 text-ink-500">
+              {item.meaning}
+            </dd>
           </div>
         ))}
       </dl>
@@ -7613,12 +7626,13 @@ function FontRow({
     }
   };
 
+  // Wraps the picker under the label on a narrow row, like SegmentedRow.
   return (
     <div
-      className="flex items-center justify-between gap-5 px-5 py-4"
+      className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 px-5 py-4"
       {...settingsSearchTargetProps(settingId)}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1 basis-56">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && (
           <div className="mt-1 text-xs leading-5 text-ink-500">
@@ -7630,7 +7644,7 @@ function FontRow({
         ref={buttonRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-[236px] shrink-0 items-center justify-between gap-2 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3.5 py-2 text-left text-sm text-ink-900 transition-colors hover:bg-paper-200"
+        className="flex w-[236px] max-w-full shrink-0 items-center justify-between gap-2 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3.5 py-2 text-left text-sm text-ink-900 transition-colors hover:bg-paper-200"
       >
         <span
           className="truncate"
@@ -7764,12 +7778,14 @@ function SliderRow({
 }): JSX.Element {
   const display =
     (format ? format(value) : String(value)) + (unit && !format ? unit : "");
+  // Wraps the slider under the label on a narrow row, like SegmentedRow; the
+  // track gives way before the value does when a row of its own is too narrow.
   return (
     <div
-      className="flex items-center justify-between gap-5 px-5 py-4"
+      className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 px-5 py-4"
       {...settingsSearchTargetProps(settingId)}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1 basis-56">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && (
           <div className="mt-1 text-xs leading-5 text-ink-500">
@@ -7777,7 +7793,7 @@ function SliderRow({
           </div>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-3">
+      <div className="flex max-w-full shrink-0 items-center gap-3">
         <input
           type="range"
           min={min}
@@ -7785,7 +7801,7 @@ function SliderRow({
           step={step}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="zen-slider h-1 w-[140px] cursor-pointer appearance-none rounded-full"
+          className="zen-slider h-1 w-[140px] min-w-0 cursor-pointer appearance-none rounded-full"
         />
         <div className="min-w-[54px] text-right text-sm tabular-nums text-ink-800">
           {display}
@@ -8315,12 +8331,17 @@ function SegmentedRow<T extends string>({
   settingId?: string;
   onChange: (next: T) => void;
 }): JSX.Element {
+  // The options wrap under the label when the row is too narrow, as the
+  // Vault Location buttons do (#871), and wrap within themselves when even
+  // a row of their own is too narrow. On one unwrapping line, three long
+  // options in a tablet-width or minimum-width Settings pane squeezed the
+  // label and description to one word per line, and ran past the card.
   return (
     <div
-      className="flex items-center justify-between gap-5 px-5 py-4"
+      className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 px-5 py-4"
       {...settingsSearchTargetProps(settingId)}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1 basis-56">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && (
           <div className="mt-1 text-xs leading-5 text-ink-500">
@@ -8328,7 +8349,7 @@ function SegmentedRow<T extends string>({
           </div>
         )}
       </div>
-      <div className="inline-flex shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/75 p-1">
+      <div className="inline-flex max-w-full shrink-0 flex-wrap rounded-xl border border-paper-300/70 bg-paper-100/75 p-1">
         {options.map((option) => (
           <button
             key={option.value}
