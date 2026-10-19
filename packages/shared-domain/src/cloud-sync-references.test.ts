@@ -834,3 +834,47 @@ describe('content reference capability negotiation', () => {
     expect(send).toHaveBeenCalledOnce()
   })
 })
+
+describe('reference-mode rebuild after CURSOR_EXPIRED', () => {
+  it('streams what changed in Cloud and keeps a local edit Cloud also changed', async () => {
+    const big = entry('big', 3)
+    const note = entry('note', 4, 'cloud text v4')
+    const before = { big: entry('big', 1), note: entry('note', 1, 'old text') }
+    const tracked = (item: Entry) => {
+      const { content: _content, content_ref: _ref, ...metadata } = item
+      return metadata
+    }
+    // big.md was edited on this device while it was away; note.md was not.
+    const edited = { ...local(before.big), content: { ...local(before.big).content, sha256: hash('edited here') } }
+    const f = fixture(
+      [big, note],
+      { ...emptyCloudSyncState('vault'), cursor: 2, items: { big: tracked(before.big), note: tracked(before.note) } },
+      [edited, local(before.note)]
+    )
+    for (let sequence = 1; sequence <= 5; sequence++) {
+      f.feed.push({ item_id: 'pruned', revision: sequence, sequence, type: 'delete', path: 'pruned.md', previous_path: null })
+    }
+    const follow = vi.mocked(f.remote.changes).getMockImplementation()!
+    vi.mocked(f.remote.changes).mockImplementation(async (vault, after, ...rest) => {
+      if (after < 5) {
+        throw Object.assign(new Error('This cursor is older than the retained change log.'), {
+          name: 'CloudServiceRequestError', status: 410, code: 'CURSOR_EXPIRED', details: { pruned_through: 5, cursor: 5 }
+        })
+      }
+      return follow(vault, after, ...rest)
+    })
+
+    const result = await f.coordinator.sync()
+
+    expect(f.files.get('note.md')).toEqual(local(note))
+    expect(f.files.get('big.md')).toEqual(edited)
+    expect(f.repository.applyStagedCloudContent).toHaveBeenCalledOnce()
+    expect(f.remote.mutate).not.toHaveBeenCalled()
+    expect(result.pendingConflicts).toEqual([
+      expect.objectContaining({ item_id: 'big', kind: 'content', path: 'big.md' })
+    ])
+    expect(f.state()?.pending_conflicts?.big?.cloud).toMatchObject({ revision: 3, content_ref: big.content_ref })
+    expect(f.state()?.cursor).toBe(5)
+    expect(f.state()?.items).toEqual({ big: tracked(big), note: tracked(note) })
+  })
+})

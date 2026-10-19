@@ -301,13 +301,21 @@ export class CloudSyncCoordinator {
       throw new Error('Choose a filename inside the synced vault.')
     }
 
+    // A delete found by rebuilding from the manifest has no revision to build
+    // on, so this device's version goes back to Cloud as a new file, and a
+    // file deleted on both sides leaves nothing to send.
+    const recreate = stored.cloud.path === null && stored.cloud.revision === null
+    if (recreate && !chosen) {
+      await this.saveWithoutConflict(state, stored.id)
+      return
+    }
     const operationId = this.ids.operationId()
     const mutation: CloudSyncMutation = chosen
       ? {
           type: 'upsert',
           operation_id: operationId,
-          item_id: stored.item_id,
-          base_revision: stored.cloud.revision,
+          item_id: recreate ? this.ids.itemId() : stored.item_id,
+          base_revision: recreate ? null : stored.cloud.revision,
           path: resolvedPath ?? '',
           kind: local.kind,
           content: chosen
@@ -476,7 +484,7 @@ export class CloudSyncCoordinator {
     let state = bootstrap.state
     let pulled = bootstrap.pulled
     const localConflicts = [...bootstrap.localConflicts]
-    const initialPull = await this.pullChanges(state)
+    const initialPull = await this.pullOrRebuild(state)
     state = initialPull.state
     pulled += initialPull.pulled
     localConflicts.push(...initialPull.localConflicts)
@@ -561,7 +569,7 @@ export class CloudSyncCoordinator {
     }
 
     if (mutationCursor > state.cursor) {
-      const finalPull = await this.pullChanges(state, acknowledgedSequences)
+      const finalPull = await this.pullOrRebuild(state, acknowledgedSequences)
       state = finalPull.state
       pulled += finalPull.pulled
       localConflicts.push(...finalPull.localConflicts)
@@ -591,14 +599,152 @@ export class CloudSyncCoordinator {
     }
   }
 
+  /**
+   * Cloud keeps its change log for a limited time (90 days by default) and
+   * answers 410 CURSOR_EXPIRED to a cursor older than what is left. Every run
+   * used to fail there, and relinking reused the same state, so a device away
+   * that long could not sync again. It catches up from the manifest instead,
+   * then follows the log again from the manifest's cursor.
+   */
+  private async pullOrRebuild(
+    state: CloudSyncState,
+    acknowledgedSequences?: ReadonlySet<number>
+  ): Promise<CloudSyncPull> {
+    try {
+      return await this.pullChanges(state, acknowledgedSequences)
+    } catch (error) {
+      if (!isCloudCursorExpired(error)) throw error
+    }
+    // pullChanges saved the changes that landed before the log ran out.
+    const rebuilt = await this.rebuildFromManifest((await this.states.load(this.vaultId)) ?? state)
+    const pull = await this.pullChanges(rebuilt.state, acknowledgedSequences)
+    return {
+      state: pull.state,
+      pulled: rebuilt.pulled + pull.pulled,
+      localConflicts: [...rebuilt.localConflicts, ...pull.localConflicts]
+    }
+  }
+
+  /**
+   * Replay what the pruned log would have said, item by item, from the
+   * difference between the tracked state and the manifest. A first sync
+   * knows nothing about this device's files; this one still knows what sync
+   * last agreed on for each, so an offline edit is pushed as an edit, an
+   * offline delete as a delete, and a Cloud change lands only on a file this
+   * device can vouch for. Anything else is queued as a conflict, exactly as
+   * the change feed would have queued it.
+   *
+   * The order is the only thing lost: deletes go first so the paths they free
+   * are free, then renames, then edits, then files new to this device. A chain
+   * of renames through each other's paths can come out as conflicts, never as
+   * an overwrite.
+   */
+  private async rebuildFromManifest(previous: CloudSyncState): Promise<CloudSyncPull> {
+    const manifest = await this.stableManifest(!this.referencesEnabled && !this.remote.revision)
+    const localByPath = new Map((await this.repository.scan()).map((item) => [cloudSyncPathKey(item.path), item]))
+    const holds = (item: CloudSyncManifestItem) =>
+      localByPath.get(cloudSyncPathKey(item.path))?.content.sha256 === item.sha256
+    const listed = new Map(manifest.items.map((item) => [item.item_id, item]))
+    const pending = previous.pending_conflicts ?? {}
+
+    const deletes: string[] = []
+    const moves: string[] = []
+    const edits = new Set<string>()
+    const arrivals = new Set<string>()
+    for (const id of new Set([...Object.keys(previous.items), ...Object.keys(pending), ...listed.keys()])) {
+      const tracked = previous.items[id]
+      const cloud = listed.get(id)
+      const conflict = pending[id]
+      if (conflict) {
+        // A queued decision moves to the Cloud version it now has to be
+        // made against, without touching the file, like the change feed.
+        if (!cloud) {
+          if (conflict.cloud.path !== null) deletes.push(id)
+        } else if (conflict.cloud.path === null || conflict.cloud.revision !== cloud.revision) {
+          edits.add(id)
+        }
+      } else if (!cloud) {
+        if (tracked) deletes.push(id)
+      } else if (!tracked) {
+        arrivals.add(id)
+      } else if (!sameTrackedItem(tracked, cloud)) {
+        if (tracked.sha256 === cloud.sha256 && tracked.kind === cloud.kind) {
+          if (tracked.path !== cloud.path) moves.push(id)
+        } else if (tracked.path !== cloud.path || !holds(cloud)) {
+          edits.add(id)
+        }
+      }
+    }
+
+    const items = { ...previous.items }
+    let state: CloudSyncState = { ...previous, pending_conflicts: { ...pending } }
+    const localConflicts: CloudSyncLocalConflict[] = []
+    let pulled = 0
+    const land = async (change: CloudSyncChange, cloud: CloudSyncManifestItem | undefined) => {
+      throwIfCloudSyncCancelled(this.remote.downloadSignal)
+      const queued = state.pending_conflicts?.[change.item_id]
+      state = queued
+        ? withConflict(state, advancePendingConflict(queued, change))
+        : await this.landRemoteChange(state, change, previous.items[change.item_id], localConflicts)
+      const conflict = state.pending_conflicts?.[change.item_id]
+      if (change.type === 'delete' && conflict?.cloud.path === null) {
+        // The manifest lists only live files, so the revision that deleted
+        // this one is unknown. Keeping this device's version sends it back
+        // as a new file (see resolveConflict).
+        state = withConflict(state, { ...conflict, cloud: { ...conflict.cloud, revision: null } })
+      }
+      if (cloud) items[change.item_id] = trackedManifestItem(cloud)
+      else delete items[change.item_id]
+      pulled++
+    }
+
+    try {
+      for (const id of deletes) {
+        const path = previous.items[id]?.path ?? pending[id]?.cloud.path ?? pending[id]?.local.path ?? ''
+        await land({
+          sequence: manifest.cursor, item_id: id, type: 'delete', path, previous_path: null,
+          revision: previous.items[id]?.revision ?? pending[id]?.cloud.revision ?? 0
+        }, undefined)
+      }
+      for (const id of moves) {
+        const cloud = listed.get(id)!
+        await land({
+          sequence: manifest.cursor, item_id: id, type: 'move', path: cloud.path,
+          previous_path: previous.items[id]!.path, revision: cloud.revision,
+          ...(cloud.content_ref ? { content_ref: cloud.content_ref } : {})
+        }, cloud)
+      }
+      for await (const item of this.bootstrapItems(manifest, (candidate) => edits.has(candidate.item_id))) {
+        const before = previous.items[item.item_id]
+        await land(manifestUpsert(item, manifest.cursor, before && before.path !== item.path ? before.path : null), item)
+      }
+      // A file new to this device may already be here, but only the vault as
+      // it is now can say: a delete or rename above may have just taken away
+      // the file at its path.
+      const current = arrivals.size === 0 ? localByPath
+        : new Map((await this.repository.scan()).map((item) => [cloudSyncPathKey(item.path), item]))
+      const arriving = (item: CloudSyncManifestItem) => arrivals.has(item.item_id) &&
+        current.get(cloudSyncPathKey(item.path))?.content.sha256 !== item.sha256
+      for await (const item of this.bootstrapItems(manifest, arriving)) {
+        await land(manifestUpsert(item, manifest.cursor), item)
+      }
+      throwIfCloudSyncCancelled(this.remote.downloadSignal)
+    } catch (error) {
+      // What landed stays landed, still at the old cursor: a retry rebuilds
+      // from these items and never redoes a change undone since (#813).
+      await this.states.save({ ...state, items })
+      throw error
+    }
+
+    state = { ...state, cursor: manifest.cursor, items: manifestState(this.vaultId, manifest.cursor, manifest.items).items }
+    await this.states.save(state)
+    return { state, pulled, localConflicts }
+  }
+
   private async pullChanges(
     initialState: CloudSyncState,
     acknowledgedSequences: ReadonlySet<number> = new Set()
-  ): Promise<{
-    state: CloudSyncState
-    pulled: number
-    localConflicts: CloudSyncLocalConflict[]
-  }> {
+  ): Promise<CloudSyncPull> {
     let state = initialState
     let pulled = 0
     const localConflicts: CloudSyncLocalConflict[] = []
@@ -714,13 +860,7 @@ export class CloudSyncCoordinator {
           onDisk.delete(change.item_id)
           const existingConflict = state.pending_conflicts?.[change.item_id]
           if (existingConflict) {
-            state = {
-              ...state,
-              pending_conflicts: {
-                ...state.pending_conflicts,
-                [change.item_id]: advancePendingConflict(existingConflict, change)
-              }
-            }
+            state = withConflict(state, advancePendingConflict(existingConflict, change))
           } else {
             if (this.referencesEnabled && change.type === 'upsert') {
               const pageIndex = pages.findIndex((page) => page.start <= index && index < page.end)
@@ -741,22 +881,7 @@ export class CloudSyncCoordinator {
                 kind: change.content.encoding === 'utf8' ? 'text' : 'binary', ...change.content
               }, change.content)
             }
-            const applied = await this.applyRemoteChange(change, previous)
-            const conflict = applied.conflict
-            if (conflict?.code === 'LOCAL_EDIT_CONFLICT') {
-              const pending = await this.storedConflict(applied.change, previous, conflict.local ?? null)
-              if (!(await this.applyAutomaticMerge(pending))) {
-                state = {
-                  ...state,
-                  pending_conflicts: {
-                    ...state.pending_conflicts,
-                    [pending.id]: pending
-                  }
-                }
-              }
-            } else if (conflict) {
-              localConflicts.push(publicLocalConflict(conflict))
-            }
+            state = await this.landRemoteChange(state, change, previous, localConflicts)
           }
           pulled++
         }
@@ -771,6 +896,25 @@ export class CloudSyncCoordinator {
     if (changes.length > 0) await this.states.save(state)
 
     return { state, pulled, localConflicts }
+  }
+
+  /** Put one Cloud change on disk, or queue it for a decision when the local
+   * file is not what sync last agreed on with Cloud. */
+  private async landRemoteChange(
+    state: CloudSyncState,
+    change: CloudSyncChange,
+    previous: CloudSyncTrackedItem | undefined,
+    localConflicts: CloudSyncLocalConflict[]
+  ): Promise<CloudSyncState> {
+    const applied = await this.applyRemoteChange(change, previous)
+    const conflict = applied.conflict
+    if (conflict?.code === 'LOCAL_EDIT_CONFLICT') {
+      const pending = await this.storedConflict(applied.change, previous, conflict.local ?? null)
+      if (!(await this.applyAutomaticMerge(pending))) return withConflict(state, pending)
+    } else if (conflict) {
+      localConflicts.push(publicLocalConflict(conflict))
+    }
+    return state
   }
 
   private async retryPendingMerges(
@@ -1220,7 +1364,9 @@ export class CloudSyncCoordinator {
     let pulled = 0
     const state = manifestState(this.vaultId, manifest.cursor, manifest.items)
 
-    for await (const item of this.bootstrapItems(manifest, localByPath)) {
+    const needsBytes = (item: CloudSyncManifestItem) =>
+      localByPath.get(cloudSyncPathKey(item.path))?.content.sha256 !== item.sha256
+    for await (const item of this.bootstrapItems(manifest, needsBytes)) {
       throwIfCloudSyncCancelled(this.remote.downloadSignal)
       const local = localByPath.get(cloudSyncPathKey(item.path))
 
@@ -1267,9 +1413,11 @@ export class CloudSyncCoordinator {
     return { state, pulled, conflicts, localConflicts }
   }
 
+  /** The manifest items `needsBytes` selects, with their content, one bounded
+   * page at a time in manifest order. */
   private async *bootstrapItems(
     manifest: { cursor: number; items: CloudSyncManifestItem[] },
-    localByPath: ReadonlyMap<string, CloudSyncLocalItem>
+    needsBytes: (item: CloudSyncManifestItem) => boolean
   ): AsyncGenerator<CloudSyncManifestItem> {
     const budget = this.remote.bootstrapContentPageBytes ?? BOOTSTRAP_BULK_RESPONSE_LIMIT_BYTES
     if (!Number.isSafeInteger(budget) || budget <= 0) {
@@ -1280,21 +1428,19 @@ export class CloudSyncCoordinator {
       contentBytes: Math.min(budget, BOOTSTRAP_BULK_RESPONSE_LIMIT_BYTES)
     }
     for (let offset = 0; offset < manifest.items.length; offset += MANIFEST_PAGE_SIZE) {
-      yield* this.bootstrapPage(manifest, localByPath, offset, MANIFEST_PAGE_SIZE, limits)
+      yield* this.bootstrapPage(manifest, needsBytes, offset, MANIFEST_PAGE_SIZE, limits)
     }
   }
 
   private async *bootstrapPage(
     manifest: { cursor: number; items: CloudSyncManifestItem[] },
-    localByPath: ReadonlyMap<string, CloudSyncLocalItem>,
+    needsBytes: (item: CloudSyncManifestItem) => boolean,
     offset: number,
     pageSize: number,
     limits: { pageSize: number; contentBytes: number }
   ): AsyncGenerator<CloudSyncManifestItem> {
     const items = manifest.items.slice(offset, offset + pageSize)
-    const needed = items.filter(
-      (item) => localByPath.get(cloudSyncPathKey(item.path))?.content.sha256 !== item.sha256
-    )
+    const needed = items.filter(needsBytes)
     if (needed.length === 0) return
     if (
       (!this.referencesEnabled && !this.remote.revision) ||
@@ -1362,7 +1508,7 @@ export class CloudSyncCoordinator {
 
     const smallerSize = BOOTSTRAP_PAGE_SIZES.find((size) => size < pageSize)!
     for (let start = offset; start < offset + items.length; start += smallerSize) {
-      yield* this.bootstrapPage(manifest, localByPath, start, smallerSize, limits)
+      yield* this.bootstrapPage(manifest, needsBytes, start, smallerSize, limits)
     }
   }
 
@@ -1519,6 +1665,19 @@ export class CloudSyncCoordinator {
 
     throw new CloudIssueError('remote-changed', 'Vault changed repeatedly while the initial sync manifest was loading')
   }
+}
+
+type CloudSyncPull = {
+  state: CloudSyncState
+  pulled: number
+  localConflicts: CloudSyncLocalConflict[]
+}
+
+/** Cloud pruned the part of the change log this cursor still needed. */
+function isCloudCursorExpired(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const value = error as { status?: unknown; code?: unknown }
+  return value.status === 410 && value.code === 'CURSOR_EXPIRED'
 }
 
 function isCloudManifestTooLarge(error: unknown): boolean {
@@ -1739,6 +1898,10 @@ function publicConflictVersion(
   }
 }
 
+function withConflict(state: CloudSyncState, conflict: CloudSyncStoredConflict): CloudSyncState {
+  return { ...state, pending_conflicts: { ...state.pending_conflicts, [conflict.id]: conflict } }
+}
+
 function withoutConflict(state: CloudSyncState, conflictId: string): CloudSyncState {
   const pending = { ...state.pending_conflicts }
   delete pending[conflictId]
@@ -1924,27 +2087,46 @@ function manifestState(
   state.cursor = cursor
 
   for (const item of items) {
-    state.items[item.item_id] = {
-      item_id: item.item_id,
-      path: item.path,
-      kind: item.kind,
-      revision: item.revision,
-      sha256: item.sha256,
-      byte_length: item.byte_length,
-      media_type: item.media_type
-    }
+    state.items[item.item_id] = trackedManifestItem(item)
   }
 
   return state
 }
 
-function manifestUpsert(item: CloudSyncManifestItem): CloudSyncChange {
+function trackedManifestItem(item: CloudSyncManifestItem): CloudSyncTrackedItem {
   return {
-    sequence: 0,
+    item_id: item.item_id,
+    path: item.path,
+    kind: item.kind,
+    revision: item.revision,
+    sha256: item.sha256,
+    byte_length: item.byte_length,
+    media_type: item.media_type
+  }
+}
+
+function sameTrackedItem(tracked: CloudSyncTrackedItem, item: CloudSyncManifestItem): boolean {
+  return (
+    tracked.revision === item.revision &&
+    tracked.path === item.path &&
+    tracked.kind === item.kind &&
+    tracked.sha256 === item.sha256 &&
+    tracked.byte_length === item.byte_length &&
+    tracked.media_type === item.media_type
+  )
+}
+
+function manifestUpsert(
+  item: CloudSyncManifestItem,
+  sequence = 0,
+  previousPath: string | null = null
+): CloudSyncChange {
+  return {
+    sequence,
     item_id: item.item_id,
     type: 'upsert',
     path: item.path,
-    previous_path: null,
+    previous_path: previousPath,
     revision: item.revision,
     content: item.content,
     ...(item.content_ref ? { content_ref: item.content_ref } : {})

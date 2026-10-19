@@ -102,6 +102,9 @@ const DOWNLOAD_INCOMPLETE =
   "A file from ZenNotes Cloud didn't finish downloading. Nothing on this device was changed. Sync will try again."
 const REMOTE_CHANGED =
   'Files in Cloud changed while this device was syncing. Choose Sync now to try again.'
+// Sync rebuilds from the full list by itself; this shows only when that was cut short.
+const CATCHING_UP =
+  "This device was away longer than ZenNotes Cloud keeps its list of changes, so sync is catching up by comparing every file with Cloud. Edits made on this device are kept. Choose Sync now if it hasn't finished."
 const CONTENT_UNAVAILABLE =
   `A file stored in ZenNotes Cloud is missing or damaged, so this device can't download it. Your copy on this device is unchanged. Copy the details and choose Report an Issue.`
 
@@ -353,6 +356,8 @@ function serviceMessage(raw: RawCloudError): { message: string; kind: CloudError
       return other(CLOUD_UNEXPECTED_ANSWER_MESSAGE)
     case 'SYNC_CONTENT_UNAVAILABLE':
       return other(CONTENT_UNAVAILABLE)
+    case 'CURSOR_EXPIRED':
+      return other(CATCHING_UP)
     case 'UPLOAD_EXPIRED':
     case 'UPLOAD_NOT_RESTARTABLE':
     case 'UPLOAD_NOT_FOUND':

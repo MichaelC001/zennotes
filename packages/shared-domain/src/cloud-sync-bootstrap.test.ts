@@ -1111,3 +1111,43 @@ describe('legacy bootstrap conflict decisions with metadata manifests', () => {
     }
   )
 })
+
+describe('rebuilding from a metadata manifest after CURSOR_EXPIRED', () => {
+  it('downloads only what changed in Cloud and pushes what changed here', async () => {
+    const cloud = [file('a.md', 'a1'), file('b.md', 'b1'), file('c.md', 'c1')]
+    const f = fixture(cloud)
+    await f.coordinator.sync()
+    f.events.length = 0
+    f.manifest.mockClear()
+    f.revision.mockClear()
+
+    // Away longer than Cloud keeps its change log: b.md changed in Cloud and
+    // a.md changed here. c.md is the same on both sides.
+    cloud[1] = file('b.md', 'b2')
+    f.inventory[1] = { ...f.inventory[1], revision: 7, sha256: cloud[1].content.sha256, byte_length: cloud[1].content.byte_length }
+    f.locals.set('a.md', file('a.md', 'a, edited here'))
+    f.manifest.mockImplementation(async (_vaultId, options) => {
+      if (options.includeContent !== false) throw new Error('HTTP 413 SYNC_RESPONSE_TOO_LARGE')
+      return { data: structuredClone(f.inventory), cursor: 20, next_page: null }
+    })
+    vi.mocked(f.remote.changes).mockImplementation(async (_vaultId, after) => {
+      if (after < 15) {
+        throw Object.assign(new Error('This cursor is older than the retained change log.'), {
+          name: 'CloudServiceRequestError', status: 410, code: 'CURSOR_EXPIRED', details: { pruned_through: 15, cursor: 20 }
+        })
+      }
+      return { data: [], cursor: after, has_more: false }
+    })
+
+    const result = await f.coordinator.sync()
+
+    expect(result).toMatchObject({ pulled: 1, pushed: 1, pendingConflicts: [] })
+    expect(f.manifest).toHaveBeenCalledExactlyOnceWith('vault', { includeContent: false, page: 1, perPage: 250 })
+    expect(f.events).toEqual(['revision:item-1', 'apply:item-1'])
+    expect(f.locals.get('b.md')).toEqual(cloud[1])
+    expect(f.mutate.mock.calls.at(-1)?.[1].mutations).toEqual([
+      expect.objectContaining({ type: 'upsert', item_id: 'item-0', base_revision: 1, content: content('a, edited here') })
+    ])
+    expect(f.state()?.cursor).toBe(20)
+  })
+})

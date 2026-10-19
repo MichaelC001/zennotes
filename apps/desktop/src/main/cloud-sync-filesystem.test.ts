@@ -15,6 +15,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { DesktopCloudSyncRepository, DesktopCloudSyncStateStore } from './cloud-sync-filesystem'
+import { createCloudSyncClient } from './cloud-sync-client'
 import {
   CLOUD_SYNC_INLINE_UPLOAD_LIMIT_BYTES,
   cloudSyncUploadSource
@@ -791,5 +792,152 @@ describe('DesktopCloudSyncRepository: a Cloud restore from Trash', () => {
     expect(remote.mutate).not.toHaveBeenCalled()
     expect(await readFile(path.join(root, 'Note.md'), 'utf8')).toBe('agreed')
     expect(await readdir(path.join(root, 'trash'))).toEqual([])
+  })
+})
+
+describe('DesktopCloudSyncRepository: back after Cloud pruned its change log', () => {
+  it('rebuilds from the manifest without losing an edit made while away', async () => {
+    const root = await temporaryRoot()
+    await writeFile(path.join(root, 'Plan.md'), 'v1')
+    await writeFile(path.join(root, 'Draft.md'), 'draft, edited here')
+    await writeFile(path.join(root, 'Trip.md'), 'trip, edited here')
+    const item = (id: string, relPath: string, revision: number, contents: string) => ({
+      ...tracked(relPath, contents), item_id: id, revision
+    })
+    // The state the desktop kept from before the trip, reused on relink.
+    const states = new DesktopCloudSyncStateStore(await temporaryRoot())
+    await states.save({
+      version: 1,
+      vault_id: 'vault',
+      cursor: 3,
+      items: {
+        plan: item('plan', 'Plan.md', 1, 'v1'),
+        draft: item('draft', 'Draft.md', 1, 'draft'),
+        trip: item('trip', 'Trip.md', 1, 'trip')
+      }
+    })
+    const listed = [item('plan', 'Plan.md', 7, 'v7'), item('draft', 'Draft.md', 1, 'draft')]
+    const remote: CloudSyncRemote = {
+      manifest: vi.fn(async () => ({
+        data: listed.map((entry, index) => ({ ...entry, content: upsert(entry.path, index === 0 ? 'v7' : 'draft').content })),
+        cursor: 40,
+        next_page: null
+      })),
+      changes: vi.fn(async (_vault: string, after: number) => {
+        if (after < 30) {
+          throw Object.assign(new Error('This cursor is older than the retained change log.'), {
+            name: 'CloudServiceRequestError', status: 410, code: 'CURSOR_EXPIRED', details: { pruned_through: 30, cursor: 40 }
+          })
+        }
+        return { data: [], cursor: after, has_more: false }
+      }),
+      mutate: vi.fn<CloudSyncRemote['mutate']>(async (_vault, body) => ({
+        acknowledged: body.mutations.map((mutation) => ({
+          operation_id: mutation.operation_id, item_id: mutation.item_id, revision: 2, sequence: 41
+        })),
+        cursor: 41,
+        conflicts: []
+      }))
+    }
+    let operation = 0
+    const coordinator = new CloudSyncCoordinator('vault', remote, new DesktopCloudSyncRepository(root), states, {
+      itemId: () => 'item-new', operationId: () => `operation-${++operation}`
+    })
+
+    const result = await coordinator.sync()
+
+    expect(await readFile(path.join(root, 'Plan.md'), 'utf8')).toBe('v7')
+    expect(await readFile(path.join(root, 'Draft.md'), 'utf8')).toBe('draft, edited here')
+    // Deleted in Cloud, edited here: kept, and waiting for a decision.
+    expect(await readFile(path.join(root, 'Trip.md'), 'utf8')).toBe('trip, edited here')
+    expect(vi.mocked(remote.mutate).mock.calls.flatMap((call) => call[1].mutations)).toEqual([
+      expect.objectContaining({ type: 'upsert', item_id: 'draft', base_revision: 1, path: 'Draft.md' })
+    ])
+    expect(result.pendingConflicts).toEqual([
+      expect.objectContaining({ item_id: 'trip', kind: 'delete', path: 'Trip.md', cloud_path: null })
+    ])
+    expect((await states.load('vault'))?.cursor).toBe(40)
+  })
+
+  it('reads the 410 off the wire through the desktop client and catches up', async () => {
+    const root = await temporaryRoot()
+    await writeFile(path.join(root, 'Plan.md'), 'v1')
+    await writeFile(path.join(root, 'Draft.md'), 'draft, edited here')
+    const states = new DesktopCloudSyncStateStore(await temporaryRoot())
+    await states.save({
+      version: 1,
+      vault_id: 'vault',
+      cursor: 3,
+      items: {
+        plan: { ...tracked('Plan.md', 'v1'), item_id: 'plan' },
+        draft: { ...tracked('Draft.md', 'draft'), item_id: 'draft' }
+      }
+    })
+    const body = (contents: string) => upsert('x', contents).content!
+    const json = (status: number, payload: unknown) =>
+      new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } })
+    const requests: string[] = []
+    // Cloud's own answers, as the website sends them.
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input))
+      requests.push(`${init?.method ?? 'GET'} ${url.pathname}${url.search}`)
+      if (url.pathname === '/api/v1/vaults/vault/changes') {
+        const after = Number(url.searchParams.get('after'))
+        if (after < 30) {
+          return json(410, { error: {
+            code: 'CURSOR_EXPIRED',
+            message: 'This cursor is older than the retained change log. Rebuild this vault from its manifest.',
+            details: { pruned_through: 30, cursor: 40 }
+          } })
+        }
+        return json(200, { data: [], cursor: after, has_more: false })
+      }
+      if (url.pathname === '/api/v1/vaults/vault/manifest') {
+        const metadata = (id: string, relPath: string, revision: number, contents: string) => {
+          const { data: _data, encoding: _encoding, ...content } = body(contents)
+          return { item_id: id, path: relPath, kind: 'text', revision, ...content }
+        }
+        return json(200, {
+          data: [metadata('draft', 'Draft.md', 1, 'draft'), metadata('plan', 'Plan.md', 7, 'v7')],
+          cursor: 40,
+          next_page: null
+        })
+      }
+      if (url.pathname === '/api/v1/vaults/vault/items/plan/revisions/7') {
+        return json(200, { data: { item_id: 'plan', revision: 7, path: 'Plan.md', kind: 'text', deleted: false, content: body('v7') } })
+      }
+      if (url.pathname === '/api/v1/vaults/vault/mutations') {
+        const { mutations } = JSON.parse(String(init?.body))
+        return json(200, {
+          acknowledged: mutations.map((mutation: { operation_id: string; item_id: string }) => ({
+            operation_id: mutation.operation_id, item_id: mutation.item_id, revision: 2, sequence: 41
+          })),
+          conflicts: [],
+          cursor: 41
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    let operation = 0
+    const coordinator = new CloudSyncCoordinator(
+      'vault',
+      createCloudSyncClient('https://zennotes.test', 'token', fetchImplementation),
+      new DesktopCloudSyncRepository(root),
+      states,
+      { itemId: () => 'item-new', operationId: () => `operation-${++operation}` }
+    )
+
+    await expect(coordinator.sync()).resolves.toMatchObject({ pulled: 1, pushed: 1 })
+
+    expect(await readFile(path.join(root, 'Plan.md'), 'utf8')).toBe('v7')
+    expect(await readFile(path.join(root, 'Draft.md'), 'utf8')).toBe('draft, edited here')
+    expect(requests).toEqual([
+      'GET /api/v1/vaults/vault/changes?after=3&limit=250',
+      'GET /api/v1/vaults/vault/manifest?include_content=false&page=1&per_page=250',
+      'GET /api/v1/vaults/vault/items/plan/revisions/7',
+      'GET /api/v1/vaults/vault/changes?after=40&limit=250',
+      'POST /api/v1/vaults/vault/mutations',
+      'GET /api/v1/vaults/vault/changes?after=40&limit=250'
+    ])
   })
 })

@@ -133,7 +133,10 @@ describe('describeCloudError', () => {
     const copy = describeCloudError(
       serviceError('This cursor is older than the retained change log. Rebuild this vault from its manifest.', 410, 'CURSOR_EXPIRED')
     )
-    expect(copy.message).toBe(CLOUD_UNEXPECTED_ANSWER_MESSAGE)
+    // Sync catches up from the manifest by itself, so the words reassure
+    // instead of sending the person to Report an Issue.
+    expect(copy.message).toMatch(/catching up/)
+    expect(copy.message).not.toMatch(/Report an Issue|manifest/)
     expect(copy.detail).toContain('CURSOR_EXPIRED')
     expect(copy.detail).toContain('manifest')
   })

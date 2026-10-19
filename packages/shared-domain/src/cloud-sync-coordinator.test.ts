@@ -2732,3 +2732,254 @@ describe('CloudSyncCoordinator: decisions on queued conflicts', () => {
     ])
   })
 })
+
+/* ---------- A device away longer than Cloud keeps its change log ---------- */
+
+/** Cloud's answer to a cursor older than what is left of its change log. */
+function cursorExpired(): Error {
+  return Object.assign(
+    new Error('This cursor is older than the retained change log. Rebuild this vault from its manifest.'),
+    { name: 'CloudServiceRequestError', status: 410, code: 'CURSOR_EXPIRED', details: { pruned_through: 30, cursor: 40 } }
+  )
+}
+
+/** Cloud at cursor 40, with everything through 30 pruned from its log. */
+function prunedServer(
+  files: Array<[itemId: string, path: string, revision: number, data: string]>,
+  changes: CloudSyncChange[] = []
+): ReturnType<typeof remote> {
+  const server = remote({
+    manifest: {
+      data: files.map(([item_id, path, revision, data]) => {
+        const body = realContent(data)
+        return {
+          item_id, path, kind: 'text' as const, revision,
+          sha256: body.sha256, byte_length: body.byte_length, media_type: body.media_type,
+          content: body
+        }
+      }),
+      cursor: 40,
+      next_page: null
+    },
+    changes
+  })
+  const follow = server.changes.bind(server)
+  server.changes = vi.fn(async (vaultId: string, after: number, limit?: number) => {
+    if (after < 30) throw cursorExpired()
+    return follow(vaultId, after, limit)
+  })
+  return server
+}
+
+/** What sync last agreed on before this device went away, at cursor 3. */
+function awayState(...items: CloudSyncTrackedItem[]): CloudSyncState {
+  return { version: 1, vault_id: 'vault-1', cursor: 3, items: Object.fromEntries(items.map((item) => [item.item_id, item])) }
+}
+
+describe('CloudSyncCoordinator: a cursor older than the change log (CURSOR_EXPIRED)', () => {
+  it('catches up from the manifest when nothing changed on this device', async () => {
+    const fs = memoryFileSystem({ 'Plan.md': 'v1', 'Old.md': 'old', 'Trip.md': 'same' })
+    const states = memoryState(awayState(
+      tracked('plan', 'Plan.md', 1, 'v1'),
+      tracked('old', 'Old.md', 1, 'old'),
+      tracked('trip', 'Trip.md', 1, 'same')
+    ))
+    // Edited, deleted, moved and created elsewhere while this device was away.
+    const server = prunedServer(
+      [['plan', 'Plan.md', 7, 'v7'], ['trip', 'archive/Trip.md', 2, 'same'], ['new', 'New.md', 1, 'new']],
+      [upsert(41, 'later', 'Later.md', 'after the trip')]
+    )
+    const coordinator = new CloudSyncCoordinator('vault-1', server, new PortableCloudSyncRepository(fs), states, ids())
+
+    const result = await coordinator.sync()
+
+    expect(Object.fromEntries(fs.files)).toEqual({
+      'Plan.md': 'v7',
+      'archive/Trip.md': 'same',
+      'New.md': 'new',
+      'Later.md': 'after the trip'
+    })
+    expect(server.mutations).toEqual([])
+    expect(result).toMatchObject({ pulled: 5, pushed: 0, localConflicts: [], pendingConflicts: [] })
+    // Then it follows the log again from the manifest's cursor.
+    expect(states.current?.cursor).toBe(41)
+    expect(states.current?.items).toEqual({
+      plan: tracked('plan', 'Plan.md', 7, 'v7'),
+      trip: tracked('trip', 'archive/Trip.md', 2, 'same'),
+      new: tracked('new', 'New.md', 1, 'new'),
+      later: tracked('later', 'Later.md', 41, 'after the trip')
+    })
+    await expect(coordinator.sync()).resolves.toMatchObject({ pulled: 0, pushed: 0 })
+  })
+
+  it('pushes edits made while away and never overwrites one Cloud also changed', async () => {
+    // Plan.md was edited here, Gone.md deleted here, Fresh.md created here.
+    // Notes.md was edited on both sides.
+    const fs = memoryFileSystem({ 'Plan.md': 'mine', 'Notes.md': 'notes, edited here', 'Fresh.md': 'fresh' })
+    const states = memoryState(awayState(
+      tracked('plan', 'Plan.md', 1, 'v1'),
+      tracked('notes', 'Notes.md', 1, 'notes'),
+      tracked('gone', 'Gone.md', 1, 'gone')
+    ))
+    const server = prunedServer([
+      ['plan', 'Plan.md', 1, 'v1'],
+      ['notes', 'Notes.md', 5, 'notes, edited in Cloud'],
+      ['gone', 'Gone.md', 1, 'gone']
+    ])
+
+    const result = await new CloudSyncCoordinator(
+      'vault-1', server, new PortableCloudSyncRepository(fs), states, ids()
+    ).sync()
+
+    expect(Object.fromEntries(fs.files)).toEqual({
+      'Plan.md': 'mine',
+      'Notes.md': 'notes, edited here',
+      'Fresh.md': 'fresh'
+    })
+    expect(server.mutations.flatMap((request) => request.mutations)).toEqual([
+      expect.objectContaining({ type: 'delete', item_id: 'gone', base_revision: 1 }),
+      expect.objectContaining({ type: 'upsert', item_id: 'plan', base_revision: 1, path: 'Plan.md', content: realContent('mine') }),
+      expect.objectContaining({ type: 'upsert', base_revision: null, path: 'Fresh.md', content: realContent('fresh') })
+    ])
+    expect(result.localConflicts).toEqual([])
+    expect(result.pendingConflicts).toEqual([
+      expect.objectContaining({ item_id: 'notes', kind: 'content', path: 'Notes.md' })
+    ])
+    expect(states.current?.pending_conflicts?.notes).toMatchObject({
+      base: { path: 'Notes.md', revision: 1 },
+      local: { path: 'Notes.md', content: realContent('notes, edited here') },
+      cloud: { path: 'Notes.md', revision: 5, content: realContent('notes, edited in Cloud') }
+    })
+    expect(states.current?.cursor).toBe(40)
+  })
+
+  it('keeps a file edited here that Cloud deleted, and asks', async () => {
+    const fs = memoryFileSystem({ 'Plan.md': 'mine' })
+    const states = memoryState(awayState(tracked('plan', 'Plan.md', 2, 'v2')))
+    const server = prunedServer([])
+    const coordinator = new CloudSyncCoordinator('vault-1', server, new PortableCloudSyncRepository(fs), states, ids())
+
+    const result = await coordinator.sync()
+
+    expect(fs.files.get('Plan.md')).toBe('mine')
+    expect(server.mutations).toEqual([])
+    expect(result.pendingConflicts).toEqual([
+      expect.objectContaining({ item_id: 'plan', kind: 'delete', path: 'Plan.md', cloud_path: null })
+    ])
+    // The manifest lists only live files, so the revision that deleted it is unknown.
+    expect(states.current?.pending_conflicts?.plan?.cloud).toMatchObject({ path: null, revision: null })
+    expect(states.current?.items).toEqual({})
+
+    const details = await coordinator.getConflict('plan')
+    expect(details.cloud).toMatchObject({ deleted: true, revision: null })
+    await coordinator.resolveConflict({
+      conflict_id: 'plan',
+      choice: 'local',
+      expected_local_sha256: details.local.sha256,
+      expected_cloud_revision: details.cloud.revision
+    })
+
+    // With no revision of the deleted file to build on, this device's version
+    // goes back to Cloud as a new file.
+    expect(server.mutations.flatMap((request) => request.mutations)).toEqual([
+      expect.objectContaining({ type: 'upsert', item_id: 'item-local-1', base_revision: null, path: 'Plan.md', content: realContent('mine') })
+    ])
+    expect(fs.files.get('Plan.md')).toBe('mine')
+    expect(states.current?.pending_conflicts).toEqual({})
+    expect(states.current?.items['item-local-1']).toMatchObject({ path: 'Plan.md', sha256: realContent('mine').sha256 })
+  })
+
+  it('removes the file when the person accepts a delete it found while away', async () => {
+    const fs = memoryFileSystem({ 'Plan.md': 'mine' })
+    const states = memoryState(awayState(tracked('plan', 'Plan.md', 2, 'v2')))
+    const server = prunedServer([])
+    const coordinator = new CloudSyncCoordinator('vault-1', server, new PortableCloudSyncRepository(fs), states, ids())
+    await coordinator.sync()
+
+    await coordinator.resolveConflict({
+      conflict_id: 'plan',
+      choice: 'cloud',
+      expected_local_sha256: realContent('mine').sha256,
+      expected_cloud_revision: null
+    })
+
+    expect(fs.files.has('Plan.md')).toBe(false)
+    expect(server.mutations).toEqual([])
+    expect(states.current?.pending_conflicts).toEqual({})
+  })
+
+  it('moves a decision queued before the trip to the Cloud version it now faces', async () => {
+    const fs = memoryFileSystem({ 'Plan.md': 'mine' })
+    const states = memoryState({
+      ...awayState(tracked('plan', 'Plan.md', 2, 'v2')),
+      pending_conflicts: {
+        plan: {
+          id: 'plan',
+          item_id: 'plan',
+          kind: 'content',
+          sequence: 3,
+          base: { path: 'Plan.md', revision: 1, kind: 'text', content: realContent('v1') },
+          local: { path: 'Plan.md', revision: null, kind: 'text', content: realContent('mine') },
+          cloud: { path: 'Plan.md', revision: 2, kind: 'text', content: realContent('v2') }
+        }
+      }
+    })
+    const server = prunedServer([['plan', 'Plan.md', 9, 'v9']])
+
+    const result = await new CloudSyncCoordinator(
+      'vault-1', server, new PortableCloudSyncRepository(fs), states, ids()
+    ).sync()
+
+    expect(fs.files.get('Plan.md')).toBe('mine')
+    expect(server.mutations).toEqual([])
+    expect(result.pendingConflicts).toHaveLength(1)
+    expect(states.current?.pending_conflicts?.plan?.cloud).toMatchObject({ revision: 9, content: realContent('v9') })
+    expect(states.current?.items.plan).toEqual(tracked('plan', 'Plan.md', 9, 'v9'))
+  })
+
+  it('lands a file Cloud re-created at a path whose old file it deleted', async () => {
+    // Plan.md was deleted elsewhere and a new Plan.md with the same words
+    // made in its place. The delete must not take the new note with it.
+    const fs = memoryFileSystem({ 'Plan.md': 'same words' })
+    const states = memoryState(awayState(tracked('old-plan', 'Plan.md', 1, 'same words')))
+    const server = prunedServer([['new-plan', 'Plan.md', 1, 'same words']])
+
+    const result = await new CloudSyncCoordinator(
+      'vault-1', server, new PortableCloudSyncRepository(fs), states, ids()
+    ).sync()
+
+    expect(Object.fromEntries(fs.files)).toEqual({ 'Plan.md': 'same words' })
+    expect(server.mutations).toEqual([])
+    expect(result).toMatchObject({ pulled: 2, pendingConflicts: [] })
+    expect(states.current?.items).toEqual({ 'new-plan': tracked('new-plan', 'Plan.md', 1, 'same words') })
+  })
+
+  it('keeps what landed when a file fails midway, so a retry does not redo it (#813)', async () => {
+    const fs = memoryFileSystem({ 'A.md': 'a1', 'B.md': 'b1' })
+    const writeText = fs.writeText
+    fs.writeText = async (path, value) => {
+      if (path === 'B.md') throw new Error('disk full')
+      await writeText(path, value)
+    }
+    const states = memoryState(awayState(tracked('a', 'A.md', 1, 'a1'), tracked('b', 'B.md', 1, 'b1')))
+    const server = prunedServer([['a', 'A.md', 4, 'a4'], ['b', 'B.md', 4, 'b4']])
+    const coordinator = new CloudSyncCoordinator('vault-1', server, new PortableCloudSyncRepository(fs), states, ids())
+
+    await expect(coordinator.sync()).rejects.toThrow('disk full')
+    expect(fs.files.get('A.md')).toBe('a4')
+    expect(states.current?.cursor).toBe(3)
+    expect(states.current?.items.a).toEqual(tracked('a', 'A.md', 4, 'a4'))
+    expect(states.current?.items.b).toEqual(tracked('b', 'B.md', 1, 'b1'))
+
+    // The person deletes A.md before the retry: it stays deleted.
+    fs.files.delete('A.md')
+    fs.writeText = writeText
+    await coordinator.sync()
+
+    expect(Object.fromEntries(fs.files)).toEqual({ 'B.md': 'b4' })
+    expect(server.mutations.flatMap((request) => request.mutations)).toEqual([
+      expect.objectContaining({ type: 'delete', item_id: 'a', base_revision: 4 })
+    ])
+    expect(states.current?.cursor).toBe(40)
+  })
+})

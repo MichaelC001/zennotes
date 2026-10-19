@@ -778,3 +778,28 @@ describe('CloudSyncHostService vault replaced by an encrypted one', () => {
     expect(isCloudVaultSuperseded(null)).toBe(false)
   })
 })
+
+describe('CloudSyncHostService back after Cloud pruned its change log', () => {
+  const remoteVault: CloudSyncVault = {
+    id: 'vault-1', name: 'Notes', cursor: 0,
+    created_at: '2026-10-13T12:00:00.000Z', updated_at: '2026-10-13T12:00:00.000Z'
+  }
+
+  it('keeps the link and catches up from the manifest on a 410 CURSOR_EXPIRED', async () => {
+    const { service, client, persistence, hostVault, retiredStates } = setup([remoteVault])
+    await service.link(hostVault, remoteVault.id)
+    await service.sync(hostVault)
+    client.changes.mockRejectedValueOnce(Object.assign(
+      new Error('This cursor is older than the retained change log. Rebuild this vault from its manifest.'),
+      { name: 'CloudServiceRequestError', status: 410, code: 'CURSOR_EXPIRED', details: { pruned_through: 30, cursor: 40 } }
+    ))
+    client.manifest.mockResolvedValue({ data: [], cursor: 40, next_page: null })
+
+    await expect(service.sync(hostVault)).resolves.toMatchObject({ cursor: 40, pending_conflicts: [] })
+
+    expect(await service.linkedVault(hostVault)).not.toBeNull()
+    expect(retiredStates).toEqual([])
+    const state = await persistence.loadState(hostVault.key, 'https://zennotes.org', remoteVault.id)
+    expect((state as CloudSyncState).cursor).toBe(40)
+  })
+})
