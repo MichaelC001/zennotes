@@ -3278,10 +3278,10 @@ export function SettingsModal(): JSX.Element {
                   onChange={setWorkflowEventTriggers}
                 />
                 <div
-                  className="flex items-center justify-between gap-5 px-5 py-4"
+                  className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 px-5 py-4"
                   {...settingsSearchTargetProps("workflow-tutorial")}
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1 basis-56">
                     <div className="text-sm font-medium text-ink-900">
                       Guided tutorial
                     </div>
@@ -3314,10 +3314,10 @@ export function SettingsModal(): JSX.Element {
                         : `${hidden} of ${total} recipes are hidden from the recipe gallery, behind New workflow (press x on a recipe there to hide one at a time).`;
                   return (
                     <div
-                      className="flex items-center justify-between gap-5 px-5 py-4"
+                      className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 px-5 py-4"
                       {...settingsSearchTargetProps("workflow-hidden-recipes")}
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1 basis-56">
                         <div className="text-sm font-medium text-ink-900">
                           Built-in recipes
                         </div>
@@ -3325,7 +3325,7 @@ export function SettingsModal(): JSX.Element {
                           {copy}
                         </div>
                       </div>
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex max-w-full flex-wrap items-center gap-2">
                         <Button
                           size="sm"
                           disabled={hidden === total}
@@ -4883,10 +4883,10 @@ export function SettingsModal(): JSX.Element {
                       }
                     />
                     <div
-                      className="flex items-center justify-between gap-4 px-5 py-4"
+                      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-4"
                       {...settingsSearchTargetProps("open-todays-daily-note")}
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1 basis-56">
                         <div className="text-sm font-medium text-ink-900">
                           Open today's daily note
                         </div>
@@ -5037,10 +5037,10 @@ export function SettingsModal(): JSX.Element {
                       }
                     />
                     <div
-                      className="flex items-center justify-between gap-4 px-5 py-4"
+                      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-4"
                       {...settingsSearchTargetProps("open-this-week-note")}
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1 basis-56">
                         <div className="text-sm font-medium text-ink-900">
                           Open this week's note
                         </div>
@@ -5222,10 +5222,10 @@ export function SettingsModal(): JSX.Element {
                       }
                     />
                     <div
-                      className="flex items-center justify-between gap-4 px-5 py-4"
+                      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-4"
                       {...settingsSearchTargetProps("open-this-month-note")}
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1 basis-56">
                         <div className="text-sm font-medium text-ink-900">
                           Open this month's note
                         </div>
@@ -5442,10 +5442,10 @@ export function SettingsModal(): JSX.Element {
           >
             {supportsCustomTemplates ? (
               <div
-                className="flex items-center justify-between gap-4 px-5 py-4"
+                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-4"
                 {...settingsSearchTargetProps("templates-new")}
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1 basis-56">
                   <div className="text-sm font-medium text-ink-900">
                     Create a custom template
                   </div>
@@ -5472,8 +5472,8 @@ export function SettingsModal(): JSX.Element {
                 ; built-in templates still work here.
               </InlineNote>
             )}
-            <div className="flex items-center justify-between gap-4 border-t border-paper-300/40 px-5 py-4">
-              <div className="min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-paper-300/40 px-5 py-4">
+              <div className="min-w-0 flex-1 basis-56">
                 <div className="text-sm font-medium text-ink-900">
                   {hideBuiltinTemplates
                     ? "Built-in templates are hidden"
@@ -5499,9 +5499,9 @@ export function SettingsModal(): JSX.Element {
             {allTemplates.map((template) => (
               <div
                 key={template.id}
-                className="flex items-center justify-between gap-4 px-5 py-3"
+                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-3"
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1 basis-56">
                   <div className="text-sm font-medium text-ink-900">
                     {template.name}
                   </div>
@@ -5510,7 +5510,7 @@ export function SettingsModal(): JSX.Element {
                     {template.description ? ` · ${template.description}` : ""}
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex max-w-full flex-wrap items-center gap-2">
                   {template.builtin && (
                     <span className="rounded-md bg-paper-200 px-2 py-1 text-xs uppercase tracking-wide text-ink-400">
                       Built-in
@@ -6244,12 +6244,12 @@ function KeymapSettings({
                 work.
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex max-w-full flex-wrap items-center gap-2">
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Filter keymaps…"
-                className="w-72 rounded-xl border border-paper-300/70 bg-paper-100/80 px-4 py-2.5 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent/45"
+                className="w-72 max-w-full rounded-xl border border-paper-300/70 bg-paper-100/80 px-4 py-2.5 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent/45"
               />
               <button
                 type="button"
@@ -6287,12 +6287,14 @@ function KeymapSettings({
                   const inactive =
                     (definition.vimOnly && !vimMode) ||
                     (definition.nonVimOnly && vimMode);
+                  // The binding and its buttons wrap under the title on a
+                  // narrow pane instead of squeezing it to a word per line.
                   return (
                     <div
                       key={definition.id}
-                      className="flex items-center justify-between gap-4 px-5 py-4"
+                      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-4"
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1 basis-56">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <span className="text-sm font-medium text-ink-900">
                             {definition.title}
@@ -6320,7 +6322,7 @@ function KeymapSettings({
                           {definition.description}
                         </div>
                       </div>
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex max-w-full flex-wrap items-center gap-2">
                         <span
                           className={[
                             "rounded-xl border px-3 py-1.5 text-xs font-medium",
@@ -6986,10 +6988,10 @@ function DateNotePatternResetRow({
         : DEFAULT_MONTHLY_NOTE_LOCALE;
   return (
     <div
-      className="flex items-center justify-between gap-4 px-5 py-4"
+      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-4"
       {...settingsSearchTargetProps(settingId)}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1 basis-56">
         <div className="text-sm font-medium text-ink-900">
           Reset to defaults
         </div>
