@@ -17,6 +17,7 @@ import {
   registerHalfPageMotion,
 } from "../lib/cm-vim-half-page-motion";
 import { registerHeadingMotion } from "../lib/cm-vim-heading-motion";
+import { registerOpenLineContinuation } from "../lib/cm-vim-open-line";
 import { registerReflowOperator } from "../lib/cm-vim-reflow";
 import {
   harperAddWordAtCursor,
@@ -88,7 +89,6 @@ import {
   selectActiveBuffer,
 } from "../lib/buffer-navigation";
 import { applyVimInsertEscape } from "../lib/vim-insert-escape";
-import { listContinuationPrefix } from "../lib/list-continuation";
 import { focusEditorNormalMode } from "../lib/editor-focus";
 import { toVimSequence } from "../lib/vim-key-sequence";
 import { registerNoteMoveExCommands } from "../lib/vim-ex-commands";
@@ -506,65 +506,7 @@ function registerVimCommands(): void {
     { context: "visual" },
   );
 
-  // #320: opening a line with o/O on a list item carries the marker forward —
-  // like pressing Enter — so bullets repeat, ordered numbers advance (the
-  // renumber pass fixes the exact value for both o and O), indentation is
-  // preserved, and a checkbox continues as a fresh unchecked box. Non-list lines
-  // fall back to Vim's built-in open-line. The handler runs as `actions[name]`,
-  // so `this` is Vim's action table — reuse its open-line + insert-mode entry.
-  type VimActionTable = {
-    newLineAndEnterInsertMode: (
-      cm: unknown,
-      args: unknown,
-      vim: unknown,
-    ) => void;
-    enterInsertMode: (cm: unknown, args: unknown, vim: unknown) => void;
-  };
-  Vim.defineAction("zenOpenLineContinuingList", function (
-    this: VimActionTable,
-    cm: ReturnType<typeof getCM>,
-    actionArgs: { after?: boolean; repeat?: number },
-    vim: { insertMode?: boolean },
-  ) {
-    const view = (cm as unknown as { cm6?: EditorView }).cm6;
-    const prefix = view
-      ? listContinuationPrefix(
-          view.state.doc.lineAt(view.state.selection.main.head).text,
-        )
-      : null;
-    if (!view || prefix == null) {
-      this.newLineAndEnterInsertMode(cm, actionArgs, vim);
-      return;
-    }
-    const line = view.state.doc.lineAt(view.state.selection.main.head);
-    vim.insertMode = true;
-    if (actionArgs.after) {
-      view.dispatch({
-        changes: { from: line.to, insert: `\n${prefix}` },
-        selection: { anchor: line.to + 1 + prefix.length },
-      });
-    } else {
-      view.dispatch({
-        changes: { from: line.from, insert: `${prefix}\n` },
-        selection: { anchor: line.from + prefix.length },
-      });
-    }
-    this.enterInsertMode(cm, { repeat: actionArgs.repeat }, vim);
-  } as unknown as Parameters<typeof Vim.defineAction>[1]);
-  Vim.mapCommand(
-    "o",
-    "action",
-    "zenOpenLineContinuingList",
-    { after: true },
-    { context: "normal", isEdit: true, interlaceInsertRepeat: true },
-  );
-  Vim.mapCommand(
-    "O",
-    "action",
-    "zenOpenLineContinuingList",
-    { after: false },
-    { context: "normal", isEdit: true, interlaceInsertRepeat: true },
-  );
+  registerOpenLineContinuation();
 
   // #290/#312: make j/k move by display line through soft-wrapped content.
   // Shared with the Quick Note window (QuickCaptureApp) via the same helper.

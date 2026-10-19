@@ -1,6 +1,12 @@
 import { syntaxTree } from '@codemirror/language'
-import { EditorSelection, countColumn, type Line } from '@codemirror/state'
-import type { EditorView } from '@codemirror/view'
+import {
+  EditorSelection,
+  countColumn,
+  type EditorState,
+  type Line,
+  type StateCommand,
+  type Transaction
+} from '@codemirror/state'
 import type { SyntaxNode } from '@lezer/common'
 import { hasPendingMarkdownBlockSnippet } from './cm-markdown-snippets'
 
@@ -24,9 +30,11 @@ import { hasPendingMarkdownBlockSnippet } from './cm-markdown-snippets'
  *
  * The one exception is a fence inside a quote or callout: there the content
  * and closing lines are taken over too (see `continueQuotedFenceLine`).
+ *
+ * A state command, not a view one: Vim's `o`/`O` run it on a scratch state to
+ * read the prefix Enter would give a quoted line (`quotedOpenLinePrefix`).
  */
-export function insertNewlineContinueFencedCodeIndent(view: EditorView): boolean {
-  const { state } = view
+export const insertNewlineContinueFencedCodeIndent: StateCommand = ({ state, dispatch }) => {
   const range = state.selection.main
   if (!range.empty) return false
 
@@ -46,7 +54,7 @@ export function insertNewlineContinueFencedCodeIndent(view: EditorView): boolean
   // Past the opener, content lines already copy their own leading whitespace
   // correctly, unless the fence is in a quote.
   if (fenceLine.number !== caretLine.number) {
-    return continueQuotedFenceLine(view, node, prefix, caretLine)
+    return continueQuotedFenceLine(state, dispatch, node, prefix, caretLine)
   }
 
   // Whitespace-only (or empty) indent is already handled by the default
@@ -54,12 +62,14 @@ export function insertNewlineContinueFencedCodeIndent(view: EditorView): boolean
   if (!/\S/.test(prefix)) return false
 
   const insert = state.lineBreak + fenceContinuationPrefix(prefix)
-  view.dispatch(
-    state.changeByRange((r) => ({
-      changes: { from: r.from, to: r.to, insert },
-      range: EditorSelection.cursor(r.from + insert.length)
-    })),
-    { scrollIntoView: true, userEvent: 'input' }
+  dispatch(
+    state.update(
+      state.changeByRange((r) => ({
+        changes: { from: r.from, to: r.to, insert },
+        range: EditorSelection.cursor(r.from + insert.length)
+      })),
+      { scrollIntoView: true, userEvent: 'input' }
+    )
   )
   return true
 }
@@ -90,12 +100,12 @@ function fenceContinuationPrefix(openerPrefix: string): string {
  * applied: it measures columns from a line start that holds the `>`.
  */
 function continueQuotedFenceLine(
-  view: EditorView,
+  state: EditorState,
+  dispatch: (tr: Transaction) => void,
   fence: SyntaxNode,
   openerPrefix: string,
   line: Line
 ): boolean {
-  const { state } = view
   if (!openerPrefix.includes('>') || state.selection.ranges.length > 1) return false
   const head = state.selection.main.head
 
@@ -120,11 +130,13 @@ function continueQuotedFenceLine(
   let to = head
   while (to < line.to && /[\t ]/.test(line.text[to - line.from])) to++
   const from = /\S/.test(state.sliceDoc(markupEnd, head)) ? head : markupEnd
-  view.dispatch({
-    changes: { from, to, insert },
-    selection: EditorSelection.cursor(from + insert.length),
-    scrollIntoView: true,
-    userEvent: 'input'
-  })
+  dispatch(
+    state.update({
+      changes: { from, to, insert },
+      selection: EditorSelection.cursor(from + insert.length),
+      scrollIntoView: true,
+      userEvent: 'input'
+    })
+  )
   return true
 }
