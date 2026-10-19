@@ -87,8 +87,6 @@ const deferredNormalFlowChunkPatterns = [
   /^Preview-/,
   /^NoteHoverPreview-/,
   /^wardley-/,
-  /^vendor-markdown-/,
-  /^vendor-highlight-/,
   /^vendor-d3-/,
   // Pele draws mermaid fences; its runtime chunk loads before any diagram type.
   /^pele-runtime-/,
@@ -100,6 +98,18 @@ const deferredNormalFlowChunkPatterns = [
   /^vendor-jsxgraph-/,
   /^vendor-function-plot-/
 ]
+// The markdown stack is the editor's, so it loads in the normal flow but must
+// never be fetched before the app first renders. The live preview draws table
+// cells (cm-table's renderInlineCell, #559) and comment bodies (CommentsPanel)
+// through renderMarkdown, and formulas through KaTeX (cm-math-render,
+// cm-latex-completions), all synchronously in a widget's toDOM or a render, so
+// both chunks sit in the Editor chunk's static graph, and App warms that module
+// during boot (renderer.workspace.ready waits for it). Deferring them would
+// paint raw source for a frame on the first table, formula or comment. Fetched
+// before the app mounts, though, they are in the ENTRY's static graph, ahead of
+// first paint, the way a manualChunks rule once hoisted mermaid there and
+// brought vendor-markdown along (e7a9879e).
+const editorChunkPatterns = [/^vendor-markdown-/, /^vendor-highlight-/]
 
 function parsePositiveInt(raw, fallback) {
   const parsed = Number.parseInt(raw ?? '', 10)
@@ -609,10 +619,31 @@ function budgetStatus(label, actual, budget) {
   }
 }
 
-function findDeferredNormalFlowChunks(scripts) {
-  return scripts.filter((script) =>
-    deferredNormalFlowChunkPatterns.some((pattern) => pattern.test(script))
-  )
+function matchingChunks(scripts, patterns) {
+  return scripts.filter((script) => patterns.some((pattern) => pattern.test(script)))
+}
+
+// Scripts the reloaded document asked for before App's first render. Only the
+// entry's static graph and the HTML's own modulepreloads can be that early:
+// App's first dynamic import waits for an effect. Timed from the CDP request's
+// wallTime because the renderer loads over file://, which Resource Timing never
+// records. Null when the app has no renderer.app.mounted sample (an older
+// ZEN_PERF_DESKTOP_APP_PATH build) or when the entry chunk itself falls outside
+// the window, which means the two clocks do not line up. Either way the guard
+// cannot run, so the report says unavailable instead of printing an empty list
+// that looks like a pass, and ZEN_PERF_ENFORCE fails the run.
+function scriptsRequestedBeforeMount(requests, timeOrigin, appMountedSample) {
+  const mount = sampleWindow(appMountedSample, timeOrigin)
+  if (!mount || typeof timeOrigin !== 'number') return null
+  const mountedAt = timeOrigin + mount.start
+  const scripts = [
+    ...new Set(
+      requests
+        .filter((request) => request.wallTimeMs >= timeOrigin && request.wallTimeMs < mountedAt)
+        .map((request) => request.script)
+    )
+  ]
+  return scripts.some((script) => /^index-/.test(script)) ? scripts : null
 }
 
 function printMetric(label, value, suffix = 'ms') {
@@ -686,9 +717,12 @@ async function main() {
         consoleMessages.push({ type: event.type, text })
       }
     })
+    const networkScriptRequests = []
     client.on('Network.requestWillBeSent', (event) => {
       const script = scriptNameFromUrl(event.request?.url ?? '')
-      if (script) networkScripts.push(script)
+      if (!script) return
+      networkScripts.push(script)
+      networkScriptRequests.push({ script, wallTimeMs: (event.wallTime ?? 0) * 1000 })
     })
 
     await Promise.all([
@@ -747,6 +781,7 @@ async function main() {
           refreshApply: samples.find((sample) => sample.name === 'store.refreshNotes.apply') ?? null,
           workspaceRestore: samples.find((sample) => sample.name.startsWith('workspace.restore')) ?? null,
           samples,
+          timeOrigin: performance.timeOrigin,
           rowCounts: rowCounts(),
           nav: nav ? {
             domContentLoaded: Math.round(nav.domContentLoadedEventEnd * 100) / 100,
@@ -1055,7 +1090,13 @@ async function main() {
     const mainListNotes = mainPerfSamples.find((sample) => sample.name === 'main.vault.listNotes') ?? null
     const longTaskSummary = summarizeLongTasks(finalSnapshot.longTasks)
     const loadedScripts = [...new Set([...finalSnapshot.scripts, ...networkScripts])]
-    const deferredNormalFlowChunks = findDeferredNormalFlowChunks(loadedScripts)
+    const deferredNormalFlowChunks = matchingChunks(loadedScripts, deferredNormalFlowChunkPatterns)
+    const scriptsBeforeMount = scriptsRequestedBeforeMount(
+      networkScriptRequests,
+      startup.timeOrigin,
+      startup.appMounted
+    )
+    const editorChunksBeforeMount = matchingChunks(scriptsBeforeMount ?? [], editorChunkPatterns)
     const statuses = [
       ...(mainReady ? [budgetStatus('main ready-to-show', mainReady.durationMs, budgets.mainReadyMs)] : []),
       budgetStatus('renderer workspace ready', startup.ready.durationMs, budgets.rendererReadyMs),
@@ -1186,6 +1227,21 @@ async function main() {
       }
     }
 
+    if (scriptsBeforeMount === null) {
+      console.log('\nJS chunks fetched before the app mounted: unavailable')
+    } else {
+      console.log('\nJS chunks fetched before the app mounted')
+      for (const script of scriptsBeforeMount) {
+        console.log(`- ${script}`)
+      }
+    }
+    if (editorChunksBeforeMount.length > 0) {
+      console.log('\nEditor chunks fetched before the app mounted')
+      for (const script of editorChunksBeforeMount) {
+        console.log(`- ${script}`)
+      }
+    }
+
     const failed = statuses.filter((status) => !status.ok)
     if (failed.length > 0) {
       console.log('\nBudget warnings')
@@ -1219,6 +1275,16 @@ async function main() {
     // being usable for measuring.
     if (enforceDeferredChunks && deferredNormalFlowChunks.length > 0) {
       throw new Error('Desktop runtime benchmark loaded deferred-heavy chunks during normal flow')
+    }
+    if (enforceDeferredChunks && scriptsBeforeMount === null) {
+      throw new Error(
+        startup.appMounted
+          ? 'Desktop runtime benchmark could not time chunk fetches against the app mount (the entry chunk fell outside the before-mount window); the before-mount guard cannot run'
+          : 'Desktop runtime benchmark could not time chunk fetches against the app mount (no renderer.app.mounted sample); the before-mount guard cannot run'
+      )
+    }
+    if (enforceDeferredChunks && editorChunksBeforeMount.length > 0) {
+      throw new Error('Desktop runtime benchmark fetched editor chunks before the app mounted')
     }
     if (enforceBudgets && failed.length > 0) {
       throw new Error('Desktop runtime benchmark exceeded enforced budgets')
