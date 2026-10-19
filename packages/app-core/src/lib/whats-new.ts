@@ -40,6 +40,27 @@ export const CLOUD_ANNOUNCEMENT = {
 
 export const WHATS_NEW: readonly WhatsNewEntry[] = [
   {
+    version: '2.72.0',
+    highlights: [
+      {
+        title: 'Task folders',
+        body: 'Choose where tasks live: right-click a folder and pick Use as Task Folder, and only the notes in your Task folders feed Tasks, the boards and the calendars. Every other checkbox stays a plain checkbox. Both folder lists are under Settings → Tasks → Checklists.'
+      },
+      {
+        title: 'Cloud errors you can act on',
+        body: 'When Cloud has a problem, it now says what happened, whether it was on Cloud’s side or yours, and what to do. The technical line is under Details in Settings → Cloud, with Copy details and Report an Issue.'
+      },
+      {
+        title: 'Back after months away',
+        body: 'A device that last synced longer ago than Cloud keeps its change log now catches up by itself, keeping the edits you made while it was away and asking about anything changed on both sides.'
+      },
+      {
+        title: 'Pickers and callouts',
+        body: 'The sidebar’s icon and color pickers move with the arrow keys, and h j k l with Vim on. A math or code block you open inside a callout keeps every line in the callout.'
+      }
+    ]
+  },
+  {
     version: '2.71.0',
     highlights: [
       {
