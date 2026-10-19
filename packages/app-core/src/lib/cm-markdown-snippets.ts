@@ -52,13 +52,18 @@ const markdownSnippetRulesFacet = Facet.define<
 // Leading whitespace plus any list/blockquote markers, i.e. everything before a
 // fence's own column. Lets a block open inside a list item or quote (`- ```bash`,
 // `> $$`) and lets its auto-inserted lines align to the fence column. (#405)
-const BLOCK_INDENT_PREFIX_RE = /^[\t ]*(?:(?:[-+*]|\d{1,9}[.)])[\t ]+|>[\t ]?)*/
+// A quote marker may be followed by more than one space: a list item's
+// continuation inside a callout (`>   $$`) opens a block too (#961).
+const BLOCK_INDENT_PREFIX_RE = /^[\t ]*(?:(?:[-+*]|\d{1,9}[.)])[\t ]+|>[\t ]*)*/
 
-/** The whitespace to align a block's continuation lines to its fence column:
- *  the leading indent kept as-is, any list/quote marker turned into spaces. */
-function blockIndentFor(lineText: string): string {
+/** What a block's continuation lines start with, so they line up with its
+ *  fence column: the leading indent kept as-is and any list marker turned into
+ *  spaces, the item's continuation indent. A quote marker is kept: a line
+ *  without its `>` leaves the quote (or callout), and the body and closing
+ *  fence fell out of it with nothing to render (#961). */
+function blockContinuationPrefix(lineText: string): string {
   const prefix = lineText.match(BLOCK_INDENT_PREFIX_RE)?.[0] ?? ''
-  return prefix.replace(/[^\t ]/g, ' ')
+  return prefix.replace(/[^\t >]/g, ' ')
 }
 
 function isBlockOpenerLine(rule: MarkdownSnippetRule, text: string): boolean {
@@ -163,12 +168,13 @@ function blockSnippetTransaction(
   // legitimate case (#718).
   if (isInsideCode(state, selection.head, line.number)) return null
 
-  // Align to the fence column so a block opened inside a list item keeps its
-  // content and closing fence inside the item instead of escaping to col 0 (#405).
-  const indent = blockIndentFor(line.text)
+  // Align to the fence column so a block opened inside a list item or a quote
+  // keeps its content and closing fence inside it instead of escaping to
+  // col 0 (#405, #961).
+  const prefix = blockContinuationPrefix(line.text)
 
-  const insert = `${line.text}\n${indent}\n${indent}${rule.close}`
-  const cursor = line.from + line.text.length + 1 + indent.length
+  const insert = `${line.text}\n${prefix}\n${prefix}${rule.close}`
+  const cursor = line.from + line.text.length + 1 + prefix.length
   return {
     changes: { from: line.from, to: line.to, insert },
     selection: { anchor: cursor }

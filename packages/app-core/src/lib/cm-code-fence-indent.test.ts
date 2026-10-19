@@ -17,11 +17,14 @@ function mount(doc: string, withSnippets = true): EditorView {
   const view = new EditorView({
     state: EditorState.create({
       doc,
+      // In EditorPane's order: the snippets ahead of the markdown keymap, both
+      // Prec.high, so `$$` + Enter auto-closes before the markdown command can
+      // continue a list or quote (#961).
       extensions: [
+        ...(withSnippets ? [markdownSnippetExtension()] : []),
         vim(),
         markdown({ base: markdownLanguage, addKeymap: false }),
         vimAwareMarkdownKeymap,
-        ...(withSnippets ? [markdownSnippetExtension()] : []),
         keymap.of([...vimAwareDefaultKeymap(true)])
       ]
     }),
@@ -88,5 +91,39 @@ describe('fenced code Enter indentation in lists (#405)', () => {
     view.dispatch({ selection: { anchor: 9 } }) // stay in normal mode
     press(view, 'Enter', 13)
     expect(view.state.doc.toString()).toBe('- ```bash')
+  })
+})
+
+// #961: in a quote or callout the quote marker carries onto the new lines.
+describe('block Enter inside quotes and callouts (#961)', () => {
+  it('auto-closes a math block typed in a callout, every line quoted', () => {
+    const view = mount('> [!note] Note heading\n> ')
+    press(view, 'G', 71) // last line
+    press(view, 'A', 65)
+    typeInput(view, '$$')
+    press(view, 'Enter', 13)
+    expect(view.state.doc.toString()).toBe('> [!note] Note heading\n> $$\n> \n> $$')
+  })
+
+  it('auto-closes a fence typed in a quote, every line quoted', () => {
+    const view = mount('> ')
+    press(view, 'A', 65)
+    typeInput(view, '```js')
+    press(view, 'Enter', 13)
+    expect(view.state.doc.toString()).toBe('> ```js\n> \n> ```')
+  })
+
+  it('keeps the quote on Enter at an existing quoted fence opener (fallback)', () => {
+    const view = mount('> ```js')
+    press(view, 'A', 65)
+    press(view, 'Enter', 13)
+    expect(view.state.doc.toString()).toBe('> ```js\n> ')
+  })
+
+  it('keeps the quote and turns the list marker to spaces for a fence in a quoted item', () => {
+    const view = mount('> - ```js')
+    press(view, 'A', 65)
+    press(view, 'Enter', 13)
+    expect(view.state.doc.toString()).toBe('> - ```js\n>   ')
   })
 })

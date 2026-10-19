@@ -233,6 +233,61 @@ describe('block snippets inside list items (#405)', () => {
   })
 })
 
+// #961: inside a quote or callout every line of the block needs its `>`, or
+// the body and closing fence leave the quote and the block does not render.
+describe('block snippets inside quotes and callouts (#961)', () => {
+  function caretLine(state: EditorState | null): string | undefined {
+    if (!state) return undefined
+    const head = state.selection.main.head
+    const line = state.doc.lineAt(head)
+    return head === line.to ? line.text : undefined
+  }
+
+  it('keeps the quote marker on a math block in a callout', () => {
+    const state = typeThenTrigger('> [!note] Note heading\n> ', '$$', 'Enter')
+    expect(state?.doc.toString()).toBe('> [!note] Note heading\n> $$\n> \n> $$')
+    expect(caretLine(state)).toBe('> ')
+  })
+
+  it('keeps it on a fenced code block in a quote', () => {
+    const state = typeThenTrigger('> ', '```js', 'Enter')
+    expect(state?.doc.toString()).toBe('> ```js\n> \n> ```')
+  })
+
+  it('keeps every marker of a nested quote', () => {
+    const state = typeThenTrigger('> > ', '$$', 'Enter')
+    expect(state?.doc.toString()).toBe('> > $$\n> > \n> > $$')
+  })
+
+  it('keeps a quote marker written without its space', () => {
+    const state = typeThenTrigger('>', '$$', 'Enter')
+    expect(state?.doc.toString()).toBe('>$$\n>\n>$$')
+    expect(caretLine(state)).toBe('>')
+  })
+
+  it('indents under a list item inside a quote, keeping the quote', () => {
+    const state = typeThenTrigger('> - ', '$$', 'Enter')
+    expect(state?.doc.toString()).toBe('> - $$\n>   \n>   $$')
+  })
+
+  it('opens on a list item continuation inside a callout', () => {
+    const state = typeThenTrigger('> [!note] Outer\n> - item\n>   ', '$$', 'Enter')
+    expect(state?.doc.toString()).toBe('> [!note] Outer\n> - item\n>   $$\n>   \n>   $$')
+    expect(caretLine(state)).toBe('>   ')
+  })
+
+  it('keeps a quote nested in a list item', () => {
+    const state = typeThenTrigger('- > ', '$$', 'Enter')
+    expect(state?.doc.toString()).toBe('- > $$\n  > \n  > $$')
+  })
+
+  it('reads a quoted closer as the end of the block, not a new opener', () => {
+    const doc = '> $$\n> x\n> '
+    const typed = typeInput(createState(doc, doc.length), '$$')
+    expect(markdownSnippetTransaction(typed, 'Enter')).toBeNull()
+  })
+})
+
 // #718: no snippet may fire inside code. The plain harness above has no
 // markdown parser, so its states carry no FencedCode/InlineCode nodes; this
 // one parses the doc the way the real editor does.

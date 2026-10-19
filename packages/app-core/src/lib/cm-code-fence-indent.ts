@@ -48,9 +48,10 @@ export function insertNewlineContinueFencedCodeIndent(view: EditorView): boolean
   // command; only a list/quote marker before the fence trips it up.
   if (!/\S/.test(prefix)) return false
 
-  // Align continued lines to the fence column, turning the marker into spaces
-  // so the content sits inside the list item.
-  const insert = state.lineBreak + prefix.replace(/\S/g, ' ')
+  // Align continued lines to the fence column, turning a list marker into
+  // spaces so the content sits inside the item. A quote marker stays, or the
+  // new line would leave the quote or callout the fence is in (#961).
+  const insert = state.lineBreak + prefix.replace(/[^\s>]/g, ' ')
   view.dispatch(
     state.changeByRange((r) => ({
       changes: { from: r.from, to: r.to, insert },
