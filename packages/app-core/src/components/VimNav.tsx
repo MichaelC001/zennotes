@@ -454,7 +454,12 @@ export function VimNav(): JSX.Element | null {
         // the INPUT/TEXTAREA escape below does not cover it: without this
         // marker, Space armed the leader instead of pressing the focused
         // button and leader chords fired underneath the dialog.
-        document.querySelector('[data-workflow-import]')
+        document.querySelector('[data-workflow-import]') ||
+        // Every other dialog the shared Modal shell draws. Routing below
+        // follows the store's focused panel, not DOM focus, so with the
+        // sidebar focused, j/k moved its cursor behind the icon and color
+        // pickers and l opened the row, pulling focus out of the dialog (#960).
+        document.querySelector('[aria-modal="true"]')
       ) return
 
       // Hint mode — handled entirely by HintOverlay's own listener

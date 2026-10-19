@@ -51,7 +51,7 @@ import {
 import { requestPaneMode } from './lib/pane-mode'
 import { recordRendererPerf } from './lib/perf'
 import { focusEditorNormalMode } from './lib/editor-focus'
-import { isAppOverlayOpen } from './lib/overlay-open'
+import { isAppOverlayOpen, isOverlayOrDialogOpen } from './lib/overlay-open'
 import { installMarkdownFileDropHandler } from './lib/markdown-file-drop'
 import {
   setMarkdownLooseMathDelimiters,
@@ -321,6 +321,10 @@ function AppUpdateNotice({
  */
 function handlePanelKeyWithoutVim(e: KeyboardEvent, focusedPanel: string | null): void {
   if (e.metaKey || e.ctrlKey || e.altKey) return
+  // A dialog over the panel owns its keys: the focused panel stays set while
+  // one is open, so arrows would move the row behind it and Enter would open
+  // that row instead of pressing the dialog's focused button (#960).
+  if (isOverlayOrDialogOpen()) return
   // Text entry inside a panel (the outline filter, a comment draft) keeps its keys.
   const target = e.target instanceof HTMLElement ? e.target : null
   if (target) {
