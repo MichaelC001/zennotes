@@ -762,7 +762,11 @@ function App(): JSX.Element {
       // open. Per the house rule for global key handlers, a shortcut that
       // switches, reopens or creates the note must not act under it: it
       // strands the user on a different note than they left, and a new note
-      // pulls the keyboard into a title field nobody can see.
+      // pulls the keyboard into a title field nobody can see. The DOM check
+      // also covers every dialog the shared Modal shell draws without a
+      // data-* hook of its own (the sidebar icon and color pickers, Publish,
+      // the workflow pickers), where Shift+Mod+N used to make a quick note
+      // behind the picker.
       const overlayOpen =
         state.settingsOpen ||
         state.searchOpen ||
@@ -772,10 +776,7 @@ function App(): JSX.Element {
         state.templatePaletteOpen ||
         state.embedDrawingPaletteOpen ||
         state.outlinePaletteOpen ||
-        !!document.querySelector('[data-ctx-menu]') ||
-        !!document.querySelector('[data-prompt-modal]') ||
-        !!document.querySelector('[data-confirm-modal]') ||
-        !!document.querySelector('[data-cloud-conflict-dialog]')
+        isOverlayOrDialogOpen()
 
       if (isUndoShortcut(e)) {
         const assetUndoEntry = state.assetUndoStack.at(-1)
@@ -1040,13 +1041,11 @@ function App(): JSX.Element {
       // Don't move focus (or swallow the key) while a modal, palette, or the
       // Settings keybinding recorder is open — the recorder also captures keys
       // in this phase, so a focusPane shortcut bound to e.g. Ctrl+H must not
-      // intercept it. (#124)
+      // intercept it. (#124) Any dialog the shared Modal shell draws counts
+      // too: under the sidebar color picker Alt+L moved focus into the editor
+      // behind it, and Mod+N made a note there.
       const overrides = state.keymapOverrides
-      const modalOrMenuOpen =
-        !!document.querySelector('[data-ctx-menu]') ||
-        !!document.querySelector('[data-prompt-modal]') ||
-        !!document.querySelector('[data-confirm-modal]') ||
-        !!document.querySelector('[data-cloud-conflict-dialog]')
+      const modalOrMenuOpen = isOverlayOrDialogOpen()
       // `global.searchNotes` is deliberately not a toggle. `Mod+P` resolves to
       // `Ctrl+P` on Linux and Windows, which is also the Emacs previous-item
       // chord every palette handles via `isPalettePreviousKey()`. A toggle here
