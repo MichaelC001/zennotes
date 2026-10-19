@@ -36,7 +36,7 @@ const runtime = vi.hoisted(() => {
   return { calls, D2 }
 })
 
-vi.mock('./d2-runtime', () => ({ D2: runtime.D2 }))
+vi.mock('./d2-runtime', () => ({ D2: runtime.D2, createD2: async () => new runtime.D2() }))
 
 import { d2SourceSetsTheme, formatD2Error, peekD2Svg, renderD2Svg, sanitizeD2Svg, withUniqueD2Ids } from './d2-render'
 

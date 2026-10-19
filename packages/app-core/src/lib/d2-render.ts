@@ -32,7 +32,7 @@ let d2Promise: Promise<D2Instance> | null = null
 
 function loadD2(): Promise<D2Instance> {
   if (!d2Promise) {
-    d2Promise = import('./d2-runtime').then((module) => new module.D2())
+    d2Promise = import('./d2-runtime').then((module) => module.createD2())
     // A failed load (an offline web client that never fetched the chunk) must
     // not poison every later diagram.
     d2Promise.catch(() => {
