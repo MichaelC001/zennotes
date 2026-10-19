@@ -38,11 +38,21 @@ import {
   type CloudSyncTrackedItem
 } from './cloud-sync-engine'
 import { mergeCloudSyncText, resolveCloudSyncMerge } from './cloud-sync-merge'
+import { CloudIssueError, cloudProtocolError } from './cloud-error-copy'
 import {
   validateCloudSyncContentReference, validateCloudSyncDownloadInstruction,
   cloudSyncStagedHandle, releaseCloudSyncStagedFile, throwIfCloudSyncCancelled,
   type CloudContentDecryptor, type CloudSyncDownloadSource, type CloudSyncStagedFile, type CloudSyncStagedConflict
 } from './cloud-sync-content'
+
+/** A decision another window or device already made. */
+const CONFLICT_SETTLED =
+  'This file was already settled, in another window or on another device. Nothing else is needed.'
+/** The other side moved on while the person was choosing. */
+const CONFLICT_CHANGED_AGAIN =
+  'The file changed again on another device while you were reviewing it. Choose Sync now to load the newest version, then choose again.'
+const CHOICE_UNCONFIRMED = "ZenNotes Cloud didn't confirm your choice, so nothing changed yet. Try again."
+const NEEDS_UPDATE = "This version of ZenNotes can't do that yet. Update ZenNotes, then try again."
 
 const MUTATION_BATCH_SIZE = 100
 const MANIFEST_PAGE_SIZE = 250
@@ -186,7 +196,7 @@ export class CloudSyncCoordinator {
     await this.ensureReferences()
     const state = await this.requireState()
     const stored = state.pending_conflicts?.[conflictId]
-    if (!stored) throw new Error('This conflict is no longer waiting for a decision.')
+    if (!stored) throw new Error(CONFLICT_SETTLED)
     const current = await this.currentLocalSnapshot(stored)
     const conflict = { ...stored, local: current, cloud: await this.previewSnapshot(stored.cloud) }
     const merge = conflictTextMerge(conflict)
@@ -210,7 +220,7 @@ export class CloudSyncCoordinator {
   async saveConflictDraft(conflictId: string, draftText: string | null): Promise<void> {
     const state = await this.requireState()
     const conflict = state.pending_conflicts?.[conflictId]
-    if (!conflict) throw new Error('This conflict is no longer waiting for a decision.')
+    if (!conflict) throw new Error(CONFLICT_SETTLED)
     const pending = { ...state.pending_conflicts }
     pending[conflictId] = {
       ...conflict,
@@ -226,7 +236,7 @@ export class CloudSyncCoordinator {
     }
     const state = await this.requireState()
     const stored = state.pending_conflicts?.[resolution.conflict_id]
-    if (!stored) throw new Error('This conflict is no longer waiting for a decision.')
+    if (!stored) throw new Error(CONFLICT_SETTLED)
     const local = await this.currentLocalSnapshot(stored)
     if ((local.content?.sha256 ?? null) !== resolution.expected_local_sha256) {
       throw new Error(
@@ -234,7 +244,7 @@ export class CloudSyncCoordinator {
       )
     }
     if (stored.cloud.revision !== resolution.expected_cloud_revision) {
-      throw new Error('The Cloud version changed. Sync again before choosing a version.')
+      throw new Error(CONFLICT_CHANGED_AGAIN)
     }
     if (resolution.choice === 'cloud' || resolution.choice === 'both') {
       // These choices consume Cloud bytes locally rather than writing a
@@ -318,12 +328,10 @@ export class CloudSyncCoordinator {
     const response = await this.remote.mutate(this.vaultId, request)
     const conflict = response.conflicts.find((item) => item.operation_id === operationId)
     if (conflict) {
-      throw new Error(
-        'The Cloud version changed while saving. Sync again to review the latest changes.'
-      )
+      throw new Error(CONFLICT_CHANGED_AGAIN)
     }
     if (!response.acknowledged.some((item) => item.operation_id === operationId)) {
-      throw new Error('Cloud did not confirm the resolution. Try again.')
+      throw new Error(CHOICE_UNCONFIRMED)
     }
 
     // Save to Cloud first. If the request fails, the file the user is looking
@@ -391,7 +399,7 @@ export class CloudSyncCoordinator {
     }
     if (resolution.choice !== 'local' && !this.repository.resolveBootstrapConflict &&
         !(current.item.content_ref && this.repository.replaceConflictFile)) {
-      throw new Error('This device cannot resolve Cloud file conflicts yet.')
+      throw new Error(NEEDS_UPDATE)
     }
 
     if (resolution.choice === 'local' || resolution.choice === 'merged') {
@@ -419,19 +427,17 @@ export class CloudSyncCoordinator {
       })
       const conflict = response.conflicts.find((item) => item.operation_id === operationId)
       if (conflict) {
-        throw new Error(
-          `Cloud changed while resolving this file (${conflict.code}). Sync again to compare the latest versions.`
-        )
+        throw new Error(CONFLICT_CHANGED_AGAIN)
       }
       if (!response.acknowledged.some((item) => item.operation_id === operationId)) {
-        throw new Error('Cloud did not confirm the conflict resolution. Try again.')
+        throw new Error(CHOICE_UNCONFIRMED)
       }
     }
     // A merged choice must reach Cloud before replacing the local version,
     // so a failed request leaves the original conflict safe to review again.
     if (resolution.choice !== 'local') {
       if (current.item.content_ref) {
-        if (!this.repository.replaceConflictFile) throw new Error('This host cannot save a merged conflict.')
+        if (!this.repository.replaceConflictFile) throw new Error(NEEDS_UPDATE)
         await this.repository.replaceConflictFile({ path: current.item.path,
           expectedSha256: current.local.content.sha256,
           content: await textContent(resolution.merged_text!, current.local.content.media_type) })
@@ -611,10 +617,10 @@ export class CloudSyncCoordinator {
       for (const change of response.data) {
         this.validateWireItem(change)
         if (this.referencesEnabled && change.sequence !== expectedSequence++) {
-          throw new Error(`Expected sync sequence ${expectedSequence - 1}, received ${change.sequence}`)
+          throw cloudProtocolError(`Expected sync sequence ${expectedSequence - 1}, received ${change.sequence}`)
         }
         if (this.referencesEnabled && change.type === 'upsert' && !change.content_ref && !change.content) {
-          throw new Error('Reference-mode change feed returned an upsert without content or a reference.')
+          throw cloudProtocolError('Reference-mode change feed returned an upsert without content or a reference.')
         }
       }
       pages.push({ after, start: changes.length, end: changes.length + response.data.length })
@@ -635,7 +641,7 @@ export class CloudSyncCoordinator {
 
       if (!response.has_more) break
       if (response.data.length === 0) {
-        throw new Error('Cloud sync change feed reported another page without returning a change')
+        throw cloudProtocolError('Cloud sync change feed reported another page without returning a change')
       }
     }
 
@@ -693,7 +699,7 @@ export class CloudSyncCoordinator {
             const content = change.content ?? change.content_ref
             if (!expected || !content || expected.revision !== change.revision || expected.path !== change.path ||
                 expected.sha256 !== content.sha256 || expected.byte_length !== content.byte_length) {
-              throw new Error('Cloud echo did not match its acknowledged mutation.')
+              throw cloudProtocolError('Cloud echo did not match its acknowledged mutation.')
             }
           }
           // This device's own push: the file already holds these bytes.
@@ -723,7 +729,7 @@ export class CloudSyncCoordinator {
                 const response = await this.remote.changes(this.vaultId, page.after, page.end - page.start, { contentMode: 'references' })
                 if (response.data.length !== page.end - page.start ||
                     response.data.some((body, offset) => !sameChangeMetadata(body, changes[page.start + offset]))) {
-                  throw new Error('Cloud change page changed while its content was loading.')
+                  throw new CloudIssueError('remote-changed', 'Cloud change page changed while its content was loading.')
                 }
                 for (const body of response.data) this.validateWireItem(body)
                 pageBodies = new Map(response.data.map((body) => [body.sequence, body]))
@@ -925,7 +931,7 @@ export class CloudSyncCoordinator {
       const response = await this.remote.revision(this.vaultId, itemId, revision)
       if (this.referencesEnabled && (response.data.item_id !== itemId || response.data.revision !== revision || response.data.deleted)) return null
       if (response.data.content_ref) {
-        if (response.data.content) throw new Error('Ambiguous Cloud revision content.')
+        if (response.data.content) throw cloudProtocolError('Ambiguous Cloud revision content.')
         if (response.data.item_id !== itemId || response.data.revision !== revision || response.data.deleted) return null
         const ref = validateCloudSyncContentReference(response.data.content_ref, { item_id: itemId, revision, ...expected })
         return await this.withStaged(ref, async (file) => file.preview ?? null)
@@ -1010,7 +1016,7 @@ export class CloudSyncCoordinator {
     local: CloudSyncStoredConflict['local']
   ): Promise<void> {
     if (!this.repository.applyConflictResolutionFiles && !this.repository.replaceConflictFile) {
-      throw new Error('This device cannot resolve Cloud file conflicts yet.')
+      throw new Error(NEEDS_UPDATE)
     }
     // An empty file list below means "remove the local file", which is only
     // right when Cloud deleted it. A Cloud file whose bytes are missing must
@@ -1034,7 +1040,7 @@ export class CloudSyncCoordinator {
     const localPath = local.path ?? conflict.base.path
     if (!localPath) throw new Error('The local file path is no longer available.')
     if (conflict.cloud.path !== null && conflict.cloud.path !== localPath) {
-      throw new Error('This device needs an update before it can resolve moved files.')
+      throw new Error(NEEDS_UPDATE)
     }
     await this.repository.replaceConflictFile!({
       path: localPath,
@@ -1064,7 +1070,7 @@ export class CloudSyncCoordinator {
       return
     }
     if (!this.repository.resolveBootstrapConflict || conflict.cloud.path !== local.path) {
-      throw new Error('This device needs an update before it can keep both moved files.')
+      throw new Error(NEEDS_UPDATE)
     }
     await this.repository.resolveBootstrapConflict({
       path: local.path,
@@ -1092,7 +1098,7 @@ export class CloudSyncCoordinator {
     if (!this.remote.negotiateContentReferences || !this.remote.download ||
         !this.repository.stageCloudContent || !this.repository.applyStagedCloudContent ||
         !this.repository.resolveStagedCloudConflict) {
-      if (this.remote.requiresContentReferenceHost) throw new Error('This host needs all Cloud staging and conflict hooks before streaming sync.')
+      if (this.remote.requiresContentReferenceHost) throw cloudProtocolError('This host needs all Cloud staging and conflict hooks before streaming sync.')
       return
     }
     this.referenceNegotiation ??= this.remote.negotiateContentReferences().then((enabled) => {
@@ -1103,13 +1109,13 @@ export class CloudSyncCoordinator {
 
   private async withStaged<Result>(reference: CloudSyncContentReference, use: (file: CloudSyncStagedFile) => Promise<Result>): Promise<Result> {
     if (!this.referencesEnabled || !this.remote.download || !this.repository.stageCloudContent) {
-      throw new Error('This host cannot safely download Cloud content references.')
+      throw cloudProtocolError('This host cannot safely download Cloud content references.')
     }
     const ref = Object.freeze(validateCloudSyncContentReference(reference))
     throwIfCloudSyncCancelled(this.remote.downloadSignal)
     const decryptor = ref.encrypted ? await this.remote.contentDecryptor?.(this.vaultId) : undefined
     if (ref.encrypted && !decryptor) {
-      throw new Error('This host cannot decrypt content from an end-to-end encrypted vault.')
+      throw new Error(NEEDS_UPDATE)
     }
     const file = await this.repository.stageCloudContent({
       reference: ref, signal: this.remote.downloadSignal, previewLimitBytes: CONFLICT_PREVIEW_LIMIT_BYTES,
@@ -1128,7 +1134,7 @@ export class CloudSyncCoordinator {
       throwIfCloudSyncCancelled(this.remote.downloadSignal)
       if (file.preview) {
         if (ref.byte_length > CONFLICT_PREVIEW_LIMIT_BYTES || typeof file.preview.data !== 'string' || file.preview.data.length > CONFLICT_PREVIEW_LIMIT_BYTES * 2) {
-          throw new Error('Cloud staging preview exceeded its byte budget.')
+          throw cloudProtocolError('Cloud staging preview exceeded its byte budget.')
         }
         const item: CloudSyncManifestItem = { ...ref, path: 'preview', kind: ref.encoding === 'utf8' ? 'text' : 'binary', content: file.preview }
         this.validateWireItem(item)
@@ -1169,28 +1175,28 @@ export class CloudSyncCoordinator {
   private validateWireItem(item: CloudSyncManifestItem | CloudSyncChange): void {
     if (this.referencesEnabled) {
       if (typeof item.item_id !== 'string' || !item.item_id || !Number.isSafeInteger(item.revision) || item.revision < 1) {
-        throw new Error('Invalid Cloud item identity or revision.')
+        throw cloudProtocolError('Invalid Cloud item identity or revision.')
       }
       normalizeCloudSyncPath(item.path)
       if ('sequence' in item) {
         if (!Number.isSafeInteger(item.sequence) || item.sequence < 1 || !['upsert', 'move', 'delete'].includes(item.type)) {
-          throw new Error('Invalid Cloud change sequence or type.')
+          throw cloudProtocolError('Invalid Cloud change sequence or type.')
         }
       } else if (!['text', 'binary'].includes(item.kind) || typeof item.sha256 !== 'string' ||
           !/^[a-f0-9]{64}$/.test(item.sha256) || !Number.isSafeInteger(item.byte_length) || item.byte_length < 0 ||
           typeof item.media_type !== 'string' || !item.media_type) {
-        throw new Error('Invalid Cloud manifest metadata.')
+        throw cloudProtocolError('Invalid Cloud manifest metadata.')
       }
     }
     if (item.content_ref) {
-      if (!this.referencesEnabled || item.content) throw new Error('Unexpected or ambiguous Cloud content reference.')
+      if (!this.referencesEnabled || item.content) throw cloudProtocolError('Unexpected or ambiguous Cloud content reference.')
       validateCloudSyncContentReference(item.content_ref, item)
     }
     if (this.referencesEnabled && item.content) {
       if (typeof item.content.data !== 'string' || item.content.byte_length > 1_048_576 ||
           item.content.data.length > 2_097_152 || Object.keys(item.content).some((key) =>
         !['encoding', 'data', 'sha256', 'byte_length', 'media_type'].includes(key))) {
-        throw new Error('Invalid inline Cloud content or remote staging handle.')
+        throw cloudProtocolError('Invalid inline Cloud content or remote staging handle.')
       }
       const { data: _bytes, ...metadata } = item.content
       validateCloudSyncContentReference({ ...metadata, item_id: item.item_id, revision: item.revision }, item)
@@ -1336,7 +1342,7 @@ export class CloudSyncCoordinator {
           response.data.length !== items.length ||
           response.data.some((item, index) => !sameManifestItem(item, items[index]))
         ) {
-          throw new Error('Vault changed while bootstrap content was loading. Retry sync.')
+          throw new CloudIssueError('remote-changed', 'Vault changed while bootstrap content was loading. Retry sync.')
         }
         const neededIds = new Set(needed.map((item) => item.item_id))
         for (const item of response.data) {
@@ -1365,9 +1371,7 @@ export class CloudSyncCoordinator {
     local: CloudSyncLocalItem
   }> {
     if (await this.states.load(this.vaultId)) {
-      throw new Error(
-        'This Cloud conflict is no longer pending. Sync again to see the latest state.'
-      )
+      throw new Error(CONFLICT_SETTLED)
     }
 
     const manifest = await this.stableManifest(!this.referencesEnabled && !this.remote.revision)
@@ -1385,7 +1389,7 @@ export class CloudSyncCoordinator {
       item.sha256 !== conflict.remote_sha256 ||
       local.content.sha256 !== conflict.local_sha256
     ) {
-      throw new Error('This Cloud conflict changed. Sync again to compare the latest versions.')
+      throw new Error(CONFLICT_CHANGED_AGAIN)
     }
     return {
       item: await this.hydrateManifestItem(item),
@@ -1400,7 +1404,7 @@ export class CloudSyncCoordinator {
     if (item.content_ref) return item
     if (item.content) return { ...item, content: item.content }
     if (!this.remote.revision) {
-      throw new Error(`Manifest item ${item.item_id} did not include content`)
+      throw cloudProtocolError(`Manifest item ${item.item_id} did not include content`)
     }
 
     const { data } = await this.remote.revision(this.vaultId, item.item_id, item.revision)
@@ -1411,12 +1415,14 @@ export class CloudSyncCoordinator {
       data.kind !== item.kind ||
       data.deleted
     ) {
-      throw new Error(
-        `Cloud revision for ${item.path} did not match the sync manifest. Retry sync.`
+      throw new CloudIssueError(
+        'download-damaged',
+        `Cloud revision for ${item.path} did not match the sync manifest. Retry sync.`,
+        item.path
       )
     }
     if (data.content_ref) {
-      if (data.content) throw new Error('Ambiguous Cloud revision content.')
+      if (data.content) throw cloudProtocolError('Ambiguous Cloud revision content.')
       const referenced = { ...item, content: undefined, content_ref: data.content_ref }
       this.validateWireItem(referenced)
       return referenced
@@ -1438,8 +1444,10 @@ export class CloudSyncCoordinator {
       content.media_type !== item.media_type ||
       !hasInlineData(content)
     ) {
-      throw new Error(
-        `Cloud revision for ${item.path} did not match the sync manifest. Retry sync.`
+      throw new CloudIssueError(
+        'download-damaged',
+        `Cloud revision for ${item.path} did not match the sync manifest. Retry sync.`,
+        item.path
       )
     }
 
@@ -1453,17 +1461,17 @@ export class CloudSyncCoordinator {
       bytes = new Uint8Array(binary.length)
       for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
     } else {
-      throw new Error('Encrypted cloud sync content must be decrypted before filesystem apply')
+      throw cloudProtocolError('Encrypted cloud sync content must be decrypted before filesystem apply')
     }
     if (bytes.byteLength !== item.byte_length) {
-      throw new Error(`Cloud revision for ${item.path} has invalid bytes. Retry sync.`)
+      throw new CloudIssueError('download-damaged', `Cloud revision for ${item.path} has invalid bytes. Retry sync.`, item.path)
     }
     const digest = await crypto.subtle.digest('SHA-256', bytes.buffer)
     const hash = [...new Uint8Array(digest)]
       .map((byte) => byte.toString(16).padStart(2, '0'))
       .join('')
     if (hash !== item.sha256) {
-      throw new Error(`Cloud revision for ${item.path} has an invalid hash. Retry sync.`)
+      throw new CloudIssueError('download-damaged', `Cloud revision for ${item.path} has an invalid hash. Retry sync.`, item.path)
     }
     return content
   }
@@ -1487,7 +1495,7 @@ export class CloudSyncCoordinator {
         if (this.referencesEnabled && (!Number.isSafeInteger(response.cursor) || response.cursor < 0 ||
             !Array.isArray(response.data) ||
             (response.next_page !== null && (response.next_page !== page + 1 || response.data.length !== MANIFEST_PAGE_SIZE)))) {
-          throw new Error('Invalid reference-mode manifest cursor or pagination.')
+          throw cloudProtocolError('Invalid reference-mode manifest cursor or pagination.')
         }
         cursor ??= response.cursor
 
@@ -1498,7 +1506,7 @@ export class CloudSyncCoordinator {
         for (const item of response.data) {
           this.validateWireItem(item)
           if (this.referencesEnabled && !includeContent && !item.content_ref) {
-            throw new Error('Reference-mode manifest omitted a content reference.')
+            throw cloudProtocolError('Reference-mode manifest omitted a content reference.')
           }
         }
         items.push(...response.data)
@@ -1509,7 +1517,7 @@ export class CloudSyncCoordinator {
       if (stable && cursor !== null) return { cursor, items }
     }
 
-    throw new Error('Vault changed repeatedly while the initial sync manifest was loading')
+    throw new CloudIssueError('remote-changed', 'Vault changed repeatedly while the initial sync manifest was loading')
   }
 }
 
@@ -1641,7 +1649,7 @@ function assertCloudSnapshotIsCurrent(
 ): void {
   const current = manifest.items.find((item) => item.item_id === conflict.item_id)
   if (conflict.cloud.path === null) {
-    if (current) throw new Error('The Cloud version changed. Sync again before choosing a version.')
+    if (current) throw new Error(CONFLICT_CHANGED_AGAIN)
     return
   }
   if (
@@ -1651,7 +1659,7 @@ function assertCloudSnapshotIsCurrent(
     current.sha256 !== (conflict.cloud.content ?? conflict.cloud.content_ref)?.sha256 ||
     current.byte_length !== (conflict.cloud.content ?? conflict.cloud.content_ref)?.byte_length
   ) {
-    throw new Error('The Cloud version changed. Sync again before choosing a version.')
+    throw new Error(CONFLICT_CHANGED_AGAIN)
   }
 }
 

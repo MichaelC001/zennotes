@@ -17,6 +17,11 @@ import {
 } from "@zennotes/shared-domain/cloud-auto-sync";
 import { formatCloudBytes } from "@zennotes/shared-domain/cloud-bytes";
 import {
+  describeCloudError,
+  type CloudErrorCopy,
+  type CloudErrorKind,
+} from "@zennotes/shared-domain/cloud-error-copy";
+import {
   cloudSyncPathKey,
   shouldSyncVaultPath,
 } from "@zennotes/shared-domain/cloud-sync";
@@ -89,7 +94,13 @@ interface CloudSyncStatusStore {
   phase: CloudSyncPhase;
   vaultName: string | null;
   lastSyncedAt: number | null;
+  /** What the status row and Settings say: a failure's plain sentence, or
+   *  what a finished run needs from the person. */
   error: string | null;
+  /** The technical line behind a failure, for Settings' Details. */
+  errorDetail: string | null;
+  /** Null for anything that is not a failure. */
+  errorKind: CloudErrorKind | null;
   /** What the last completed run reported, so the status bar's Review can
    *  show the files that need attention without another sync first. */
   lastSummary: CloudSyncRunSummary | null;
@@ -127,6 +138,8 @@ const emptyCloudSyncStatus: CloudSyncStatusStore = {
   vaultName: null,
   lastSyncedAt: null,
   error: null,
+  errorDetail: null,
+  errorKind: null,
   lastSummary: null,
   conflictReviewOpen: false,
   conflictReviewStartId: null,
@@ -136,6 +149,17 @@ const emptyCloudSyncStatus: CloudSyncStatusStore = {
   settingsConflictPromptOpen: false,
   removedVault: null,
 };
+
+type CloudSyncStatusText = Pick<CloudSyncStatusStore, "error" | "errorDetail" | "errorKind">;
+
+/** Status text that is not a failure: an attention message, or nothing. */
+function statusText(message: string | null): CloudSyncStatusText {
+  return { error: message, errorDetail: null, errorKind: null };
+}
+
+function failureText(copy: CloudErrorCopy): CloudSyncStatusText {
+  return { error: copy.message, errorDetail: copy.detail, errorKind: copy.kind };
+}
 
 const SETTINGS_ATTENTION_MESSAGE =
   "Vault settings differ on this device and in Cloud. Choose which settings to use.";
@@ -248,14 +272,12 @@ export function startCloudAutoSync(
     intervalMs: timings.intervalMs,
     retryDelaysMs: timings.retryDelaysMs,
     onError(error, retryInMs) {
-      if (!isUnauthorizedCloudError(error)) {
+      const copy = cloudSyncErrorCopy(error);
+      if (copy.kind !== "signed-out") {
         reportError(error, retryInMs);
         return;
       }
-
-      void bridge.logoutCloudAccount().catch((logoutError) => {
-        reportError(logoutError, retryInMs);
-      });
+      signOutAfterRefusal(bridge, copy);
     },
   });
   const unsubscribeVault = bridge.onVaultChange((event) => {
@@ -271,7 +293,7 @@ export function startCloudAutoSync(
       else if (error) {
         useCloudSyncStatusStore.setState({
           phase: "error",
-          error: syncFailureMessage(error),
+          ...syncFailure(error),
         });
         void refreshRemovedCloudLink(bridge, error);
       }
@@ -324,14 +346,16 @@ export async function connectCloudAccountFromStatusBar(
   try {
     await bridge.connectCloudAccount();
   } catch (error) {
-    markCloudSyncDisconnected(cloudSyncErrorMessage(error));
+    markCloudSyncDisconnected(failureText(cloudSyncErrorCopy(error)));
     throw error;
   }
 }
 
 export async function syncCloudVaultWithStatus(
   bridge: Pick<CloudAutoSyncBridge, "syncCloudVault"> &
-    Partial<Pick<CloudAutoSyncBridge, "getCloudVaultLink" | "getCloudSettingsConflict">> = getZenBridge(),
+    Partial<
+      Pick<CloudAutoSyncBridge, "getCloudVaultLink" | "getCloudSettingsConflict" | "logoutCloudAccount">
+    > = getZenBridge(),
   vaultName?: string | null,
 ): Promise<CloudSyncRunSummary> {
   const current = useCloudSyncStatusStore.getState();
@@ -339,7 +363,7 @@ export async function syncCloudVaultWithStatus(
   useCloudSyncStatusStore.setState({
     phase: "syncing",
     vaultName: nextVaultName,
-    error: null,
+    ...statusText(null),
   });
 
   try {
@@ -354,11 +378,14 @@ export async function syncCloudVaultWithStatus(
     applyCloudSyncSummary(summary, nextVaultName);
     return summary;
   } catch (error) {
-    if (!await refreshRemovedCloudLink(bridge, error)) {
+    const copy = cloudSyncErrorCopy(error);
+    if (copy.kind === "signed-out") {
+      signOutAfterRefusal(bridge, copy);
+    } else if (!await refreshRemovedCloudLink(bridge, error)) {
       useCloudSyncStatusStore.setState({
         phase: "error",
         vaultName: nextVaultName,
-        error: syncFailureMessage(error),
+        ...syncFailure(error),
       });
     }
     // The parked copy is local, so a failed run can still surface a question
@@ -405,7 +432,7 @@ function applyCloudSettingsConflict(next: CloudSyncSettingsConflict | null): voi
         ? {}
         : {
             phase: settledAttention === null ? "ready" : "attention",
-            error: settledAttention,
+            ...statusText(settledAttention),
           }),
     });
     return;
@@ -421,7 +448,7 @@ function applyCloudSettingsConflict(next: CloudSyncSettingsConflict | null): voi
     settingsConflict: next,
     settingsConflictPromptOpen: current.settingsConflictPromptOpen || newQuestion,
     ...(current.phase === "ready"
-      ? { phase: "attention", error: SETTINGS_ATTENTION_MESSAGE }
+      ? { phase: "attention", ...statusText(SETTINGS_ATTENTION_MESSAGE) }
       : {}),
   });
 }
@@ -517,7 +544,7 @@ async function refreshRemovedCloudLink(
     return false;
   }
   const vaultName = useCloudSyncStatusStore.getState().vaultName;
-  markCloudSyncUnlinked(syncFailureMessage(error));
+  markCloudSyncUnlinked(syncFailure(error));
   // The hosts drop a link after a failed request only once Cloud has answered
   // that its vault is gone ("not found") or was replaced by an encrypted one,
   // so a link found gone after a failure means a deleted vault unless the
@@ -717,7 +744,7 @@ function applyCloudSyncSummary(summary: CloudSyncRunSummary, vaultName?: string 
     phase: attention === null ? "ready" : "attention",
     vaultName: vaultName ?? current.vaultName,
     lastSyncedAt: attention === null ? Date.now() : current.lastSyncedAt,
-    error: attention,
+    ...statusText(attention),
     lastSummary: summary,
     resolutionSaved: false,
     // Do not reopen a finished review on the next unrelated conflict.
@@ -877,18 +904,25 @@ function markCloudSyncReady(vaultName: string): void {
     vaultName,
     lastSyncedAt: current.vaultName === vaultName ? current.lastSyncedAt : null,
     resolutionSaved: current.vaultName === vaultName && current.resolutionSaved,
-    error: null,
+    ...statusText(null),
   });
 }
 
-function markCloudSyncDisconnected(error: string | null = null): void {
+function markCloudSyncDisconnected(failure: CloudSyncStatusText = statusText(null)): void {
   announcedCloudConflictIds.clear();
+  const current = useCloudSyncStatusStore.getState();
+  // Signing out after Cloud refused this device's sign-in announces the
+  // account change too; why it happened stays until the person connects.
+  const reason =
+    failure.error === null && current.errorKind === "signed-out"
+      ? { error: current.error, errorDetail: current.errorDetail, errorKind: current.errorKind }
+      : failure;
   useCloudSyncStatusStore.setState({
     phase: "disconnected",
     vaultName: null,
     lastSyncedAt: null,
     resolutionSaved: false,
-    error,
+    ...reason,
     settingsConflict: null,
     settingsConflictPromptOpen: false,
   });
@@ -900,18 +934,18 @@ function markCloudSyncConnecting(): void {
     vaultName: null,
     lastSyncedAt: null,
     resolutionSaved: false,
-    error: null,
+    ...statusText(null),
   });
 }
 
-function markCloudSyncUnlinked(error: string | null = null): void {
+function markCloudSyncUnlinked(failure: CloudSyncStatusText = statusText(null)): void {
   announcedCloudConflictIds.clear();
   useCloudSyncStatusStore.setState({
     phase: "unlinked",
     vaultName: null,
     lastSyncedAt: null,
     resolutionSaved: false,
-    error,
+    ...failure,
     lastSummary: null,
     conflictReviewOpen: false,
     // Unlinking leaves the parked copy on disk, but there is no cloud to
@@ -926,13 +960,32 @@ function isSyncableVaultChange(event: VaultChangeEvent): boolean {
   return shouldSyncVaultPath(event.path);
 }
 
-function isUnauthorizedCloudError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "status" in error &&
-    error.status === 401
-  );
+let signingOutAfterRefusal: Promise<unknown> | null = null;
+
+/**
+ * Cloud no longer accepts this device's sign-in (it was removed from the
+ * account on the website, or the sign-in expired). Every later request would
+ * be refused the same way, so the device signs out, as if the person had
+ * chosen Disconnect, and the status row says why until they connect again.
+ * Concurrent refusals (another window, the change check) sign out once.
+ */
+export function signOutAfterRefusal(
+  bridge: Partial<Pick<CloudAutoSyncBridge, "logoutCloudAccount">>,
+  copy: CloudErrorCopy,
+): void {
+  const current = useCloudSyncStatusStore.getState();
+  // A failed run reports here and to the controller's onError: one sign-out.
+  if (current.phase === "disconnected" && current.errorKind === "signed-out") return;
+  markCloudSyncDisconnected(failureText(copy));
+  if (!bridge.logoutCloudAccount || signingOutAfterRefusal) return;
+  signingOutAfterRefusal = bridge
+    .logoutCloudAccount()
+    .catch((error: unknown) => {
+      console.warn("[cloud-sync] Signing out after a refused sign-in failed", error);
+    })
+    .finally(() => {
+      signingOutAfterRefusal = null;
+    });
 }
 
 function browserCloudAutoSyncEnvironment(): CloudAutoSyncEnvironment {
@@ -964,16 +1017,20 @@ function logAutomaticSyncError(error: unknown, retryInMs: number): void {
   );
 }
 
-function syncFailureMessage(error: unknown): string {
+function syncFailure(error: unknown): CloudSyncStatusText {
+  const copy = cloudSyncErrorCopy(error);
   const prefix = useCloudSyncStatusStore.getState().resolutionSaved
-    ? "Note saved. Remaining vault sync failed: "
+    ? "Your note was saved, but the rest of the vault didn't sync. "
     : "";
-  return prefix + cloudSyncErrorMessage(error);
+  return failureText({ ...copy, message: prefix + copy.message });
 }
 
-function cloudSyncErrorMessage(error: unknown): string {
-  return humanIpcError(error instanceof Error ? error : new Error(String(error)), "Cloud sync failed.");
+/** A failed run or Cloud request in plain words, with its technical line. */
+export function cloudSyncErrorCopy(error: unknown): CloudErrorCopy {
+  return describeCloudError(error, CLOUD_SYNC_FAILED_MESSAGE);
 }
+
+export const CLOUD_SYNC_FAILED_MESSAGE = "Sync didn't finish. Choose Sync now to try again.";
 
 function firstCapacityConflict(summary: CloudSyncRunSummary): CloudSyncConflict | undefined {
   return summary.conflicts.find((conflict) =>
@@ -1016,7 +1073,7 @@ export function cloudSyncAttentionLabel(
     return `${count} ${count === 1 ? "file" : "files"} too large for Cloud`;
   }
   if (dimension === "sync_active_bytes") return "Cloud storage full";
-  if (dimension === "sync_active_items") return "Cloud item limit reached";
+  if (dimension === "sync_active_items") return "Cloud file limit reached";
   return "Cloud capacity reached";
 }
 
@@ -1027,10 +1084,10 @@ export function cloudSyncAttentionMessage(
   if (capacityConflict) {
     const capacity = capacityConflict.capacity;
     if (capacity?.dimension === "sync_active_items") {
-      return `Cloud active-item limit reached (${capacity.used + capacity.reserved} of ${capacity.limit}). Remove files or increase your Cloud capacity.`;
+      return `Your ZenNotes Cloud plan holds up to ${formatCount(capacity.limit)} files across your account, and you have reached that. New files are waiting on this device. Delete files you no longer need, or change your plan under Billing on zennotes.org.`;
     }
     if (capacity?.dimension === "sync_active_bytes") {
-      return `Cloud storage limit reached (${formatCloudBytes(capacity.used + capacity.reserved)} of ${formatCloudBytes(capacity.limit)}). Remove files or increase your Cloud capacity.`;
+      return `Your ZenNotes Cloud storage is full (${formatCloudBytes(capacity.used + capacity.reserved)} of ${formatCloudBytes(capacity.limit)}), so new and changed files are waiting on this device. Delete large files you no longer need, or add storage under Billing on zennotes.org.`;
     }
     if (capacity?.dimension === "sync_max_file_bytes") {
       // Name the file: "a file" sent people hunting through the whole vault.
@@ -1042,7 +1099,7 @@ export function cloudSyncAttentionMessage(
       }
       return `${onlyPath ? `“${fileName(onlyPath)}”` : "A file"} is larger than the ${limit} Cloud file-size limit, so it stays on this device. Remove it or make it smaller to finish syncing.`;
     }
-    return "Cloud capacity reached. Remove files or increase your Cloud capacity.";
+    return "Your ZenNotes Cloud plan is full, so some changes are waiting on this device. Delete files you no longer need, or change your plan under Billing on zennotes.org.";
   }
 
   const decisionCount =
@@ -1050,7 +1107,7 @@ export function cloudSyncAttentionMessage(
     (summary.bootstrap_conflicts?.length ?? 0);
   if (decisionCount > 0) {
     const count = decisionCount;
-    return `Cloud sync needs attention: ${count} ${count === 1 ? "file differs" : "files differ"} on this device and in Cloud.`;
+    return `${count} ${count === 1 ? "file was" : "files were"} changed both on this device and on another device. Choose Review to decide what to keep.`;
   }
   if (summary.local_conflicts.length > 0) {
     const count = summary.local_conflicts.length;
@@ -1061,7 +1118,7 @@ export function cloudSyncAttentionMessage(
   }
   if (summary.conflicts.length > 0) {
     const count = summary.conflicts.length;
-    return `Cloud sync needs attention: ${count} ${count === 1 ? "change could" : "changes could"} not be applied.`;
+    return `${count} ${count === 1 ? "change" : "changes"} didn't sync. The list below says what happened to each file.`;
   }
 
   return null;
@@ -1088,10 +1145,17 @@ export interface CloudSyncAttentionItem {
   detail: string;
   /** Where the Cloud version was parked, when there is one to look at. */
   conflictCopyPath: string | null;
+  /** What Cloud answered, for Details, when the row could not say more. */
+  technical?: string | null;
 }
 
 function fileName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
+}
+
+/** "50,000": English grouping, like the rest of these sentences. */
+function formatCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function pendingCloudConflictDetail(conflict: CloudSyncPendingConflict): string {
@@ -1172,7 +1236,7 @@ export function cloudSyncAttentionItems(
   }
   for (const conflict of summary.conflicts) {
     if (CAPACITY_CODES.has(conflict.code)) continue;
-    const path = conflict.path ?? conflict.current_path ?? `item ${conflict.item_id}`;
+    const path = conflict.path ?? conflict.current_path ?? "A file";
     const detail =
       conflict.code === "REVISION_CONFLICT"
         ? "Changed on another device after this device last synced. Sync again to load both versions into the resolver."
@@ -1180,8 +1244,15 @@ export function cloudSyncAttentionItems(
           ? `Another Cloud file already uses this name${conflict.current_path && conflict.current_path !== path ? ` (${conflict.current_path})` : ""}. Rename one of them and sync again.`
           : conflict.code === "ITEM_DELETED"
             ? "Deleted on another device while this device still had a change. Sync again to choose whether to keep or delete it."
-            : `Cloud rejected this change (${conflict.code}).`;
-    items.push({ kind: "rejected", path, detail, conflictCopyPath: null });
+            : "ZenNotes Cloud didn't accept this change. Choose Sync now to retry; if it stays, copy the details and choose Report an Issue.";
+    const known = ["REVISION_CONFLICT", "PATH_CONFLICT", "ITEM_DELETED"].includes(conflict.code);
+    items.push({
+      kind: "rejected",
+      path,
+      detail,
+      conflictCopyPath: null,
+      technical: known ? null : `${conflict.code} · item ${conflict.item_id}`,
+    });
   }
   return items;
 }

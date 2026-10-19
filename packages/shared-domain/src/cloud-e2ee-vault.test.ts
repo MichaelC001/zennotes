@@ -209,7 +209,7 @@ describe('account setup and unlock', () => {
     expect(third.value?.key).toBe(first.value?.key)
 
     await expect(unlockCloudEncryption(api, new MemoryKeyStore(), { passphrase: 'not the passphrase at all' }))
-      .rejects.toThrow('That passphrase does not unlock your encryption.')
+      .rejects.toThrow("That passphrase didn't work.")
   }, 30_000)
 
   it('changes the passphrase and replaces the recovery key without touching the account key', async () => {
@@ -220,7 +220,7 @@ describe('account setup and unlock', () => {
     const accountKey = store.value!.key
 
     await changeCloudEncryptionPassphrase(api, store, { passphrase: PASSPHRASE }, 'velvet canyon morning drum')
-    await expect(unlockCloudEncryption(api, new MemoryKeyStore(), { passphrase: PASSPHRASE })).rejects.toThrow(/does not unlock/)
+    await expect(unlockCloudEncryption(api, new MemoryKeyStore(), { passphrase: PASSPHRASE })).rejects.toThrow(/didn't work/)
     const afterChange = new MemoryKeyStore()
     await unlockCloudEncryption(api, afterChange, { passphrase: 'velvet canyon morning drum' })
     expect(afterChange.value?.key).toBe(accountKey)
@@ -228,7 +228,7 @@ describe('account setup and unlock', () => {
     const replacement = await prepareNewCloudRecoveryKey(api, store, { recoveryWords: setup.recoveryWords.join(' ') })
     await replacement.finish()
     await expect(unlockCloudEncryption(api, new MemoryKeyStore(), { recoveryWords: setup.recoveryWords.join(' ') }))
-      .rejects.toThrow(/does not unlock/)
+      .rejects.toThrow(/didn't work/)
     const viaNewWords = new MemoryKeyStore()
     await unlockCloudEncryption(api, viaNewWords, { recoveryWords: replacement.recoveryWords.join(' ') })
     expect(viaNewWords.value?.key).toBe(accountKey)

@@ -10,7 +10,8 @@ import {
   type VaultSettingsSectionDifference,
   type VaultSettingsSide,
 } from "@zennotes/shared-domain/vault-settings-conflict";
-import { humanIpcError } from "../lib/ipc-error";
+import type { CloudErrorCopy } from "@zennotes/shared-domain/cloud-error-copy";
+import { CloudErrorMessage, cloudErrorCopy } from "./CloudErrorMessage";
 import {
   describeVaultSettingsConflict,
   formatVaultSettingsValue,
@@ -67,7 +68,7 @@ export function CloudSettingsConflictDialog({
   const differences = described?.differences ?? [];
   const [choices, setChoices] = useState<Choices>({});
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CloudErrorCopy | null>(null);
   const primary = useRef<HTMLButtonElement>(null);
 
   const sideOf = (section: VaultSettingsSection): VaultSettingsSide =>
@@ -86,7 +87,7 @@ export function CloudSettingsConflictDialog({
     try {
       await work();
     } catch (cause) {
-      setError(humanIpcError(cause, "The settings could not be applied. Nothing was changed."));
+      setError(cloudErrorCopy(cause, "The settings could not be applied. Nothing was changed."));
       setBusy(false);
     }
   };
@@ -189,7 +190,7 @@ export function CloudSettingsConflictDialog({
         )}
         {error && (
           <div role="alert" className="mt-3 text-sm text-danger">
-            {error}
+            <CloudErrorMessage message={error.message} detail={error.detail} />
           </div>
         )}
       </Modal.Body>

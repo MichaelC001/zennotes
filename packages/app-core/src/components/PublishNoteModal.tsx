@@ -4,6 +4,8 @@ import type { CloudPublishedNote } from '@zennotes/bridge-contract/cloud-sync'
 import { CloudPublishUnconfirmedError, publishCloudNoteWithFeedback, type PublishableCloudNote } from '../lib/cloud-publishing'
 import { notifyPublishedNoteChanged } from '../lib/published-note-events'
 import { Button } from './ui/Button'
+import type { CloudErrorCopy } from '@zennotes/shared-domain/cloud-error-copy'
+import { CloudErrorMessage, cloudErrorCopy } from './CloudErrorMessage'
 import { Modal } from './ui/Modal'
 
 export function PublishNoteModal({
@@ -18,7 +20,7 @@ export function PublishNoteModal({
   const [existing, setExisting] = useState<CloudPublishedNote | null>(null)
   const [loading, setLoading] = useState(true)
   const [publishing, setPublishing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<CloudErrorCopy | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
@@ -32,7 +34,7 @@ export function PublishNoteModal({
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
-          setError(reason instanceof Error ? reason.message : 'Could not load publishing settings.')
+          setError(cloudErrorCopy(reason, "ZenNotes couldn't load your publishing settings. Try again in a moment.", bridge))
         }
       })
       .finally(() => {
@@ -61,7 +63,7 @@ export function PublishNoteModal({
           notifyPublishedNoteChanged({ notePath: note.path, url: reason.publicNote.url })
         }
       } else {
-        setError(reason instanceof Error ? reason.message : 'Could not publish this note.')
+        setError(cloudErrorCopy(reason, "ZenNotes couldn't publish this note. Try again in a moment.", bridge))
       }
     } finally {
       setPublishing(false)
@@ -83,7 +85,7 @@ export function PublishNoteModal({
         </p>
         {error && (
           <div role="alert" className="rounded-lg border border-danger/35 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {error}
+            <CloudErrorMessage message={error.message} detail={error.detail} />
           </div>
         )}
       </Modal.Body>

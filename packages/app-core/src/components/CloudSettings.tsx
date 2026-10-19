@@ -20,8 +20,13 @@ import type {
 } from "@zennotes/bridge-contract/cloud-sync";
 import { getZenBridge, type ZenBridge } from "@zennotes/bridge-contract/bridge";
 import { cloudBackupLimitMessage } from "@zennotes/shared-domain/cloud-backup";
+import {
+  CLOUD_VAULT_NAME_REQUIRED_MESSAGE,
+  type CloudErrorCopy,
+} from "@zennotes/shared-domain/cloud-error-copy";
 import { confirmApp } from "../lib/confirm-requests";
 import { CloudEncryptionPanel } from "./CloudEncryptionPanel";
+import { CloudErrorMessage, cloudErrorCopy } from "./CloudErrorMessage";
 import {
   clearRemovedCloudVault,
   cloudSyncAttentionItems,
@@ -38,6 +43,7 @@ import {
   useCloudSyncStatusStore,
   requestCloudAutoSync,
   syncCloudVaultWithStatus,
+  CLOUD_SYNC_FAILED_MESSAGE,
   type CloudVaultRemoval,
 } from "../lib/cloud-auto-sync";
 import {
@@ -152,11 +158,27 @@ export function CloudSettings({
   const [loadingPublishedNotes, setLoadingPublishedNotes] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [action, setAction] = useState<CloudAction>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [vaultError, setVaultError] = useState<string | null>(null);
+  const [error, setError] = useState<CloudErrorCopy | null>(null);
+  const signedOutReason = useCloudSyncStatusStore((s) =>
+    s.errorKind === "signed-out" ? s.error : null,
+  );
+  const signedOutDetail = useCloudSyncStatusStore((s) =>
+    s.errorKind === "signed-out" ? s.errorDetail : null,
+  );
+  const [vaultError, setVaultError] = useState<CloudErrorCopy | null>(null);
   const [deleteRequest, setDeleteRequest] = useState<CloudVaultLink | null>(
     null,
   );
+  // A refused sign-in signs this device out, and the page's Connect card
+  // says why (from the status store); anything else is said where it failed.
+  const showFailure = (
+    cause: unknown,
+    fallback: string,
+    show: (copy: CloudErrorCopy) => void = setError,
+  ): void => {
+    const copy = cloudErrorCopy(cause, fallback, bridge);
+    if (copy.kind !== "signed-out") show(copy);
+  };
   // The list is the truth about what can be opened: a choice that is no
   // longer in it falls back to the first vault that is.
   const effectiveSelectedVaultId = cloudVaults.some(
@@ -310,7 +332,7 @@ export function CloudSettings({
             if (superseded()) return;
             continue;
           }
-          setError(errorMessage(cause, "Could not load ZenNotes Cloud."));
+          showFailure(cause, LOAD_ACCOUNT_FAILED);
           return;
         } finally {
           if (!superseded()) setLoadingDetails(false);
@@ -323,7 +345,7 @@ export function CloudSettings({
   useEffect(() => {
     const refresh = (): void => {
       void loadStatus().catch((cause) => {
-        setError(errorMessage(cause, "Could not load ZenNotes Cloud."));
+        showFailure(cause, LOAD_ACCOUNT_FAILED);
       });
     };
 
@@ -424,7 +446,7 @@ export function CloudSettings({
       await refreshServiceAccount();
     } catch (cause) {
       if (isCancelledRequest(cause)) return;
-      setError(errorMessage(cause, "Could not load published notes."));
+      showFailure(cause, "ZenNotes couldn't load your published notes. Try again in a moment.");
     } finally {
       setLoadingPublishedNotes(false);
     }
@@ -453,7 +475,7 @@ export function CloudSettings({
       await refreshServiceAccount();
     } catch (cause) {
       if (isCancelledRequest(cause)) return;
-      setError(errorMessage(cause, "Could not load cloud backups."));
+      showFailure(cause, "ZenNotes couldn't load your backups. Try again in a moment.");
     } finally {
       setLoadingBackups(false);
     }
@@ -494,12 +516,11 @@ export function CloudSettings({
       // Sync errors already live in the shared status store. Duplicating one
       // here leaves it visible after a successful editor/background retry.
       if (nextAction !== "sync") {
-        const message = errorMessage(
+        showFailure(
           cause,
-          "ZenNotes Cloud could not complete that action.",
+          "That didn't work. Try again in a moment.",
+          VAULT_SECTION_ACTIONS.has(nextAction) ? setVaultError : setError,
         );
-        if (VAULT_SECTION_ACTIONS.has(nextAction)) setVaultError(message);
-        else setError(message);
       }
     } finally {
       setAction(null);
@@ -543,7 +564,7 @@ export function CloudSettings({
   const createAndLinkVault = (): Promise<void> =>
     runAction("link", async () => {
       const name = newVaultName.trim();
-      if (!name) throw new Error("Enter a name for the cloud vault.");
+      if (!name) throw new Error(CLOUD_VAULT_NAME_REQUIRED_MESSAGE);
       const createdLink =
         encryptNewVault && encryptionReady
           ? await bridge.createAndLinkCloudVault(name, { encrypted: true })
@@ -820,7 +841,17 @@ export function CloudSettings({
           role="alert"
           className="rounded-xl border border-danger/35 bg-danger/10 px-4 py-3 text-sm leading-6 text-danger"
         >
-          {error}
+          <CloudErrorMessage message={error.message} detail={error.detail} />
+        </div>
+      )}
+
+      {status.state === "disconnected" && signedOutReason && (
+        <div
+          role="alert"
+          data-cloud-signed-out=""
+          className="rounded-xl border border-warning/35 bg-warning/10 px-4 py-3 text-sm leading-6 text-ink-700"
+        >
+          <CloudErrorMessage message={signedOutReason} detail={signedOutDetail} />
         </div>
       )}
 
@@ -996,7 +1027,9 @@ function CloudPublishedNotesPanel({
   if (!publishIncluded) {
     return (
       <CloudNotice>
-        Publishing is not included in this subscription.
+        Publishing isn&apos;t part of your current plan. Choose a plan under
+        Billing on zennotes.org to publish notes. Your notes stay on this
+        device either way.
       </CloudNotice>
     );
   }
@@ -1360,7 +1393,7 @@ function CloudVaultPanel({
   settingsConflict: CloudSyncSettingsConflict | null;
   summary: CloudSyncRunSummary | null;
   syncIncluded: boolean;
-  vaultError: string | null;
+  vaultError: CloudErrorCopy | null;
   onCreateAndLink: () => void;
   onLink: () => void;
   onNewVaultNameChange: (value: string) => void;
@@ -1378,6 +1411,7 @@ function CloudVaultPanel({
   const lastSummary = useCloudSyncStatusStore((s) => s.lastSummary);
   const syncPhase = useCloudSyncStatusStore((s) => s.phase);
   const syncError = useCloudSyncStatusStore((s) => s.error);
+  const syncErrorDetail = useCloudSyncStatusStore((s) => s.errorDetail);
   const removedVault = useCloudSyncStatusStore((s) => s.removedVault);
   const syncing = syncPhase === "syncing" || action === "sync";
   const syncFailed = syncPhase === "error";
@@ -1388,7 +1422,11 @@ function CloudVaultPanel({
   );
   if (!syncIncluded) {
     return (
-      <CloudNotice>Sync is not included in this subscription.</CloudNotice>
+      <CloudNotice>
+        Sync isn&apos;t part of your current plan. Choose a plan under Billing
+        on zennotes.org to sync this vault. Your notes stay on this device
+        either way.
+      </CloudNotice>
     );
   }
   if (!localVaultAvailable) {
@@ -1419,7 +1457,7 @@ function CloudVaultPanel({
         </p>
       </div>
 
-      {vaultError && <CloudSectionError message={vaultError} />}
+      {vaultError && <CloudSectionError error={vaultError} />}
       {!link && removedVault && (
         <CloudVaultRemovedNotice
           removal={removedVault}
@@ -1539,7 +1577,10 @@ function CloudVaultPanel({
                 tabIndex={-1}
                 className="text-sm text-danger outline-none"
               >
-                {syncError ?? "Sync failed. Please try again."}
+                <CloudErrorMessage
+                  message={syncError ?? CLOUD_SYNC_FAILED_MESSAGE}
+                  detail={syncErrorDetail}
+                />
               </div>
             )}
             {displayedSummary &&
@@ -1826,7 +1867,7 @@ function useBackupNotes(bridge: ZenBridge): BackupNotes {
       } catch (cause) {
         if (request !== latestRequest.current) return;
         requestedSearch.current = null;
-        setError(errorMessage(cause, "Could not search this backup."));
+        setError(cloudErrorCopy(cause, "ZenNotes couldn't search this backup. Try again in a moment.").message);
       }
     },
     [bridge],
@@ -1876,7 +1917,7 @@ function useBackupNotes(bridge: ZenBridge): BackupNotes {
       });
     } catch (cause) {
       if (request !== latestRequest.current) return;
-      setError(errorMessage(cause, "Could not load more notes."));
+      setError(cloudErrorCopy(cause, "ZenNotes couldn't load more notes from this backup. Try again in a moment.").message);
     } finally {
       if (request === latestRequest.current) setLoadingMore(false);
     }
@@ -1966,7 +2007,11 @@ function CloudBackupPanel({
 
   if (!backupIncluded) {
     return (
-      <CloudNotice>Backups are not included in this subscription.</CloudNotice>
+      <CloudNotice>
+        Backups aren&apos;t part of your current plan. Choose a plan under
+        Billing on zennotes.org to back up this vault. Your notes stay on this
+        device either way.
+      </CloudNotice>
     );
   }
   if (!link) {
@@ -2434,17 +2479,50 @@ function CloudRestoreResult({
     );
   }
 
-  const message =
+  const failure =
     result.restore.status === "conflict"
-      ? "The cloud vault changed before restore began, so nothing was replaced. Refresh and try again."
-      : result.restore.error?.message || "The backup could not be restored.";
+      ? {
+          message:
+            "The cloud vault changed before restore began, so nothing was replaced. Refresh and try again.",
+          detail: null,
+        }
+      : restoreFailureCopy(result.restore.error);
   return (
     <div
       role="alert"
       className="rounded-xl border border-danger/35 bg-danger/10 px-4 py-3 text-sm text-danger"
     >
-      {message}
+      <CloudErrorMessage message={failure.message} detail={failure.detail} />
     </div>
+  );
+}
+
+const RESTORE_FAILED_MESSAGE =
+  "ZenNotes couldn't restore this backup. Try again in a few minutes. If it keeps happening, copy the details and choose Report an Issue.";
+
+/**
+ * A failed restore job, from what the service recorded. RESTORE_FAILED can
+ * carry the job's raw exception text, so it and anything unrecognised are
+ * worded here and the service's words go to Details; the rest are worded
+ * like the same codes anywhere else.
+ */
+function restoreFailureCopy(
+  error: CloudBackupRestoreResult["restore"]["error"],
+): { message: string; detail: string | null } {
+  if (!error) return { message: RESTORE_FAILED_MESSAGE, detail: null };
+  if (!error.code || error.code === "RESTORE_FAILED") {
+    return {
+      message: RESTORE_FAILED_MESSAGE,
+      detail: [error.code, error.message].filter(Boolean).join(" · ") || null,
+    };
+  }
+  return cloudErrorCopy(
+    Object.assign(new Error(error.message ?? ""), {
+      name: "CloudServiceRequestError",
+      status: 409,
+      code: error.code,
+    }),
+    RESTORE_FAILED_MESSAGE,
   );
 }
 
@@ -2739,7 +2817,10 @@ function CloudSyncSummary({
                     {item.path}
                   </div>
                   <div className="mt-0.5 text-xs leading-5 text-ink-500">
-                    {item.detail}
+                    <CloudErrorMessage
+                      message={item.detail}
+                      detail={item.technical ?? null}
+                    />
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -2915,11 +2996,11 @@ function CloudVaultRemovedNotice({
 
 /** A failed action from This vault, said in This vault and brought into view:
  *  the button that failed can sit a screen below the section's top. */
-function CloudSectionError({ message }: { message: string }): JSX.Element {
+function CloudSectionError({ error }: { error: CloudErrorCopy }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.scrollIntoView?.({ block: "nearest" });
-  }, [message]);
+  }, [error]);
   return (
     <div
       ref={ref}
@@ -2927,7 +3008,7 @@ function CloudSectionError({ message }: { message: string }): JSX.Element {
       data-cloud-vault-error=""
       className="rounded-xl border border-danger/35 bg-danger/10 px-4 py-3 text-sm leading-6 text-danger"
     >
-      {message}
+      <CloudErrorMessage message={error.message} detail={error.detail} />
     </div>
   );
 }
@@ -2975,15 +3056,4 @@ function isCancelledRequest(error: unknown): boolean {
   );
 }
 
-function errorMessage(error: unknown, fallback: string): string {
-  if (!(error instanceof Error) || !error.message.trim()) return fallback;
-
-  // Electron hands the renderer "<ClassName>: <message>" for a main-process
-  // rejection; the class name ("CloudServiceRequestError") is not for people.
-  const message = error.message
-    .replace(/^Error invoking remote method '[^']+':\s*/i, "")
-    .replace(/^(?:[A-Z][A-Za-z0-9]*)?Error:\s*/, "")
-    .trim();
-
-  return message || fallback;
-}
+const LOAD_ACCOUNT_FAILED = "ZenNotes couldn't load your Cloud account. Try again in a moment.";

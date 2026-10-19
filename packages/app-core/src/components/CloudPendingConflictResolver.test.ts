@@ -119,7 +119,9 @@ describe("CloudPendingConflictResolver", () => {
     expect(bridge.getCloudConflict).toHaveBeenCalledTimes(1);
     expect(useCloudSyncStatusStore.getState()).toMatchObject({
       phase: "error", lastSyncedAt: 123, lastSummary: synced,
-      error: "Note saved. Remaining vault sync failed: Request timed out",
+      error: expect.stringMatching(
+        /^Your note was saved, but the rest of the vault didn't sync\. ZenNotes Cloud took too long to answer/,
+      ),
     });
     view.unmount();
   });

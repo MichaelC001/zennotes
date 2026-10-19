@@ -12,6 +12,7 @@ import { chmod, mkdtemp, open, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { zne1CiphertextLength } from '@zennotes/shared-domain/cloud-e2ee'
+import { cloudProtocolError } from '@zennotes/shared-domain/cloud-error-copy'
 import type { CloudVaultCipher, CloudVaultCipherSource } from '@zennotes/shared-domain/cloud-e2ee-vault'
 import type {
   CloudPublishUploadTarget,
@@ -269,7 +270,7 @@ class DesktopCloudSyncApiClient extends CloudSyncApiClient {
       if (source.bytes.byteLength !== source.byteLength) throw directUploadSizeMismatch()
       body = source.bytes as FetchBody
     } else {
-      throw new Error('A publish upload needs a file or its bytes.')
+      throw cloudProtocolError('A publish upload needs a file or its bytes.')
     }
 
     let response: Response
@@ -319,7 +320,7 @@ class DesktopCloudSyncApiClient extends CloudSyncApiClient {
       }
     }
 
-    throw new Error('ZenNotes Cloud upload completion ended unexpectedly.')
+    throw new CloudServiceRequestError('ZenNotes Cloud upload completion ended unexpectedly.', 0, 'INVALID_DIRECT_UPLOAD_RESPONSE')
   }
 }
 
@@ -497,7 +498,7 @@ async function prepareEncryptedDirectUpload(
         let offset = 0
         while (offset < piece.byteLength) {
           const written = await file.write(piece, offset)
-          if (written.bytesWritten === 0) throw new Error('Encrypted upload staging made no progress.')
+          if (written.bytesWritten === 0) throw Object.assign(new Error('Encrypted upload staging made no progress.'), { code: 'EIO' })
           offset += written.bytesWritten
         }
       }

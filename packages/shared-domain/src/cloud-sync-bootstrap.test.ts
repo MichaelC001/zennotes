@@ -976,7 +976,7 @@ describe('legacy bootstrap conflict decisions with metadata manifests', () => {
   it('rejects a changed conflict before downloading its revision', async () => {
     const f = conflictFixture()
     f.inventory[0].sha256 = content('new cloud').sha256
-    await expect(f.coordinator.getBootstrapConflict(f.conflict)).rejects.toThrow('conflict changed')
+    await expect(f.coordinator.getBootstrapConflict(f.conflict)).rejects.toThrow('changed again on another device')
     expect(f.revision).not.toHaveBeenCalled()
     expect(f.repository.resolveBootstrapConflict).not.toHaveBeenCalled()
     expect(f.state()).toBeNull()
@@ -991,7 +991,7 @@ describe('legacy bootstrap conflict decisions with metadata manifests', () => {
         conflict: f.conflict,
         choice: 'cloud'
       })
-    ).rejects.toThrow('conflict changed')
+    ).rejects.toThrow('changed again on another device')
     expect(f.revision).not.toHaveBeenCalled()
     expect(f.locals.get(edited.path)).toEqual(edited)
     expect(f.state()).toBeNull()

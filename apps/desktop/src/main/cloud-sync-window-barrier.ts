@@ -3,6 +3,7 @@ import type {
   CloudSyncRunSummary,
   CloudSyncWindowEvent
 } from '@zennotes/bridge-contract/cloud-sync'
+import { describeCloudError, encodeCloudErrorMessage } from '@zennotes/shared-domain/cloud-error-copy'
 
 interface Participant {
   id: number
@@ -76,7 +77,7 @@ export class CloudSyncWindowBarrier {
             () =>
               reject(
                 new Error(
-                  'Another ZenNotes window could not save its review draft. Sync paused; try again.'
+                  "Another ZenNotes window couldn't save the review you were working on, so sync waited. Try again."
                 )
               ),
             this.options.timeoutMs ?? 10_000
@@ -92,11 +93,13 @@ export class CloudSyncWindowBarrier {
           (candidate) => !participants.some((participant) => participant.id === candidate.id)
         )
       )
-        throw new Error('Vault windows changed while preparing sync. Please try again.')
+        throw new Error('A ZenNotes window opened or closed while sync was starting. Choose Sync now to try again.')
       summary = await work()
       return summary
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause)
+      // The other windows show this text: word it here, where the error
+      // still carries its status and code.
+      error = encodeCloudErrorMessage(describeCloudError(cause))
       throw cause
     } finally {
       clearTimeout(timer)

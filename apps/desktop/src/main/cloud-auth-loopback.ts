@@ -81,7 +81,11 @@ export class CloudAuthLoopbackServer {
   ): Promise<void> {
     const callbackUrl = this.callbackUrl;
     if (!callbackUrl) {
-      this.respond(response, 410, "This ZenNotes sign-in request has expired.");
+      this.respond(
+        response,
+        410,
+        "This sign-in has expired. Return to ZenNotes and choose Connect ZenNotes Cloud again.",
+      );
       return;
     }
 
@@ -93,7 +97,7 @@ export class CloudAuthLoopbackServer {
 
     const expectedUrl = new URL(callbackUrl);
     if (host !== expectedUrl.host || !requestUrl.startsWith("/")) {
-      this.respond(response, 400, "Invalid ZenNotes callback.");
+      this.respond(response, 400, "This sign-in link isn't valid. Return to ZenNotes and choose Connect ZenNotes Cloud again.");
       return;
     }
 
@@ -101,12 +105,12 @@ export class CloudAuthLoopbackServer {
     try {
       parsed = new URL(requestUrl, callbackUrl);
     } catch {
-      this.respond(response, 400, "Invalid ZenNotes callback.");
+      this.respond(response, 400, "This sign-in link isn't valid. Return to ZenNotes and choose Connect ZenNotes Cloud again.");
       return;
     }
 
     if (parsed.origin !== expectedUrl.origin) {
-      this.respond(response, 404, "ZenNotes callback not found.");
+      this.respond(response, 404, "This sign-in link isn't valid. Return to ZenNotes and choose Connect ZenNotes Cloud again.");
       return;
     }
 
@@ -134,7 +138,7 @@ export class CloudAuthLoopbackServer {
     }
 
     if (parsed.pathname !== CALLBACK_PATH) {
-      this.respond(response, 404, "ZenNotes callback not found.");
+      this.respond(response, 404, "This sign-in link isn't valid. Return to ZenNotes and choose Connect ZenNotes Cloud again.");
       return;
     }
 
@@ -152,7 +156,7 @@ export class CloudAuthLoopbackServer {
       !/^[A-Za-z0-9._-]+$/.test(state) ||
       state.length > 128
     ) {
-      this.respond(response, 400, "Invalid ZenNotes callback.");
+      this.respond(response, 400, "This sign-in link isn't valid. Return to ZenNotes and choose Connect ZenNotes Cloud again.");
       return;
     }
 
@@ -160,7 +164,7 @@ export class CloudAuthLoopbackServer {
       this.respond(
         response,
         410,
-        "This ZenNotes sign-in request was already used.",
+        "This sign-in is already finished. You can close this tab.",
       );
       return;
     }

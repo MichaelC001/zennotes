@@ -111,7 +111,7 @@ describe('CloudAuthFlow', () => {
     await flow.connect('https://zennotes.org')
 
     await expect(flow.complete({ code: 'OneTimeCode', state: 'other-state' })).rejects.toThrow(
-      'invalid or has expired'
+      'This sign-in has expired.'
     )
     storage.pending = {
       base_url: 'https://zennotes.org',
@@ -120,7 +120,7 @@ describe('CloudAuthFlow', () => {
       expires_at: '2026-08-10T11:59:59.000Z'
     }
     await expect(flow.complete({ code: 'OneTimeCode', state: 'fixed-state' })).rejects.toThrow(
-      'invalid or has expired'
+      'This sign-in has expired.'
     )
     expect(exchange).not.toHaveBeenCalled()
     expect(storage.pending).toBeNull()
@@ -140,7 +140,7 @@ describe('CloudAuthFlow', () => {
       device: { id: 'device-1', name: 'Ada’s iPhone', platform: 'ios' }
     })
     await expect(flow.complete({ code: 'OneTimeCode', state: 'fixed-state' })).rejects.toThrow(
-      'invalid sign-in response'
+      'unexpected answer while signing you in'
     )
     expect(storage.credential).toBeNull()
   })

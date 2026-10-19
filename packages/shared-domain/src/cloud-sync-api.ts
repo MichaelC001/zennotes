@@ -35,6 +35,7 @@ import type {
 } from '@zennotes/bridge-contract/cloud-sync'
 import type { CloudSyncRateLimitScope } from './cloud-sync-rate-limit'
 import type { CloudKeysetApi } from './cloud-e2ee-account'
+import { cloudProtocolError } from './cloud-error-copy'
 import {
   CLOUD_E2EE_HEADER,
   CLOUD_E2EE_HEADER_VALUE,
@@ -192,7 +193,7 @@ export class CloudSyncApiClient {
     }
     if (!await this.capabilityPromise) {
       this.referencesActive = false
-      throw new Error('This Cloud server needs content-reference support before this streaming host can sync.')
+      throw cloudProtocolError('This Cloud server needs content-reference support before this streaming host can sync.')
     }
     this.referencesActive = true
     return true
@@ -205,14 +206,14 @@ export class CloudSyncApiClient {
 
   private contentQuery(options: CloudSyncContentRequestOptions = {}, metadataOnly = false): Record<string, string | number> {
     if (!this.referencesActive) {
-      if (options.contentMode || (this.options.contentReferences && !metadataOnly)) throw new Error('Negotiate Cloud content references before using the reference protocol.')
+      if (options.contentMode || (this.options.contentReferences && !metadataOnly)) throw cloudProtocolError('Negotiate Cloud content references before using the reference protocol.')
       return {}
     }
     const inline = options.maxInlineBytes ?? this.options.maxInlineBytes ?? 262_144
     const response = options.maxResponseBytes ?? Math.max(65_536, Math.min(this.bootstrapContentPageBytes ?? 16_777_216, 33_554_432))
     if (!Number.isInteger(inline) || inline < 0 || inline > 1_048_576 ||
         !Number.isInteger(response) || response < 65_536 || response > 33_554_432) {
-      throw new Error('Invalid Cloud content response budgets.')
+      throw cloudProtocolError('Invalid Cloud content response budgets.')
     }
     return { content_mode: 'references', max_inline_bytes: inline, max_response_bytes: response }
   }
@@ -231,7 +232,7 @@ export class CloudSyncApiClient {
     accountKey: Uint8Array,
     accountKeyVersion: number
   ): Promise<CloudSyncVaultResponse> {
-    if (!this.options.endToEndEncryption) throw new Error('This app cannot create encrypted vaults.')
+    if (!this.options.endToEndEncryption) throw new Error("This version of ZenNotes can't use end-to-end encryption. Update ZenNotes to the latest version.")
     return this.send({
       method: 'POST',
       path: '/api/v1/vaults',
@@ -379,7 +380,7 @@ export class CloudSyncApiClient {
   }
 
   async download(vaultId: string, itemId: string, revision: number): Promise<CloudSyncDownloadResponse> {
-    if (!this.referencesActive) throw new Error('Negotiate Cloud content references before downloading revisions.')
+    if (!this.referencesActive) throw cloudProtocolError('Negotiate Cloud content references before downloading revisions.')
     return this.send({ method: 'GET',
       path: `/api/v1/vaults/${encodeURIComponent(vaultId)}/items/${encodeURIComponent(itemId)}/revisions/${encodeURIComponent(String(revision))}/download`
     })
@@ -411,7 +412,7 @@ export class CloudSyncApiClient {
     if (cipher && (body.content.encoding !== 'aes-gcm' || !body.meta)) {
       // The host seals streamed uploads itself; refusing here keeps a host bug
       // from sending a readable file into an encrypted vault.
-      throw new Error('Encrypted vaults accept only encrypted uploads.')
+      throw cloudProtocolError('Encrypted vaults accept only encrypted uploads.')
     }
     return this.send({
       method: 'POST',
@@ -571,7 +572,7 @@ function publishedNoteBody(input: CloudPublishRequest): { payload: string } | Fo
   if ('upload_id' in input) {
     // The files are already in storage; the publish names them and their upload.
     const { upload_id, asset_refs, appearance, ...note } = input
-    if (appearance?.logo) throw new Error('A staged publish cannot replace the logo.')
+    if (appearance?.logo) throw cloudProtocolError('A staged publish cannot replace the logo.')
     return {
       payload: JSON.stringify({
         ...note,

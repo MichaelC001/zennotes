@@ -50,7 +50,7 @@ export async function publishCloudNote(
 ): Promise<CloudPublishOutcome> {
   const account = await bridge.getCloudServiceAccount()
   if (!account.features.publish.active) {
-    throw new Error('Publishing requires a ZenNotes Cloud plan.')
+    throw new Error("Publishing isn't part of your current plan. Choose a plan under Billing on zennotes.org to publish notes.")
   }
   const refs = [...new Set(note.assetEmbeds)]
   if (refs.length !== assets.length) {

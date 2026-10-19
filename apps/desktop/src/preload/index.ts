@@ -336,7 +336,7 @@ const api: ZenBridge = {
     ipcRenderer.on(IPC.CLOUD_VAULT_SYNC_WINDOW, listener)
     return () => {
       for (const requestId of active) {
-        ipcRenderer.send(IPC.CLOUD_VAULT_SYNC_WINDOW_ACK, requestId, 'The vault window changed during sync preparation.')
+        ipcRenderer.send(IPC.CLOUD_VAULT_SYNC_WINDOW_ACK, requestId, 'A ZenNotes window opened or closed while sync was starting. Choose Sync now to try again.')
       }
       active.clear()
       ipcRenderer.removeListener(IPC.CLOUD_VAULT_SYNC_WINDOW, listener)

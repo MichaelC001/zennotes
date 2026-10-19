@@ -21,6 +21,12 @@ import type { CloudSyncApiClient } from './cloud-sync-api'
 import { cloudBackupCreateError, cloudBackupItemsPage, restoreCloudBackup } from './cloud-backup'
 import { normalizeCloudSyncPath } from './cloud-sync'
 import {
+  CLOUD_NOT_LINKED_MESSAGE,
+  CLOUD_NOT_SIGNED_IN_MESSAGE,
+  CLOUD_OTHER_ACCOUNT_MESSAGE,
+  CLOUD_VAULT_NAME_REQUIRED_MESSAGE
+} from './cloud-error-copy'
+import {
   CLOUD_VAULT_REMOVED_MESSAGE,
   CLOUD_VAULT_SUPERSEDED_MESSAGE,
   confirmCloudVaultMissing,
@@ -125,7 +131,7 @@ export class CloudSyncHostService {
 
   async createAndLink(vault: CloudSyncHostVault, name: string): Promise<CloudVaultLink> {
     const normalizedName = name.trim()
-    if (!normalizedName) throw new Error('Cloud vault name is required.')
+    if (!normalizedName) throw new Error(CLOUD_VAULT_NAME_REQUIRED_MESSAGE)
 
     const { account, client } = await this.connection()
     const remoteVault = (await client.createVault(normalizedName)).data
@@ -286,11 +292,11 @@ export class CloudSyncHostService {
 
   private async run(vault: CloudSyncHostVault): Promise<CloudSyncRunSummary> {
     const link = await this.linkedVault(vault)
-    if (!link) throw new Error('Link this local vault to a ZenNotes Cloud vault before syncing.')
+    if (!link) throw new Error(CLOUD_NOT_LINKED_MESSAGE)
 
     const { account, client } = await this.connection()
     if (link.base_url !== account.base_url) {
-      throw new Error('This vault is linked to a different ZenNotes Cloud account.')
+      throw new Error(CLOUD_OTHER_ACCOUNT_MESSAGE)
     }
 
     const coordinator = new CloudSyncCoordinator(
@@ -430,7 +436,7 @@ export class CloudSyncHostService {
   }> {
     const status = await this.dependencies.accountStatus()
     if (status.state !== 'connected' || !status.account) {
-      throw new Error('Connect ZenNotes Cloud before using sync.')
+      throw new Error(CLOUD_NOT_SIGNED_IN_MESSAGE)
     }
     return {
       account: status.account,
@@ -444,10 +450,10 @@ export class CloudSyncHostService {
     link: CloudVaultLink
   }> {
     const link = await this.linkedVault(vault)
-    if (!link) throw new Error('Link this local vault to a ZenNotes Cloud vault first.')
+    if (!link) throw new Error(CLOUD_NOT_LINKED_MESSAGE)
     const connection = await this.connection()
     if (link.base_url !== connection.account.base_url) {
-      throw new Error('This vault is linked to a different ZenNotes Cloud account.')
+      throw new Error(CLOUD_OTHER_ACCOUNT_MESSAGE)
     }
     return { ...connection, link }
   }
@@ -533,6 +539,6 @@ function assertBackupReady(summary: CloudSyncRunSummary): void {
     summary.bootstrap_conflicts.length > 0 ||
     (summary.pending_conflicts?.length ?? 0) > 0
   ) {
-    throw new Error('Resolve sync conflicts before creating a cloud backup.')
+    throw new Error('Some files are waiting for review. Settle them first (Review), then create the backup.')
   }
 }

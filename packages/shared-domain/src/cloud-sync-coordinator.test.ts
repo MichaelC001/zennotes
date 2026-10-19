@@ -1494,7 +1494,7 @@ describe('CloudSyncCoordinator: converged pending conflicts', () => {
       )
       expect(fs.files.get(path)).toBe(agreedText)
       expect(server.mutations).toEqual([])
-      await expect(resumed.getConflict('plan')).rejects.toThrow('no longer waiting')
+      await expect(resumed.getConflict('plan')).rejects.toThrow('already settled')
 
       fs.files.set(path, `${agreedText}- [ ] Next task.\n`)
       const next = await resumed.sync()
@@ -1694,7 +1694,7 @@ describe('CloudSyncCoordinator: safely merging queued conflicts', () => {
         content: expect.objectContaining({ data: mergedText })
       })
     ])
-    await expect(coordinator.getConflict('daily')).rejects.toThrow('no longer waiting')
+    await expect(coordinator.getConflict('daily')).rejects.toThrow('already settled')
   })
 
   it('rechecks a queued conflict after a new Cloud revision makes its edits non-overlapping', async () => {

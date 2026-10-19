@@ -26,6 +26,7 @@ import { createRequire } from "node:module";
 import { IPC } from "@shared/ipc";
 import { openExternalUrl } from "./external-urls";
 import type {
+  CloudAccountStatus,
   CloudBackupItemsQuery,
   CloudPublishNoteInput,
   CloudSyncBootstrapConflict,
@@ -215,6 +216,10 @@ import type {
   CloudEncryptionSecret,
   StoredCloudAccountKey,
 } from "@zennotes/shared-domain/cloud-e2ee-account";
+import {
+  describeCloudError,
+  encodeCloudErrorMessage,
+} from "@zennotes/shared-domain/cloud-error-copy";
 import { CloudSyncWindowBarrier } from "./cloud-sync-window-barrier";
 import { scanAllTasks, scanTasksForPath } from "./tasks";
 import {
@@ -639,8 +644,34 @@ function queueCloudAuthCallback(
 async function completeCloudAuthCallback(
   request: NonNullable<ReturnType<typeof parseCloudAuthDeepLink>>,
 ): Promise<void> {
-  const status = await getCloudAuthManager().complete(request);
+  let status: CloudAccountStatus;
+  try {
+    status = await getCloudAuthManager().complete(request);
+  } catch (error) {
+    // The browser only says sign-in failed; the reason is told here, on
+    // every platform, and the app stops waiting for the browser. Not
+    // awaited: the loopback page answers the browser only after this.
+    broadcastCloudAccountChange(await getCloudAuthManager().status());
+    void dialog.showMessageBox({
+      type: "error",
+      title: "ZenNotes Cloud sign-in failed",
+      message: "ZenNotes Cloud sign-in failed",
+      detail: encodeCloudErrorMessage(describeCloudError(error)),
+    });
+    throw error;
+  }
   broadcastCloudAccountChange(status);
+}
+
+/**
+ * A Cloud failure as the window receives it. IPC carries only the message,
+ * and the status and code that say what went wrong are on the error here, so
+ * it is worded now; the technical line follows a marker app-core splits off.
+ * A cancelled request stays one, so the window can keep ignoring it.
+ */
+function cloudIpcError(error: unknown): unknown {
+  if (error instanceof Error && error.name === "AbortError") return error;
+  return new Error(encodeCloudErrorMessage(describeCloudError(error)));
 }
 
 async function flushPendingCloudAuthCallbacks(): Promise<void> {
@@ -653,12 +684,8 @@ async function flushPendingCloudAuthCallbacks(): Promise<void> {
       if (!request) continue;
       try {
         await completeCloudAuthCallback(request);
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "ZenNotes Cloud sign-in failed.";
-        dialog.showErrorBox("ZenNotes Cloud sign-in failed", message);
+      } catch {
+        // completeCloudAuthCallback already told the person why.
       }
     }
   } finally {
@@ -3264,13 +3291,18 @@ function registerIpc(): void {
       ...args: Args
     ) => Result | Promise<Result>,
   ): void => {
+    const cloud = channel.startsWith("cloud");
     ipcMain.handle(channel, async (event, ...args) => {
       assertTrustedIpcEvent(event);
       const win = requireEventWindow(event);
-      return await ipcWindowContext.run(
-        win,
-        async () => await listener(event, ...(args as Args)),
-      );
+      try {
+        return await ipcWindowContext.run(
+          win,
+          async () => await listener(event, ...(args as Args)),
+        );
+      } catch (error) {
+        throw cloud ? cloudIpcError(error) : error;
+      }
     });
   };
 

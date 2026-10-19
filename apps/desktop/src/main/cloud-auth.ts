@@ -7,6 +7,13 @@ import type {
   CloudAccountStatus,
 } from "@zennotes/bridge-contract/cloud-sync";
 import type { CloudAuthDeepLinkRequest } from "./deep-links";
+import {
+  CLOUD_SIGN_IN_EXPIRED_MESSAGE,
+  CLOUD_SIGN_IN_REFUSED_MESSAGE,
+  CLOUD_SIGN_IN_UNEXPECTED_MESSAGE,
+  encodeCloudErrorMessage,
+} from "@zennotes/shared-domain/cloud-error-copy";
+import { CloudServiceRequestError } from "./cloud-sync-client";
 
 const PENDING_AUTH_FILE = "cloud-auth-pending.json";
 const CLOUD_ACCOUNT_FILE = "cloud-account.json";
@@ -136,11 +143,23 @@ export class CloudAuthManager {
   ): Promise<CloudAccountStatus> {
     const pending = await this.readPending();
     if (!pending || !safeEquals(request.state, pending.state)) {
-      throw new Error(
-        "This ZenNotes Cloud sign-in request is invalid or has expired.",
-      );
+      throw new Error(CLOUD_SIGN_IN_EXPIRED_MESSAGE);
     }
+    try {
+      return await this.exchange(pending, request);
+    } catch (error) {
+      // The code is spent and the browser says the sign-in failed, so this
+      // request can no longer finish: stop showing "Finish signing in in
+      // your browser" for the minutes it has left.
+      await this.removeFile(PENDING_AUTH_FILE);
+      throw error;
+    }
+  }
 
+  private async exchange(
+    pending: PendingCloudAuth,
+    request: CloudAuthDeepLinkRequest,
+  ): Promise<CloudAccountStatus> {
     const response = await this.fetchImplementation(
       `${pending.base_url}/api/v1/app/exchange`,
       {
@@ -162,14 +181,25 @@ export class CloudAuthManager {
     );
     const payload = await parseExchangeResponse(response);
     if (!response.ok) {
+      const refusal = exchangeRefusal(payload);
+      // Busy or broken service: worded like any other Cloud answer.
+      if (response.status === 429 || response.status >= 500) {
+        throw new CloudServiceRequestError(
+          refusal.message ?? `ZenNotes Cloud sign-in failed (${response.status}).`,
+          response.status,
+          refusal.code,
+        );
+      }
       throw new Error(
-        typeof payload.message === "string"
-          ? payload.message
-          : "ZenNotes Cloud rejected this sign-in request.",
+        encodeCloudErrorMessage({
+          message: CLOUD_SIGN_IN_REFUSED_MESSAGE,
+          detail: `HTTP ${response.status} · ${refusal.message ?? "no message"}`,
+          kind: "other",
+        }),
       );
     }
     if (!isExchangeResponse(payload)) {
-      throw new Error("ZenNotes Cloud returned an invalid sign-in response.");
+      throw new Error(CLOUD_SIGN_IN_UNEXPECTED_MESSAGE);
     }
     if (!(await this.dependencies.setSecret(pending.base_url, payload.token))) {
       // On Linux this almost always means Chromium settled on its plaintext
@@ -177,10 +207,13 @@ export class CloudAuthManager {
       // point at the override instead of leaving a dead end.
       throw new Error(
         process.platform === "linux"
-          ? "ZenNotes could not store the cloud credential securely on this device. " +
-            "If a Secret Service keyring (such as gnome-keyring) is running, " +
-            "launch ZenNotes with --password-store=gnome-libsecret and sign in again."
-          : "ZenNotes could not store the cloud credential securely on this device.",
+          ? "ZenNotes couldn't save your sign-in safely, so this device is not signed in. " +
+            "ZenNotes keeps it in your system keyring, and none answered. Make sure a " +
+            "keyring app such as GNOME Keyring is running. If it is, quit ZenNotes, start " +
+            "it with the option --password-store=gnome-libsecret, and sign in again."
+          : "ZenNotes couldn't save your sign-in safely in this computer's keychain, so " +
+            "this device is not signed in. Quit and reopen ZenNotes, then choose Connect " +
+            "ZenNotes Cloud again.",
       );
     }
 
@@ -405,6 +438,24 @@ function isLoopbackCallbackUrl(value: string): boolean {
 
   const port = Number(match[1]);
   return Number.isInteger(port) && port <= 65_535;
+}
+
+/** The exchange answers in Laravel's flat `{message}` shape for a bad code
+ *  and in the API's `{error: {code, message}}` shape for everything else. */
+function exchangeRefusal(payload: Record<string, unknown>): {
+  message: string | null;
+  code: string | null;
+} {
+  const nested =
+    payload.error && typeof payload.error === "object"
+      ? (payload.error as Record<string, unknown>)
+      : null;
+  const message = nested?.message ?? payload.message;
+  const code = nested?.code ?? payload.code;
+  return {
+    message: typeof message === "string" && message ? message : null,
+    code: typeof code === "string" && code ? code : null,
+  };
 }
 
 async function parseExchangeResponse(

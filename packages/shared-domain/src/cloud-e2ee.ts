@@ -666,13 +666,13 @@ export function recoveryKeyFromWords(input: string): Bytes {
     .split(/[^a-z0-9]+/)
     .filter((token) => token !== '' && !/^\d+$/.test(token))
   if (tokens.length !== 24) {
-    throw new CloudE2eeError('invalid-recovery-key', `A recovery key has 24 words; this has ${tokens.length}.`)
+    throw new CloudE2eeError('invalid-recovery-key', `A recovery key has 24 words, and this has ${tokens.length}. Check for a missing or extra word.`)
   }
   const words = tokens.map((token, index) => {
     if (knownWords.has(token)) return token
     const word = token.length >= 4 ? wordByPrefix.get(token.slice(0, 4)) : undefined
     if (!word) {
-      throw new CloudE2eeError('invalid-recovery-key', `Word ${index + 1} ("${token}") is not a recovery key word.`)
+      throw new CloudE2eeError('invalid-recovery-key', `Word ${index + 1}, “${token}”, isn't a recovery key word. Check its spelling.`)
     }
     return word
   })

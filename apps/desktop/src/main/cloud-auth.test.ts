@@ -7,6 +7,7 @@ import {
   normalizeCloudBaseUrl,
   resolveCloudBaseUrl,
 } from "./cloud-auth";
+import { describeCloudError } from "@zennotes/shared-domain/cloud-error-copy";
 
 const temporaryDirectories: string[] = [];
 
@@ -21,6 +22,7 @@ afterEach(async () => {
 async function setup(
   allowInsecureLocalDevelopment = false,
   revokeTimeoutMs?: number,
+  keyringAnswers = true,
 ) {
   const storageDirectory = await mkdtemp(
     path.join(os.tmpdir(), "zennotes-cloud-auth-"),
@@ -37,6 +39,7 @@ async function setup(
     fetchImplementation,
     getSecret: async (baseUrl) => secrets.get(baseUrl) ?? null,
     setSecret: async (baseUrl, token) => {
+      if (!keyringAnswers) return false;
       secrets.set(baseUrl, token);
       return true;
     },
@@ -148,8 +151,51 @@ describe("CloudAuthManager", () => {
 
     await expect(
       manager.complete({ code: "OneTimeCode", state: "other-state" }),
-    ).rejects.toThrow("invalid or has expired");
+    ).rejects.toThrow("This sign-in has expired.");
     expect(fetchImplementation).not.toHaveBeenCalled();
+    // A stale link leaves the request this device is waiting on alone.
+    expect((await manager.status()).state).toBe("connecting");
+  });
+
+  it("words a refused exchange, keeps the server's text as the detail, and stops waiting", async () => {
+    const { manager, fetchImplementation } = await setup();
+    await manager.connect("https://zennotes.org");
+    fetchImplementation.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "Invalid or expired code." }), {
+        status: 422,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const failure = await manager
+      .complete({ code: "OneTimeCode", state: "fixed-state" })
+      .catch((error: unknown) => error as Error);
+    expect(describeCloudError(failure)).toEqual({
+      message: expect.stringMatching(/^This sign-in didn't go through/),
+      detail: "HTTP 422 · Invalid or expired code.",
+      kind: "other",
+    });
+    expect(await manager.status()).toEqual({ state: "disconnected", account: null });
+  });
+
+  it("says plainly when the keyring cannot keep the sign-in, and stops waiting", async () => {
+    const { manager, fetchImplementation } = await setup(false, undefined, false);
+    await manager.connect("https://zennotes.org");
+    fetchImplementation.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          token: "secret-token",
+          user: { name: "Ada", email: "ada@example.com" },
+          device: { id: "device-1", name: "Test Mac", platform: "desktop" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      manager.complete({ code: "OneTimeCode", state: "fixed-state" }),
+    ).rejects.toThrow(/^ZenNotes couldn't save your sign-in safely/);
+    expect((await manager.status()).state).toBe("disconnected");
   });
 
   it("clears pending authorization when the browser cannot open", async () => {
@@ -199,7 +245,7 @@ describe("CloudAuthManager", () => {
     });
     await expect(
       manager.complete({ code: "OneTimeCode", state: "fixed-state" }),
-    ).rejects.toThrow("invalid or has expired");
+    ).rejects.toThrow("This sign-in has expired.");
   });
 });
 

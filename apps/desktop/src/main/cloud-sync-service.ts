@@ -31,6 +31,12 @@ import {
   restoreCloudBackup
 } from '@zennotes/shared-domain/cloud-backup'
 import {
+  CLOUD_NOT_LINKED_MESSAGE,
+  CLOUD_NOT_SIGNED_IN_MESSAGE,
+  CLOUD_OTHER_ACCOUNT_MESSAGE,
+  CLOUD_VAULT_NAME_REQUIRED_MESSAGE
+} from '@zennotes/shared-domain/cloud-error-copy'
+import {
   CLOUD_SYNC_SETTINGS_CONFLICT_PATH,
   CLOUD_SYNC_VAULT_SETTINGS_PATH
 } from '@zennotes/shared-domain/cloud-sync'
@@ -237,7 +243,7 @@ export class DesktopCloudSyncService {
 
   private async encryptionConnection() {
     const connection = await this.connection()
-    if (!connection.keyStore) throw new Error('End-to-end encryption is not available in this build.')
+    if (!connection.keyStore) throw new Error("This version of ZenNotes can't use end-to-end encryption. Update ZenNotes to the latest version.")
     return { ...connection, keyStore: connection.keyStore }
   }
 
@@ -289,7 +295,7 @@ export class DesktopCloudSyncService {
     const vault = (await client.listVaults()).data.find((candidate) => candidate.id === vaultId)
     if (!vault) throw new Error('That ZenNotes Cloud vault is not available to this account.')
     if (vault.encryption && !keyring) {
-      throw new Error('This vault is end-to-end encrypted, which this version of ZenNotes cannot open.')
+      throw new Error('This vault is end-to-end encrypted, which this version of ZenNotes cannot open. Update ZenNotes to the latest version.')
     }
     // Opening an encrypted vault's name needs the account key, so linking a
     // locked device stops here instead of at the first sync.
@@ -311,7 +317,7 @@ export class DesktopCloudSyncService {
     options: { encrypted?: boolean } = {}
   ): Promise<CloudVaultLink> {
     const normalizedName = name.trim()
-    if (!normalizedName) throw new Error('Cloud vault name is required.')
+    if (!normalizedName) throw new Error(CLOUD_VAULT_NAME_REQUIRED_MESSAGE)
     const { account, client, keyStore, keyring } = await this.connection()
     let vault: CloudSyncVault
     if (options.encrypted) {
@@ -423,10 +429,10 @@ export class DesktopCloudSyncService {
       }
     )
     if (!response.ok) {
-      throw new Error(await backupDownloadError(response))
+      throw await backupDownloadError(response)
     }
     if (!response.body) {
-      throw new Error('ZenNotes Cloud returned an empty backup archive.')
+      throw new CloudServiceRequestError('ZenNotes Cloud returned an empty backup archive.', response.status, 'BACKUP_NOT_AVAILABLE')
     }
 
     const target = path.resolve(destinationPath)
@@ -556,10 +562,10 @@ export class DesktopCloudSyncService {
   async encryptLinkedVault(localRoot: string): Promise<CloudVaultLink> {
     const before = await this.sync(localRoot)
     if (hasOpenConflicts(before)) {
-      throw new Error('Resolve sync conflicts before encrypting this vault.')
+      throw new Error('Some files are waiting for review. Choose Review, settle them, then encrypt this vault.')
     }
     const { client, link, keyStore, keyring } = await this.linkedConnection(localRoot)
-    if (!keyStore || !keyring) throw new Error('End-to-end encryption is not available in this build.')
+    if (!keyStore || !keyring) throw new Error("This version of ZenNotes can't use end-to-end encryption. Update ZenNotes to the latest version.")
     if (link.replaces_vault_id) return this.syncAndRetireReplacedVault(localRoot)
     if (await keyring.forVault(link.vault_id)) throw new Error('This vault is already end-to-end encrypted.')
     const stored = await keyStore.load()
@@ -578,10 +584,10 @@ export class DesktopCloudSyncService {
   private async syncAndRetireReplacedVault(localRoot: string): Promise<CloudVaultLink> {
     const summary = await this.sync(localRoot)
     if (hasOpenConflicts(summary)) {
-      throw new Error('Resolve sync conflicts, then sync again to finish encrypting this vault.')
+      throw new Error('Some files are waiting for review. Choose Review, settle them, then choose Sync now to finish encrypting this vault.')
     }
     const link = await this.readLink(localRoot)
-    if (!link) throw new Error('Link this local vault to a ZenNotes Cloud vault first.')
+    if (!link) throw new Error(CLOUD_NOT_LINKED_MESSAGE)
     return (await this.retireReplacedVault(localRoot, link, summary)) ?? link
   }
 
@@ -629,10 +635,10 @@ export class DesktopCloudSyncService {
 
   private async run(localRoot: string): Promise<CloudSyncRunSummary> {
     const link = await this.readLink(localRoot)
-    if (!link) throw new Error('Link this local vault to a ZenNotes Cloud vault before syncing.')
+    if (!link) throw new Error(CLOUD_NOT_LINKED_MESSAGE)
     const { account, client } = await this.connection()
     if (link.base_url !== account.base_url) {
-      throw new Error('This vault is linked to a different ZenNotes Cloud account.')
+      throw new Error(CLOUD_OTHER_ACCOUNT_MESSAGE)
     }
 
     const coordinator = createDesktopCloudSyncCoordinator({
@@ -836,7 +842,7 @@ export class DesktopCloudSyncService {
     keyring?: CloudE2eeKeyring
   }> {
     const connection = await this.optionalConnection()
-    if (!connection) throw new Error('Connect ZenNotes Cloud before using sync.')
+    if (!connection) throw new Error(CLOUD_NOT_SIGNED_IN_MESSAGE)
     return connection
   }
 
@@ -854,7 +860,7 @@ export class DesktopCloudSyncService {
     const account = status.account
     const token = await this.dependencies.getSecret(account.base_url)
     signal.throwIfAborted()
-    if (!token) throw new Error('The ZenNotes Cloud credential is unavailable. Sign in again.')
+    if (!token) throw new Error("ZenNotes can't find your saved Cloud sign-in on this device. Choose Disconnect, then Connect ZenNotes Cloud to sign in again.")
     const keyStore = this.dependencies.accountKeyStore?.(account)
     const keyring = keyStore ? this.keyringFor(account, token, keyStore) : undefined
     return {
@@ -908,10 +914,10 @@ export class DesktopCloudSyncService {
     keyring?: CloudE2eeKeyring
   }> {
     const link = await this.readLink(localRoot)
-    if (!link) throw new Error('Link this local vault to a ZenNotes Cloud vault first.')
+    if (!link) throw new Error(CLOUD_NOT_LINKED_MESSAGE)
     const connection = await this.connection()
     if (link.base_url !== connection.account.base_url) {
-      throw new Error('This vault is linked to a different ZenNotes Cloud account.')
+      throw new Error(CLOUD_OTHER_ACCOUNT_MESSAGE)
     }
     return { ...connection, link }
   }
@@ -944,14 +950,24 @@ export class DesktopCloudSyncService {
   }
 }
 
-async function backupDownloadError(response: Response): Promise<string> {
+/** The refusal as the API client would throw it, so it is worded by its
+ *  status and code like every other Cloud answer. A refusal without a code
+ *  reads as an archive that cannot be downloaded right now. */
+async function backupDownloadError(response: Response): Promise<CloudServiceRequestError> {
+  let message: string | null = null
+  let code: string | null = null
   try {
-    const payload = (await response.json()) as { error?: { message?: unknown } }
-    if (typeof payload.error?.message === 'string') return payload.error.message
+    const payload = (await response.json()) as { error?: { message?: unknown; code?: unknown } }
+    if (typeof payload.error?.message === 'string') message = payload.error.message
+    if (typeof payload.error?.code === 'string') code = payload.error.code
   } catch {
-    // The response was not JSON; use the stable fallback below.
+    // The response was not JSON; the status says enough.
   }
-  return `ZenNotes Cloud could not download this backup (${response.status}).`
+  return new CloudServiceRequestError(
+    message ?? `ZenNotes Cloud could not download this backup (${response.status}).`,
+    response.status,
+    code ?? (response.status === 401 ? null : 'BACKUP_NOT_AVAILABLE')
+  )
 }
 
 function fingerprint(value: string): string {
@@ -1005,6 +1021,6 @@ function assertBackupReady(summary: CloudSyncRunSummary): void {
     summary.bootstrap_conflicts.length > 0 ||
     (summary.pending_conflicts?.length ?? 0) > 0
   ) {
-    throw new Error('Resolve sync conflicts before creating a cloud backup.')
+    throw new Error('Some files are waiting for review. Settle them first (Review), then create the backup.')
   }
 }

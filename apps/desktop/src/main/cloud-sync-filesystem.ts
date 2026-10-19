@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants, createReadStream, promises as fs, type BigIntStats, type Stats } from 'node:fs'
 import path from 'node:path'
 import { atomicWriteTarget, renameWithRetry } from './atomic-write'
+import { cloudProtocolError } from '@zennotes/shared-domain/cloud-error-copy'
 import { stageDesktopCloudContent, copyVerifiedCloudFile, type DesktopCloudDownloadOptions, type DesktopCloudStagedHandle } from './cloud-sync-download'
 import { cloudSyncStagedHandle, throwIfCloudSyncCancelled, type CloudSyncDownloadSource, type CloudSyncStagedFile, type CloudSyncStagedConflict } from '@zennotes/shared-domain/cloud-sync-content'
 import type {
@@ -104,7 +105,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
     if ([change.path, previous?.path].some((candidate) => candidate && !shouldSyncVaultPath(candidate))) return
     const handle = this.stagedHandle(file)
     if (change.type !== 'upsert' || !change.content_ref || change.item_id !== file.reference.item_id ||
-        change.revision < file.reference.revision) throw new Error('Invalid staged Cloud change.')
+        change.revision < file.reference.revision) throw cloudProtocolError('Invalid staged Cloud change.')
     cloudSyncStagedHandle(file, change.content_ref)
     const atTarget = await this.localItemOrNull(change.path)
     if (atTarget?.content.sha256 === file.reference.sha256 && atTarget.content.byte_length === file.reference.byte_length) {
@@ -135,13 +136,13 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
     const local = expected ? await this.localItemOrNull(expected) : null
     if ((local?.content.sha256 ?? null) !== input.expected_sha256) throw new Error('This file changed on this device.')
     const replacing = expected !== null && cloudSyncPathKey(expected) === cloudSyncPathKey(cloud)
-    if (!replacing && await exists(this.resolve(cloud))) throw new Error(`${cloud} already exists.`)
+    if (!replacing && await exists(this.resolve(cloud))) throw new Error(`A file named “${cloud}” already exists. Choose another name.`)
     let keptCopy: Stats | undefined
     let cloudPublished = false
     try {
       if (keep) {
         if (!expected || !local) throw new Error('Both versions are no longer available.')
-        if (await exists(this.resolve(keep))) throw new Error(`${keep} already exists.`)
+        if (await exists(this.resolve(keep))) throw new Error(`A file named “${keep}” already exists. Choose another name.`)
         keptCopy = await this.publishFile(keep, this.resolve(expected), local.content, null, handle.signal)
       }
       // Recheck after a potentially long local copy, immediately before publish.
@@ -183,7 +184,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
 
   private stagedHandle(file: CloudSyncStagedFile): DesktopCloudStagedHandle {
     const handle = cloudSyncStagedHandle<DesktopCloudStagedHandle>(file)
-    if (handle.owner !== this) throw new Error('Cloud staging belongs to another repository.')
+    if (handle.owner !== this) throw cloudProtocolError('Cloud staging belongs to another repository.')
     return handle
   }
 
@@ -242,7 +243,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
     if (affectedPaths.some((path) => !shouldSyncVaultPath(path))) return
 
     if (change.type === 'upsert') {
-      if (!change.content) throw new Error(`Upsert change ${change.sequence} did not include content`)
+      if (!change.content) throw cloudProtocolError(`Upsert change ${change.sequence} did not include content`)
       const atTarget = await this.readIfExists(change.path)
       // Already byte-for-byte what the change carries. There is nothing to
       // write and nothing to conflict over at the target, so adopt the file
@@ -337,7 +338,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
 
     const source = this.resolve(originalPath)
     const destination = this.resolve(localCopyPath)
-    if (await exists(destination)) throw new Error(`${localCopyPath} already exists.`)
+    if (await exists(destination)) throw new Error(`A file named “${localCopyPath}” already exists. Choose another name.`)
     await fs.mkdir(path.dirname(destination), { recursive: true })
     await fs.rename(source, destination)
     try {
@@ -384,7 +385,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
     for (const file of files) {
       if (cloudSyncPathKey(file.path) === expectedKey) continue
       if (await exists(this.resolve(file.path))) {
-        throw new Error(`${file.path} already exists. Choose another filename.`)
+        throw new Error(`A file named “${file.path}” already exists. Choose another name.`)
       }
     }
 
@@ -446,7 +447,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
     const absolutePath = path.resolve(root, ...normalized.split('/'))
 
     if (!absolutePath.startsWith(`${root}${path.sep}`)) {
-      throw new Error(`Cloud sync path escapes vault: ${relPath}`)
+      throw cloudProtocolError(`Cloud sync path escapes vault: ${relPath}`)
     }
 
     return absolutePath
@@ -735,7 +736,7 @@ function directUploadContent(relPath: string, absolutePath: string, bytes: Buffe
 
 async function decodeContent(content: CloudSyncContent): Promise<Buffer> {
   if (content.encoding !== 'utf8' && content.encoding !== 'base64') {
-    throw new Error('Encrypted cloud sync content must be decrypted before filesystem apply')
+    throw cloudProtocolError('Encrypted cloud sync content must be decrypted before filesystem apply')
   }
   if (content.data === '' && content.byte_length > 0) {
     // A scan snapshot of a file above the inline limit carries no bytes; the

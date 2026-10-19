@@ -3,6 +3,7 @@ import type {
   CloudAccountConnectResult,
   CloudAccountStatus
 } from '@zennotes/bridge-contract/cloud-sync'
+import { CLOUD_SIGN_IN_EXPIRED_MESSAGE, CLOUD_SIGN_IN_UNEXPECTED_MESSAGE } from './cloud-error-copy'
 
 const AUTH_LIFETIME_MS = 5 * 60 * 1000
 const REVOKE_TIMEOUT_MS = 5_000
@@ -139,7 +140,7 @@ export class CloudAuthFlow {
   async complete(callback: CloudAuthCallback): Promise<CloudAccountStatus> {
     const pending = await this.pending()
     if (!pending || !safeEquals(callback.state, pending.state)) {
-      throw new Error('This ZenNotes Cloud sign-in request is invalid or has expired.')
+      throw new Error(CLOUD_SIGN_IN_EXPIRED_MESSAGE)
     }
 
     const response = await this.dependencies.exchange(pending.base_url, {
@@ -151,7 +152,7 @@ export class CloudAuthFlow {
       app_version: this.dependencies.appVersion
     })
     if (!isExchangeResponse(response, this.dependencies.platform)) {
-      throw new Error('ZenNotes Cloud returned an invalid sign-in response.')
+      throw new Error(CLOUD_SIGN_IN_UNEXPECTED_MESSAGE)
     }
 
     const account: CloudAccount = {

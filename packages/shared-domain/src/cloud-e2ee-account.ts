@@ -81,8 +81,8 @@ async function openAccountKey(keyset: CloudEncryptionKeyset, secret: CloudEncryp
       throw new CloudE2eeError(
         'wrong-key',
         'passphrase' in secret
-          ? 'That passphrase does not unlock your encryption.'
-          : 'That recovery key does not unlock your encryption.'
+          ? "That passphrase didn't work. Check for typos and capital letters, or use your recovery key instead."
+          : "That recovery key didn't work. Check each word, or use your passphrase instead."
       )
     }
     throw error
@@ -107,7 +107,7 @@ export async function prepareCloudEncryptionSetup(
   const problem = cloudPassphraseProblem(passphrase)
   if (problem) throw new CloudE2eeError('invalid-key', problem)
   if (await api.getKeyset()) {
-    throw new CloudE2eeError('invalid-key', 'End-to-end encryption is already set up for this account.')
+    throw new CloudE2eeError('invalid-key', 'End-to-end encryption is already set up for this account. Unlock it with your passphrase instead.')
   }
   const accountKey = generateCloudE2eeKey()
   const recoveryKey = generateCloudE2eeKey()

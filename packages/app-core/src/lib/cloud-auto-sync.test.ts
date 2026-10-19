@@ -9,6 +9,7 @@ import {
   CLOUD_VAULT_REMOVED_MESSAGE,
   CLOUD_VAULT_SUPERSEDED_MESSAGE,
 } from "@zennotes/shared-domain/cloud-vault-availability";
+import { CLOUD_SIGNED_OUT_MESSAGE } from "@zennotes/shared-domain/cloud-error-copy";
 import {
   acknowledgeCloudConflictResolution,
   clearCloudSyncStatus,
@@ -212,7 +213,7 @@ describe("cloud auto sync host wiring", () => {
       capacity: { dimension, used: 10, reserved: 0, limit: 10, projected: 11, can_retry_after_reduction: true },
     }]);
     expect(cloudSyncAttentionLabel(limit("sync_active_bytes"))).toBe("Cloud storage full");
-    expect(cloudSyncAttentionLabel(limit("sync_active_items"))).toBe("Cloud item limit reached");
+    expect(cloudSyncAttentionLabel(limit("sync_active_items"))).toBe("Cloud file limit reached");
     expect(cloudSyncAttentionLabel(limit("vaults"))).toBe("Cloud capacity reached");
     expect(cloudSyncAttentionLabel(run([]))).toBeNull();
     expect(cloudSyncAttentionLabel(null)).toBeNull();
@@ -251,7 +252,7 @@ describe("cloud auto sync host wiring", () => {
       await expect(syncCloudVaultWithStatus(host.bridge)).rejects.toThrow("Connection timed out");
       handlers.finished(null, "Connection timed out");
       expect(useCloudSyncStatusStore.getState().error).toBe(
-        "Note saved. Remaining vault sync failed: Connection timed out",
+        "Your note was saved, but the rest of the vault didn't sync. Connection timed out",
       );
       handlers.finished(summary, null);
       handlers.finished(null, "A later unrelated error");
@@ -480,7 +481,7 @@ describe("cloud auto sync host wiring", () => {
       vaultName: "Notes",
       lastSyncedAt: null,
       error:
-        "Cloud capacity reached. Remove files or increase your Cloud capacity.",
+        "Your ZenNotes Cloud plan is full, so some changes are waiting on this device. Delete files you no longer need, or change your plan under Billing on zennotes.org.",
     });
   });
 
@@ -516,7 +517,7 @@ describe("cloud auto sync host wiring", () => {
     expect(useCloudSyncStatusStore.getState()).toMatchObject({
       phase: "attention",
       error:
-        "Cloud active-item limit reached (100 of 100). Remove files or increase your Cloud capacity.",
+        "Your ZenNotes Cloud plan holds up to 100 files across your account, and you have reached that. New files are waiting on this device. Delete files you no longer need, or change your plan under Billing on zennotes.org.",
     });
   });
 
@@ -664,8 +665,11 @@ describe("cloud auto sync host wiring", () => {
 
   it("disconnects when the service rejects the stored credential", async () => {
     const host = setup();
-    const unauthorized = Object.assign(new Error("Unauthenticated."), {
+    // The shape both the desktop client and the phone shells throw.
+    const unauthorized = Object.assign(new Error("Authentication is required."), {
+      name: "CloudServiceRequestError",
       status: 401,
+      code: "UNAUTHENTICATED",
     });
     host.syncCloudVault.mockRejectedValue(unauthorized);
     const onError = vi.fn();
@@ -680,6 +684,13 @@ describe("cloud auto sync host wiring", () => {
 
     expect(host.logoutCloudAccount).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();
+    // The row says why the device is signed out, in words, until it connects.
+    expect(useCloudSyncStatusStore.getState()).toMatchObject({
+      phase: "disconnected",
+      error: CLOUD_SIGNED_OUT_MESSAGE,
+      errorKind: "signed-out",
+      errorDetail: "HTTP 401 · UNAUTHENTICATED · Authentication is required.",
+    });
 
     await vi.advanceTimersByTimeAsync(60_000);
     await flushPromises();
@@ -799,7 +810,7 @@ describe("cloudSyncAttentionItems (Discord: name the file, not the count)", () =
         },
       ],
     });
-    expect(items.map((item) => item.path)).toEqual(["inbox/Old.md", "item i-10"]);
+    expect(items.map((item) => item.path)).toEqual(["inbox/Old.md", "A file"]);
   });
 
   it("remembers the last run summary so Review can show it without another sync", async () => {
@@ -972,7 +983,7 @@ describe("the vault settings question (#816)", () => {
     );
     const state = useCloudSyncStatusStore.getState();
     expect(state.phase).toBe("attention");
-    expect(state.error).toContain("1 file differs");
+    expect(state.error).toContain("1 file was changed both on this device and on another device");
     expect(cloudSyncAttentionIsSettingsOnly()).toBe(false);
     expect(state.settingsConflict).toEqual(question);
 

@@ -10,6 +10,7 @@ import type {
 } from '@zennotes/bridge-contract/cloud-sync'
 import { cloudSyncPathKey, normalizeCloudSyncPath, shouldSyncVaultPath } from './cloud-sync'
 import { validateCloudSyncContentReference } from './cloud-sync-content'
+import { CloudIssueError, cloudProtocolError } from './cloud-error-copy'
 
 export interface CloudSyncLocalItem {
   path: string
@@ -112,7 +113,7 @@ export function planCloudSyncMutations(
     }
     const key = cloudSyncPathKey(normalizedItem.path)
     if (localByPathKey.has(key)) {
-      throw new Error(`Vault contains a portable path collision at ${normalizedItem.path}`)
+      throw new CloudIssueError('path-collision', `Vault contains a portable path collision at ${normalizedItem.path}`, normalizedItem.path)
     }
     localByPathKey.set(key, normalizedItem)
   }
@@ -218,7 +219,7 @@ export function resolveCloudSyncMutations(
   for (const acknowledgement of response.acknowledged) {
     const mutation = mutationByOperation.get(acknowledgement.operation_id)
     if (!mutation || mutation.item_id !== acknowledgement.item_id) {
-      throw new Error(
+      throw cloudProtocolError(
         `Server acknowledged an unknown sync operation ${acknowledgement.operation_id}`
       )
     }
@@ -231,7 +232,7 @@ export function resolveCloudSyncMutations(
     const previousItem = nextState.items[mutation.item_id]
     if (mutation.type === 'move') {
       if (!previousItem) {
-        throw new Error(`Server acknowledged a move for unknown item ${mutation.item_id}`)
+        throw cloudProtocolError(`Server acknowledged a move for unknown item ${mutation.item_id}`)
       }
       nextState.items[mutation.item_id] = {
         ...previousItem,
@@ -262,7 +263,7 @@ export function reduceCloudSyncChange(
 ): CloudSyncState {
   if (change.sequence <= state.cursor) return state
   if (change.sequence !== state.cursor + 1) {
-    throw new Error(`Expected sync sequence ${state.cursor + 1}, received ${change.sequence}`)
+    throw cloudProtocolError(`Expected sync sequence ${state.cursor + 1}, received ${change.sequence}`)
   }
 
   const items = { ...state.items }
@@ -270,18 +271,18 @@ export function reduceCloudSyncChange(
     delete items[change.item_id]
   } else if (change.type === 'move') {
     const previousItem = items[change.item_id]
-    if (!previousItem) throw new Error(`Received a move for unknown item ${change.item_id}`)
+    if (!previousItem) throw cloudProtocolError(`Received a move for unknown item ${change.item_id}`)
     items[change.item_id] = {
       ...previousItem,
       path: change.path,
       revision: change.revision
     }
   } else {
-    if (change.content_ref && change.content) throw new Error('Ambiguous Cloud change content.')
+    if (change.content_ref && change.content) throw cloudProtocolError('Ambiguous Cloud change content.')
     const content = change.content_ref
       ? validateCloudSyncContentReference(change.content_ref, change)
       : change.content
-    if (!content) throw new Error(`Upsert change ${change.sequence} did not include content`)
+    if (!content) throw cloudProtocolError(`Upsert change ${change.sequence} did not include content`)
     items[change.item_id] = {
       item_id: change.item_id,
       path: change.path,

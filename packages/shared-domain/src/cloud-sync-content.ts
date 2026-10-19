@@ -5,6 +5,7 @@ import type {
   CloudSyncDownloadInstruction,
   CloudSyncEncryptedContent
 } from '@zennotes/bridge-contract/cloud-sync'
+import { cloudProtocolError } from './cloud-error-copy'
 
 /** Host-only token. Its native handle is never serialized or accepted from HTTP. */
 export interface CloudSyncStagedFile {
@@ -203,7 +204,7 @@ export function registerCloudSyncStagedFile(
   discard: () => Promise<void>,
   preview?: CloudSyncContent
 ): CloudSyncStagedFile {
-  if (typeof discard !== 'function') throw new Error('Cloud staging requires a cleanup callback.')
+  if (typeof discard !== 'function') throw cloudProtocolError('Cloud staging requires a cleanup callback.')
   const file: CloudSyncStagedFile = Object.freeze({
     source: 'file',
     reference: Object.freeze(validateCloudSyncContentReference(reference)),
@@ -218,7 +219,7 @@ export function cloudSyncStagedHandle<Handle = unknown>(
   expected?: CloudSyncContentReference
 ): Handle {
   const stored = stagedFiles.get(file)
-  if (!stored) throw new Error('Untrusted or released Cloud staging handle.')
+  if (!stored) throw cloudProtocolError('Untrusted or released Cloud staging handle.')
   if (expected) validateCloudSyncContentReference(expected)
   if (
     expected &&
@@ -284,5 +285,5 @@ function onlyKeys(value: Record<string, unknown>, keys: string[]): boolean {
 }
 
 function invalid(): never {
-  throw new Error('Invalid Cloud content reference or download instruction.')
+  throw cloudProtocolError('Invalid Cloud content reference or download instruction.')
 }

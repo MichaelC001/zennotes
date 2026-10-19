@@ -607,7 +607,7 @@ describe('CloudSyncHostService', () => {
       local_conflicts: []
     })
 
-    await expect(service.createBackup(hostVault)).rejects.toThrow('Resolve sync conflicts')
+    await expect(service.createBackup(hostVault)).rejects.toThrow('Some files are waiting for review')
     expect(client.createBackup).not.toHaveBeenCalled()
   })
 

@@ -115,6 +115,7 @@ function CloudSyncStatus({
   const vaultName = useCloudSyncStatusStore((state) => state.vaultName);
   const lastSyncedAt = useCloudSyncStatusStore((state) => state.lastSyncedAt);
   const error = useCloudSyncStatusStore((state) => state.error);
+  const errorKind = useCloudSyncStatusStore((state) => state.errorKind);
   const lastSummary = useCloudSyncStatusStore((state) => state.lastSummary);
   const settingsOnly = useCloudSyncStatusStore(cloudSyncAttentionIsSettingsOnly);
   const settingsQuestionWaiting = useCloudSyncStatusStore(
@@ -140,13 +141,18 @@ function CloudSyncStatus({
   // person, and in the plain unlinked phase a phone said nothing at all
   // while its sync had stopped.
   const removal = phase === "unlinked" ? removedVault : null;
-  const shownPhase = removal ? "attention" : phase;
+  // Signed out because Cloud refused this device: the same, it stopped
+  // syncing without the person choosing to.
+  const signedOut = phase === "disconnected" && errorKind === "signed-out";
+  const shownPhase = removal || signedOut ? "attention" : phase;
 
   const label = removal
     ? cloudVaultRemovalLabel(removal)
     : phase === "disconnected"
       ? error
-        ? "Cloud unavailable"
+        ? errorKind === "signed-out"
+          ? "Signed out of Cloud"
+          : "Sign-in didn't start"
         : "ZenNotes Cloud"
       : phase === "connecting"
         ? "Connecting to Cloud…"
@@ -161,7 +167,9 @@ function CloudSyncStatus({
                   ? "Settings need review"
                   : (cloudSyncAttentionLabel(lastSummary) ?? "Sync incomplete")
               : phase === "error"
-                ? "Sync failed"
+                ? errorKind === "offline"
+                  ? "Can't reach Cloud"
+                  : "Sync failed"
                 : lastSyncedAt === null
                   ? "Cloud ready"
                   : `Synced ${formatRelativeSyncTime(lastSyncedAt, now)}`;
@@ -174,9 +182,9 @@ function CloudSyncStatus({
         : phase === "unlinked"
           ? "Choose the cloud vault this device should use."
           : phase === "attention"
-            ? (error ?? "Some Cloud changes could not be synchronized.")
+            ? (error ?? "Some changes didn't sync. Open Settings → Cloud to see which files.")
             : phase === "error"
-              ? `${error ?? "Sync could not finish."} Click to retry.`
+              ? `${error ?? "Sync didn't finish."} Click to retry.`
               : phase === "syncing"
                 ? `Syncing ${vaultName ?? "this vault"}`
                 : `${vaultName ?? "Cloud vault"} is connected. Click to sync now.`;
@@ -195,7 +203,7 @@ function CloudSyncStatus({
   // cannot finish the waiting file anyway.
   const actionLabel =
     phase === "disconnected"
-      ? error
+      ? error && errorKind !== "signed-out"
         ? "Retry"
         : "Connect"
       : phase === "unlinked"

@@ -60,7 +60,7 @@ const CIPHERTEXT_MEDIA_TYPE = 'application/octet-stream'
 export class CloudE2eeLockedError extends Error {
   readonly code = 'E2EE_LOCKED'
 
-  constructor(message = 'This vault is end-to-end encrypted. Unlock encryption on this device to sync it.') {
+  constructor(message = 'This vault is end-to-end encrypted, so this device needs your passphrase or recovery key before it can sync. Unlock encryption in Settings → Cloud.') {
     super(message)
     this.name = 'CloudE2eeLockedError'
   }

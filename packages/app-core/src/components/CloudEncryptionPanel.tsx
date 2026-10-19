@@ -7,7 +7,8 @@ import type {
 import type { ZenBridge } from "@zennotes/bridge-contract/bridge";
 import { cloudPassphraseProblem } from "@zennotes/shared-domain/cloud-e2ee-passphrase";
 import { confirmApp } from "../lib/confirm-requests";
-import { humanIpcError } from "../lib/ipc-error";
+import type { CloudErrorCopy } from "@zennotes/shared-domain/cloud-error-copy";
+import { CloudErrorMessage, cloudErrorCopy } from "./CloudErrorMessage";
 import { isImeComposing } from "../lib/ime";
 import { Button } from "./ui/Button";
 import { Modal } from "./ui/Modal";
@@ -32,7 +33,7 @@ export function CloudEncryptionPanel({
 }): JSX.Element | null {
   const [status, setStatus] = useState<CloudEncryptionStatus | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CloudErrorCopy | null>(null);
   const supported = typeof bridge.getCloudEncryptionStatus === "function";
 
   const refresh = useCallback(async () => {
@@ -43,7 +44,7 @@ export function CloudEncryptionPanel({
       onStatusChange?.(next);
       setError(null);
     } catch (cause) {
-      setError(humanIpcError(cause, "ZenNotes could not check end-to-end encryption."));
+      setError(cloudErrorCopy(cause, "ZenNotes couldn't check end-to-end encryption. Try again in a moment.", bridge));
     }
   }, [bridge, onStatusChange]);
 
@@ -66,7 +67,7 @@ export function CloudEncryptionPanel({
       await bridge.lockCloudEncryption?.();
       await refresh();
     } catch (cause) {
-      setError(humanIpcError(cause, "ZenNotes could not lock encryption on this device."));
+      setError(cloudErrorCopy(cause, "ZenNotes couldn't lock encryption on this device. Try again.", bridge));
     }
   };
 
@@ -100,9 +101,9 @@ export function CloudEncryptionPanel({
         </p>
       </div>
       {error && (
-        <p role="alert" className="text-sm leading-6 text-danger">
-          {error}
-        </p>
+        <div role="alert" className="text-sm leading-6 text-danger">
+          <CloudErrorMessage message={error.message} detail={error.detail} />
+        </div>
       )}
       <div className="flex flex-wrap gap-2">
         {!status.keyset && (
@@ -164,7 +165,7 @@ function EncryptionSetupDialog({
           busyLabel="Preparing…"
           onCancel={onCancel}
           onSubmit={async (passphrase) => {
-            if (!bridge.prepareCloudEncryptionSetup) throw new Error("This app cannot set up encryption.");
+            if (!bridge.prepareCloudEncryptionSetup) throw new Error("This version of ZenNotes can't use end-to-end encryption. Update ZenNotes to the latest version.");
             setPrompt(await bridge.prepareCloudEncryptionSetup(passphrase));
             setStep("words");
           }}
@@ -287,7 +288,7 @@ function EncryptionNewRecoveryKeyDialog({
           busyLabel="Preparing…"
           onCancel={onCancel}
           onSubmit={async (secret) => {
-            if (!bridge.prepareNewCloudRecoveryKey) throw new Error("This app cannot replace the recovery key.");
+            if (!bridge.prepareNewCloudRecoveryKey) throw new Error("This version of ZenNotes can't replace the recovery key. Update ZenNotes to the latest version.");
             setPrompt(await bridge.prepareNewCloudRecoveryKey(secret));
             setStep("words");
           }}
@@ -352,19 +353,19 @@ function EncryptionDialog({
 /** Runs one async step, showing its error in place and keeping the dialog open. */
 function useStep(): {
   busy: boolean;
-  error: string | null;
+  error: CloudErrorCopy | null;
   run: (task: () => Promise<void>) => Promise<void>;
-  setError: (message: string | null) => void;
+  setError: (error: CloudErrorCopy | null) => void;
 } {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CloudErrorCopy | null>(null);
   const run = useCallback(async (task: () => Promise<void>) => {
     setBusy(true);
     setError(null);
     try {
       await task();
     } catch (cause) {
-      setError(humanIpcError(cause, "That did not work. Try again."));
+      setError(cloudErrorCopy(cause, "That didn't work. Try again."));
     } finally {
       setBusy(false);
     }
@@ -451,9 +452,9 @@ function NewPassphraseStep({
           recovered by anyone, including ZenNotes. The notes on your devices are not affected.
         </p>
         {error && (
-          <p role="alert" className="text-danger">
-            {error}
-          </p>
+          <div role="alert" className="text-danger">
+            <CloudErrorMessage message={error.message} detail={error.detail} />
+          </div>
         )}
       </div>
       <Modal.Footer>
@@ -559,9 +560,9 @@ function SecretStep({
           {mode === "passphrase" ? "Use recovery key instead" : "Use passphrase instead"}
         </button>
         {error && (
-          <p role="alert" className="text-danger">
-            {error}
-          </p>
+          <div role="alert" className="text-danger">
+            <CloudErrorMessage message={error.message} detail={error.detail} />
+          </div>
         )}
       </div>
       <Modal.Footer>
@@ -706,9 +707,9 @@ function RecoveryConfirmStep({
           ))}
         </div>
         {error && (
-          <p role="alert" className="text-danger">
-            {error}
-          </p>
+          <div role="alert" className="text-danger">
+            <CloudErrorMessage message={error.message} detail={error.detail} />
+          </div>
         )}
       </div>
       <Modal.Footer>

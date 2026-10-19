@@ -17,6 +17,11 @@ import { getPublishNoteRequest, dismissPublishNoteRequest } from "../lib/publish
 import { CloudSettings } from "./CloudSettings";
 import { subscribePublishedNoteChanges } from "../lib/published-note-events";
 import { clearCloudSyncStatus, useCloudSyncStatusStore } from "../lib/cloud-auto-sync";
+import {
+  CLOUD_SIGNED_OUT_MESSAGE,
+  describeCloudError,
+  encodeCloudErrorMessage,
+} from "@zennotes/shared-domain/cloud-error-copy";
 
 const mocks = vi.hoisted(() => ({
   getCloudAccountStatus: vi.fn(),
@@ -924,9 +929,9 @@ describe("CloudSettings", () => {
     );
     await act(async () => sync!.click());
 
-    expect(host.textContent).toContain("Cloud item limit reached");
+    expect(host.textContent).toContain("Cloud file limit reached");
     expect(host.textContent).toContain(
-      "Cloud active-item limit reached (100 of 100)",
+      "Your ZenNotes Cloud plan holds up to 100 files across your account",
     );
     expect(host.textContent).toContain("107 changes are waiting to upload");
     expect(host.textContent).not.toContain("Everything is up to date");
@@ -1802,7 +1807,7 @@ describe("CloudSettings", () => {
     );
 
     expect(host.textContent).toContain(
-      "Sync is not included in this subscription",
+      "Sync isn't part of your current plan. Choose a plan under Billing on zennotes.org",
     );
     expect(mocks.listCloudVaults).not.toHaveBeenCalled();
     expect(mocks.getCloudVaultLink).not.toHaveBeenCalled();
@@ -1921,12 +1926,63 @@ describe("CloudSettings", () => {
       ),
     );
 
-    expect(host.textContent).toContain("fetch failed");
+    // The runtime's words stay in Details, never as the message.
+    const message = host.querySelector("[data-cloud-error-message]");
+    expect(message?.textContent).toMatch(/^ZenNotes can't reach ZenNotes Cloud\./);
+    expect(message?.textContent).not.toContain("fetch failed");
+    expect(host.querySelector("[data-cloud-error-details] pre")?.textContent).toBe(
+      "TypeError · fetch failed",
+    );
 
     await act(async () => window.dispatchEvent(new Event("online")));
 
-    expect(host.textContent).not.toContain("fetch failed");
+    expect(host.textContent).not.toContain("can't reach ZenNotes Cloud");
     expect(host.textContent).toContain("SyncIncluded");
+  });
+
+  it("signs out when Cloud refuses this device's sign-in, and says why above Connect", async () => {
+    mocks.getCloudAccountStatus.mockResolvedValue(connected);
+    mocks.getCloudServiceAccount.mockResolvedValue(serviceAccount);
+    mocks.getCloudVaultLink.mockResolvedValue(null);
+    mocks.logoutCloudAccount.mockResolvedValue(disconnected);
+    // What the desktop main process sends for a revoked device.
+    const worded = encodeCloudErrorMessage(
+      describeCloudError(
+        Object.assign(new Error("Authentication is required."), {
+          name: "CloudServiceRequestError",
+          status: 401,
+          code: "UNAUTHENTICATED",
+        }),
+      ),
+    );
+    mocks.listCloudVaults.mockRejectedValue(
+      new Error(`Error invoking remote method 'cloud-vaults:list': Error: ${worded}`),
+    );
+
+    await act(async () =>
+      root.render(
+        createElement(CloudSettings, {
+          localVaultAvailable: true,
+          localVaultName: "Notes",
+        }),
+      ),
+    );
+    expect(mocks.logoutCloudAccount).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+
+    const [accountChanged] = mocks.onCloudAccountChange.mock.calls[0] as unknown as [
+      (status: CloudAccountStatus) => void,
+    ];
+    await act(async () => accountChanged(disconnected));
+
+    const notice = host.querySelector("[data-cloud-signed-out]");
+    expect(notice?.querySelector("[data-cloud-error-message]")?.textContent).toBe(
+      CLOUD_SIGNED_OUT_MESSAGE,
+    );
+    expect(notice?.querySelector("[data-cloud-error-details] pre")?.textContent).toBe(
+      "HTTP 401 · UNAUTHENTICATED · Authentication is required.",
+    );
+    expect(host.textContent).toContain("Connect ZenNotes Cloud");
   });
 
   it("loads again after a sign-in cancels the first load instead of reporting the cancellation", async () => {
@@ -2965,7 +3021,9 @@ describe("CloudSettings", () => {
       await act(async () => buttonNamed("Load more")!.click());
       const inline = (): string | null | undefined =>
         host.querySelector('p[role="alert"]')?.textContent;
-      expect(inline()).toBe("Could not load more notes.");
+      expect(inline()).toBe(
+        "ZenNotes couldn't load more notes from this backup. Try again in a moment.",
+      );
       expect(shownNotes()).toBe(50);
 
       await act(async () => typeInto(searchBox()!, "launch"));

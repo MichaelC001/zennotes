@@ -118,7 +118,7 @@ describe('single-note Cloud resolution', () => {
       ]
     })
     await expect(f.coordinator.resolveConflict(f.resolution)).rejects.toThrow(
-      'Cloud version changed while saving'
+      'changed again on another device'
     )
     expect(f.mutate).toHaveBeenCalledOnce()
     expect(f.write).not.toHaveBeenCalled()

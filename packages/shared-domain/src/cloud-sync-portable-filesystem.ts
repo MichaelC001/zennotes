@@ -16,6 +16,7 @@ import type { CloudSyncRepository, CloudSyncRepositoryConflict } from './cloud-s
 import type { CloudSyncLocalItem, CloudSyncTrackedItem } from './cloud-sync-engine'
 import type { CloudSyncDownloadSource, CloudSyncStagedFile, CloudSyncStagedConflict } from './cloud-sync-content'
 import { randomUUID } from './random-uuid'
+import { cloudProtocolError } from './cloud-error-copy'
 
 const TEXT_EXTENSIONS = new Set([
   '.base',
@@ -186,7 +187,7 @@ export class PortableCloudSyncRepository implements CloudSyncRepository {
       return
     }
 
-    if (!change.content) throw new Error(`Upsert change ${change.sequence} did not include content`)
+    if (!change.content) throw cloudProtocolError(`Upsert change ${change.sequence} did not include content`)
     await this.validateContent(change.content)
 
     const previousPath = this.path(previous?.path ?? change.previous_path ?? change.path)
@@ -270,7 +271,7 @@ export class PortableCloudSyncRepository implements CloudSyncRepository {
       throw new Error('Choose a different filename inside the synced vault.')
     }
     if ((await this.fs.stat(localCopyPath)) !== null) {
-      throw new Error(`${localCopyPath} already exists.`)
+      throw new Error(`A file named “${localCopyPath}” already exists. Choose another name.`)
     }
 
     await this.fs.rename(originalPath, localCopyPath)
@@ -321,7 +322,7 @@ export class PortableCloudSyncRepository implements CloudSyncRepository {
     for (const file of files) {
       if (cloudSyncPathKey(file.path) === expectedKey) continue
       if ((await this.fs.stat(file.path)) !== null) {
-        throw new Error(`${file.path} already exists. Choose another filename.`)
+        throw new Error(`A file named “${file.path}” already exists. Choose another name.`)
       }
     }
 
@@ -546,13 +547,13 @@ export class PortableCloudSyncRepository implements CloudSyncRepository {
       await this.fs.writeBase64(path, content.data)
       return
     }
-    throw new Error('Encrypted cloud sync content must be decrypted before filesystem apply')
+    throw cloudProtocolError('Encrypted cloud sync content must be decrypted before filesystem apply')
   }
 
   private async validateContent(content: CloudSyncContent): Promise<void> {
     if (content.data === '' && content.byte_length > 0 &&
         (!this.fs.validateContent || !this.fs.writeContent)) {
-      throw new Error('File content has no readable source bytes.')
+      throw cloudProtocolError('File content has no readable source bytes.')
     }
     await this.fs.validateContent?.(content)
   }

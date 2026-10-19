@@ -14,6 +14,8 @@ import {
   useCloudSyncStatusStore,
 } from "../lib/cloud-auto-sync";
 import { Button } from "./ui/Button";
+import type { CloudErrorCopy } from "@zennotes/shared-domain/cloud-error-copy";
+import { CloudErrorMessage, cloudErrorCopy } from "./CloudErrorMessage";
 import { randomUUID } from "@zennotes/shared-domain/random-uuid";
 
 type ChangeChoice = "local" | "cloud" | "both";
@@ -44,7 +46,7 @@ export function CloudPendingConflictResolver({
   const [resolving, setBusy] = useState(false);
   const syncing = useCloudSyncStatusStore((state) => state.phase === "syncing" || state.syncWindowLocked);
   const busy = resolving || syncing;
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CloudErrorCopy | null>(null);
   const [keepBothOpen, setKeepBothOpen] = useState(false);
   const [finishLaterOpen, setFinishLaterOpen] = useState(false);
   const [combineOpen, setCombineOpen] = useState(false);
@@ -325,7 +327,7 @@ export function CloudPendingConflictResolver({
           role="alert"
           className="mt-4 rounded-lg border border-danger/35 bg-danger/10 px-3 py-2 text-sm leading-5 text-danger"
         >
-          {error}
+          <CloudErrorMessage message={error.message} detail={error.detail} />
         </div>
       )}
 
@@ -988,6 +990,8 @@ function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/** Without this the resolver showed "Error invoking remote method
+ *  'cloud-vault-conflict:resolve': Error: ..." whole. */
+function message(error: unknown): CloudErrorCopy {
+  return cloudErrorCopy(error, "That didn't work. Try again.");
 }
