@@ -7206,12 +7206,16 @@ function TextInputRow({
     onChange(next ? next : null);
   };
 
+  // The field wraps under the label when the row is too narrow, as the Vault
+  // Location buttons do (#871). On one unwrapping line, a fixed-width field
+  // in a tablet-width or narrow-window Settings pane squeezed the label and
+  // description to one word per line.
   return (
     <div
-      className="flex items-center justify-between gap-5 px-5 py-4"
+      className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 px-5 py-4"
       {...settingsSearchTargetProps(settingId)}
     >
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-56">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && (
           <div className="mt-1 text-xs leading-5 text-ink-500">
@@ -7251,7 +7255,7 @@ function TextInputRow({
           }
         }}
         placeholder={placeholder}
-        className="w-[23rem] max-w-[50vw] shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent/45"
+        className="w-[23rem] max-w-full shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3 py-2 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-accent/45"
       />
     </div>
   );
@@ -7386,12 +7390,13 @@ function TemplateSelectRow({
     }
   };
 
+  // Wraps the picker under the label on a narrow row, like TextInputRow.
   return (
     <div
-      className="flex items-center justify-between gap-5 px-5 py-4"
+      className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 px-5 py-4"
       {...settingsSearchTargetProps(settingId)}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1 basis-56">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && (
           <div className="mt-1 text-xs leading-5 text-ink-500">
@@ -7406,7 +7411,7 @@ function TemplateSelectRow({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onTriggerKeyDown}
-        className="flex w-[23rem] max-w-[50vw] shrink-0 items-center justify-between gap-2 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3 py-2 text-left text-sm text-ink-900 outline-none transition-colors hover:bg-paper-200 focus:border-accent/45"
+        className="flex w-[23rem] max-w-full shrink-0 items-center justify-between gap-2 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3 py-2 text-left text-sm text-ink-900 outline-none transition-colors hover:bg-paper-200 focus:border-accent/45"
       >
         <span className={`truncate ${missing ? "text-ink-500" : ""}`}>
           {triggerLabel}
