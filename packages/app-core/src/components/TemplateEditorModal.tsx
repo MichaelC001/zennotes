@@ -12,6 +12,7 @@ import { vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
+import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { yamlFrontmatter } from '@codemirror/lang-yaml'
 import { syntaxHighlighting, HighlightStyle, defaultHighlightStyle } from '@codemirror/language'
@@ -123,6 +124,10 @@ export function TemplateEditorModal({
       extensions: [
         appMarkdownSnippetExtension(),
         new Compartment().of(vimModeRef.current ? vim() : []),
+        // The same input-method guard as the main editor (#84, #464, #921).
+        vimImeGuard(
+          () => useStore.getState().vimBlockImeInNormalMode && !isTouchPrimaryDevice()
+        ),
         vimVisualHighlightExtension,
         history(),
         cursorDrawSelection(useStore.getState().cursorBlink),

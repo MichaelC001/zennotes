@@ -24,6 +24,7 @@ import { vimHalfPageKeymap } from '../lib/vim-half-page-keymap'
 import { applyVimInsertEscape } from '../lib/vim-insert-escape'
 import { markdownListIndentPlugin } from '../lib/cm-markdown-list-indent'
 import { appMarkdownSnippetExtension } from '../lib/markdown-snippets-config'
+import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
 import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
 import type { ExternalFileContent } from '@shared/ipc'
 import { livePreviewPlugin } from '../lib/cm-live-preview'
@@ -165,6 +166,10 @@ export function ExternalFileApp(): JSX.Element {
         extensions: [
           appMarkdownSnippetExtension(),
           new Compartment().of(prefs.vimMode ? vim() : []),
+          // No text input outside Vim insert mode, as in every other editor:
+          // without it a CJK input method composed over hjkl and typed `ia`
+          // into a file opened from outside the vault (#921).
+          vimImeGuard(() => prefs.vimBlockImeInNormalMode && !isTouchPrimaryDevice()),
           vimVisualHighlightExtension,
           history(),
           floatingCursorDrawSelection(),

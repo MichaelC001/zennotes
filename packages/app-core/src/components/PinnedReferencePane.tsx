@@ -28,6 +28,7 @@ import {
 import { vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
+import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
 import { getKeymapBinding, type KeymapOverrides } from '../lib/keymaps'
 import { keyBindingsFor } from '../lib/vim-half-page-keymap'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
@@ -241,6 +242,10 @@ export function PinnedReferencePane(): JSX.Element | null {
           noteEditingLockExtension(() => ({ vault: useStore.getState().vault, path: viewPathRef.current })),
           appMarkdownSnippetExtension(),
           vimCompartment.of(s0.vimMode ? vim() : []),
+          // The same input-method guard as the main editor (#84, #464, #921).
+          vimImeGuard(
+            () => useStore.getState().vimBlockImeInNormalMode && !isTouchPrimaryDevice()
+          ),
           vimVisualHighlightExtension,
           history(),
           drawSelectionCompartment.of(cursorDrawSelection(s0.cursorBlink)),
