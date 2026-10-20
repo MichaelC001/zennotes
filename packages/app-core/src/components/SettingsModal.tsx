@@ -1565,10 +1565,12 @@ export function SettingsModal(): JSX.Element {
         },
         {
           id: "window-title-bar",
-          title: "Window title bar",
-          description: "Show the main window title and controls, or hide them to reclaim vertical space.",
-          keywords: ["decorations", "frameless", "traffic lights", "tiling", "hyprland", "linux"],
-          available: appInfo.runtime === "desktop",
+          title: appInfo.runtime === "desktop" ? "Window title bar" : "Title bar",
+          description:
+            appInfo.runtime === "desktop"
+              ? "Show the main window title and controls, or hide them to reclaim vertical space."
+              : "Show the bar with the open note's title, or hide it to reclaim vertical space.",
+          keywords: ["decorations", "frameless", "traffic lights", "tiling", "hyprland", "linux", "header"],
         },
         {
           id: "keep-running-in-tray",
@@ -1998,10 +2000,18 @@ export function SettingsModal(): JSX.Element {
             title="Chrome"
             description="Small visual adjustments that change how the shell feels."
           >
-            {appInfo.runtime === "desktop" && (
+            {appInfo.runtime === "desktop" ? (
               <ToggleRow
                 label="Window title bar"
-                description="Show the main window’s title and controls. Turn off to reclaim vertical space. Drag blank space around the sidebar header to move the window, or use your window manager’s shortcuts."
+                description="Show the main window’s title and controls. Turn off to reclaim vertical space. Drag blank space in the tab strip or the sidebar header to move the window, or use your window manager’s shortcuts."
+                value={showWindowTitleBar}
+                settingId="window-title-bar"
+                onChange={setShowWindowTitleBar}
+              />
+            ) : (
+              <ToggleRow
+                label="Title bar"
+                description="Show the bar with the open note’s title above the workspace. Turn off to reclaim vertical space."
                 value={showWindowTitleBar}
                 settingId="window-title-bar"
                 onChange={setShowWindowTitleBar}

@@ -146,6 +146,7 @@ import {
   subscribePublishedNoteChanges,
 } from "../lib/published-note-events";
 import { useToastStore } from "../lib/toast";
+import { chromeCarriesWindowDrag } from "../lib/window-chrome";
 
 const ACTIVE_TAG_PARSE_DELAY_MS = 220;
 const ACTIVE_TAG_PARSE_LARGE_BODY_CHARS = 120_000;
@@ -2957,9 +2958,11 @@ export function Sidebar(): JSX.Element {
     >
       {/* Vault header + top-right actions */}
       <div
+        // -mt-3 pt-3 pulls the drag into the aside's top padding, the strip a
+        // hidden title bar left behind.
         className={`flex items-center justify-between px-3 pb-3${
-          showWindowTitleBar === false && window.zen.getAppInfo().runtime === "desktop"
-            ? " drag-region"
+          chromeCarriesWindowDrag(showWindowTitleBar, window.zen.getAppInfo().runtime)
+            ? " drag-region -mt-3 pt-3"
             : ""
         }`}
       >

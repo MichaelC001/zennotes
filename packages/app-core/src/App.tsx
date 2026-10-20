@@ -1201,10 +1201,29 @@ function App(): JSX.Element {
     }
   }, [])
 
+  // A window-drag strip belongs to the window, not the page, so a tab or note
+  // dragged inside the app may not be able to drop on one (the blank end of a
+  // tab strip with the title bar off). Nothing moves the window mid-drag, so
+  // the strips stand down until the drag ends.
+  useEffect(() => {
+    const root = document.documentElement
+    const start = (): void => root.classList.add('zn-app-dragging')
+    const end = (): void => root.classList.remove('zn-app-dragging')
+    window.addEventListener('dragstart', start, true)
+    window.addEventListener('dragend', end, true)
+    window.addEventListener('drop', end, true)
+    return () => {
+      window.removeEventListener('dragstart', start, true)
+      window.removeEventListener('dragend', end, true)
+      window.removeEventListener('drop', end, true)
+      end()
+    }
+  }, [])
+
   if (!hasCompletedOnboarding) {
     return (
       <div className="zn-app-shell w-screen bg-paper-100 text-ink-900">
-        {!zenMode && <TitleBar />}
+        {!zenMode && <TitleBar standalone />}
         <Suspense fallback={<div className="flex-1" />}>
           <OnboardingWizard />
         </Suspense>
@@ -1223,7 +1242,7 @@ function App(): JSX.Element {
   if (!vault) {
     return (
       <div className="zn-app-shell w-screen bg-paper-100 text-ink-900">
-        {!zenMode && <TitleBar />}
+        {!zenMode && <TitleBar standalone />}
         <Suspense fallback={<div className="flex-1" />}>
           <EmptyVault />
         </Suspense>

@@ -1510,6 +1510,9 @@ textarea,
 [role="button"] {
   -webkit-app-region: no-drag;
 }
+.zn-app-dragging .drag-region {
+  -webkit-app-region: no-drag;
+}
 
 /* --- CodeMirror editor theme ------------------------------------------- */
 

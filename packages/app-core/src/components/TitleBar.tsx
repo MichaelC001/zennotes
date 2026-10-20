@@ -9,7 +9,7 @@ import { isTrashTabPath } from '@shared/trash'
 import { isQuickNotesTabPath } from '@shared/quick-notes'
 import { resolveSystemFolderLabels } from '../lib/system-folder-labels'
 
-export function TitleBar(): JSX.Element | null {
+export function TitleBar({ standalone = false }: { standalone?: boolean }): JSX.Element | null {
   const showWindowTitleBar = useStore((s) => s.showWindowTitleBar)
   const vault = useStore((s) => s.vault)
   const activeNote = useStore((s) => s.activeNote)
@@ -19,7 +19,13 @@ export function TitleBar(): JSX.Element | null {
   const isMac = window.zen.platformSync() === 'darwin'
   const labels = resolveSystemFolderLabels(systemFolderLabels)
 
-  if (window.zen.getAppInfo().runtime === 'desktop' && showWindowTitleBar === false) return null
+  if (showWindowTitleBar === false) {
+    // Onboarding and the no-vault screen have no other chrome to move the
+    // window by; in the workspace the sidebar header and tab strip carry it.
+    return standalone && window.zen.getAppInfo().runtime === 'desktop' ? (
+      <div aria-hidden className="drag-region h-8 shrink-0" />
+    ) : null
+  }
 
   const title = activeNote
     ? activeNote.title

@@ -487,10 +487,14 @@ describe("SettingsModal date note directories", () => {
     }
   });
 
-  it("does not offer native title bar settings in the web app", async () => {
+  it("offers the title bar switch in the web app, worded for a page", async () => {
     mocks.runtime = "web";
     await act(async () => root.render(createElement(SettingsModal)));
-    expect(host.querySelector('[data-settings-search-id="window-title-bar"]')).toBeNull();
+    const row = host.querySelector('[data-settings-search-id="window-title-bar"]');
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain("Title bar");
+    expect(row?.textContent).not.toContain("Window title bar");
+    expect(row?.textContent).not.toContain("move the window");
   });
 
   it("rejects reserved prefixes with a visible explanation", async () => {

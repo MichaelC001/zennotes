@@ -348,6 +348,7 @@ import {
 import { isTabStripOverflowing } from '../lib/tab-strip-overflow'
 import { editorTabSize } from '../lib/editor-tab-size'
 import { cursorDrawSelection } from '../lib/cm-cursor-blink'
+import { chromeCarriesWindowDrag, isPaneOnTopEdge } from '../lib/window-chrome'
 
 const MODE_OPTIONS: Array<{
   mode: PaneMode
@@ -949,6 +950,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   )
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const zenMode = useStore((s) => s.zenMode)
+  // With the title bar off, the top pane's chrome is what moves the window.
+  const runtime = window.zen.getAppInfo().runtime
+  const dragsWindow = useStore(
+    (s) =>
+      chromeCarriesWindowDrag(s.showWindowTitleBar, runtime) && isPaneOnTopEdge(s.paneLayout, paneId)
+  )
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setFocusedPanel = useStore((s) => s.setFocusedPanel)
   const focusedPanel = useStore((s) => s.focusedPanel)
@@ -3562,7 +3569,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           data-tab-pane-id={paneId}
           data-tab-path={tab.path}
           data-tab-active={active ? 'true' : undefined}
-          className="relative"
+          // A window-drag strip takes the mouse from everything in it that is
+          // not marked no-drag, and a tab is dragged and right-clicked itself.
+          className={dragsWindow ? 'relative no-drag' : 'relative'}
           draggable={!isVirtual}
           onDragStart={(e) => {
             if (isVirtual) {
@@ -4005,7 +4014,8 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   // Outer header holds the back/forward nav buttons + the (flex-1) tab strip.
   const tabStripHeaderClass = [
     'glass-header flex shrink-0 items-stretch border-b border-paper-300/70 pl-1',
-    wrapTabs ? 'min-h-[var(--z-tab-height)]' : 'h-[var(--z-tab-height)]'
+    wrapTabs ? 'min-h-[var(--z-tab-height)]' : 'h-[var(--z-tab-height)]',
+    dragsWindow ? 'drag-region' : ''
   ].join(' ')
   const tabStripClass = [
     'workspace-tab-strip flex min-w-0 flex-1 items-stretch gap-0',
@@ -4370,8 +4380,16 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
           </div>
         </div>
       )}
+      {dragsWindow && !hasTabs && !content && !zenMode && (
+        // No tab strip and no header: keep something to move the window by.
+        <div aria-hidden className="drag-region h-8 shrink-0" />
+      )}
       {content && !zenMode && (
-        <header className="glass-header flex h-12 shrink-0 items-center justify-between gap-3 px-4">
+        <header
+          className={`glass-header flex h-12 shrink-0 items-center justify-between gap-3 px-4${
+            dragsWindow && !hasTabs ? ' drag-region' : ''
+          }`}
+        >
           <div className="flex min-w-0 flex-1 items-center gap-1">
             <Breadcrumb
               note={content}

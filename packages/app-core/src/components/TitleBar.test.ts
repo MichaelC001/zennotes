@@ -71,14 +71,27 @@ describe('window title bar', () => {
     expect(close).toHaveBeenCalledOnce()
   })
 
-  it('keeps the browser layout and old preferences unchanged', () => {
+  it('hides in the browser too, and old preferences keep it', () => {
     runtime = 'web'
     state.showWindowTitleBar = false
     act(() => root.render(createElement(TitleBar)))
-    expect(host.textContent).toContain('Demo vault')
-    runtime = 'desktop'
+    expect(host.childElementCount).toBe(0)
     state.showWindowTitleBar = undefined
     act(() => root.render(createElement(TitleBar)))
     expect(host.textContent).toContain('Demo vault')
+    runtime = 'desktop'
+    act(() => root.render(createElement(TitleBar)))
+    expect(host.textContent).toContain('Demo vault')
+  })
+
+  it('leaves onboarding a strip to move the desktop window by', () => {
+    state.showWindowTitleBar = false
+    act(() => root.render(createElement(TitleBar, { standalone: true })))
+    const strip = host.firstElementChild
+    expect(strip?.classList.contains('drag-region')).toBe(true)
+    expect(host.textContent).toBe('')
+    runtime = 'web'
+    act(() => root.render(createElement(TitleBar, { standalone: true })))
+    expect(host.childElementCount).toBe(0)
   })
 })

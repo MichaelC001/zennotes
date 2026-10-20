@@ -29,6 +29,7 @@ import {
 } from '../lib/vault-layout'
 import { assetTabPath } from '../lib/asset-tabs'
 import { getScrollTopForVirtualIndex, getVirtualRange } from '../lib/virtual-list'
+import { chromeCarriesWindowDrag } from '../lib/window-chrome'
 
 function formatDate(ms: number): string {
   const d = new Date(ms)
@@ -96,6 +97,9 @@ export function NoteList(): JSX.Element {
   const prefetchNotes = useStore((s) => s.prefetchNotes)
   const focusedPanel = useStore((s) => s.focusedPanel)
   const vimMode = useStore((s) => s.vimMode)
+  const dragsWindow = useStore((s) =>
+    chromeCarriesWindowDrag(s.showWindowTitleBar, window.zen.getAppInfo().runtime)
+  )
   const noteListCursorIndex = useStore((s) => s.noteListCursorIndex)
   const setFocusedPanel = useStore((s) => s.setFocusedPanel)
   const systemFolderLabels = useStore((s) => s.systemFolderLabels)
@@ -724,7 +728,11 @@ export function NoteList(): JSX.Element {
       onMouseDownCapture={() => setFocusedPanel('notelist')}
       onFocusCapture={() => setFocusedPanel('notelist')}
     >
-      <header className="glass-header flex h-12 shrink-0 items-center justify-between px-4">
+      <header
+        className={`glass-header flex h-12 shrink-0 items-center justify-between px-4${
+          dragsWindow ? ' drag-region' : ''
+        }`}
+      >
         <div className="flex items-baseline gap-2">
           <h2 className="text-sm font-semibold text-ink-900">{heading}</h2>
           <span className="text-xs text-ink-500">
