@@ -9,8 +9,9 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { Compartment, EditorState, type Transaction } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, tooltips } from '@codemirror/view'
 import { vim } from '@replit/codemirror-vim'
-import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { history, indentWithTab } from '@codemirror/commands'
 import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
+import { appHistoryKeymap } from '../lib/history-keymap'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
@@ -179,7 +180,7 @@ export function TemplateEditorModal({
         keymap.of([
           indentWithTab,
           ...vimAwareDefaultKeymap(vimModeRef.current),
-          ...historyKeymap
+          ...appHistoryKeymap
         ]),
         editorTheme,
         EditorView.updateListener.of((upd) => {

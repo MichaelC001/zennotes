@@ -26,8 +26,9 @@ import {
   tooltips
 } from '@codemirror/view'
 import { vim } from '@replit/codemirror-vim'
-import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { history, indentWithTab } from '@codemirror/commands'
 import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
+import { appHistoryKeymap } from '../lib/history-keymap'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
 import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
 import { getKeymapBinding, type KeymapOverrides } from '../lib/keymaps'
@@ -143,7 +144,7 @@ function buildReferenceKeymap(vimMode: boolean, overrides: KeymapOverrides): Ext
     }),
     indentWithTab,
     ...vimAwareDefaultKeymap(vimMode),
-    ...historyKeymap,
+    ...appHistoryKeymap,
     ...vimAwareSearchKeymap(vimMode)
   ])
 }

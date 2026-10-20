@@ -14,8 +14,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Annotation, Compartment, EditorState, type Transaction } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap } from '@codemirror/view'
 import { Vim, vim } from '@replit/codemirror-vim'
-import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { history, indentWithTab } from '@codemirror/commands'
 import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
+import { appHistoryKeymap } from '../lib/history-keymap'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
 import { mapDefaultHalfPageKeys, registerHalfPageMotion } from '../lib/cm-vim-half-page-motion'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
@@ -193,7 +194,7 @@ export function ExternalFileApp(): JSX.Element {
             ...vimHalfPageKeymap(prefs.vimMode, {}),
             indentWithTab,
             ...vimAwareDefaultKeymap(prefs.vimMode),
-            ...historyKeymap,
+            ...appHistoryKeymap,
             ...vimAwareSearchKeymap(prefs.vimMode)
           ]),
           EditorView.domEventHandlers({

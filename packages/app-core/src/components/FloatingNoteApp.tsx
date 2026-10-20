@@ -25,8 +25,9 @@ import {
   lineNumbers
 } from '@codemirror/view'
 import { Vim, vim } from '@replit/codemirror-vim'
-import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { history, indentWithTab } from '@codemirror/commands'
 import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
+import { appHistoryKeymap } from '../lib/history-keymap'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { noteMarkdown } from '../lib/cm-markdown-language'
@@ -370,7 +371,7 @@ export function FloatingNoteApp({ notePath }: { notePath: string }): JSX.Element
             ...vimHalfPageKeymap(prefs.vimMode, {}),
             indentWithTab,
             ...vimAwareDefaultKeymap(prefs.vimMode),
-            ...historyKeymap,
+            ...appHistoryKeymap,
             ...vimAwareSearchKeymap(prefs.vimMode)
           ]),
           EditorView.updateListener.of((upd) => {

@@ -42,7 +42,6 @@ import type { AssetMeta, ImportedAsset, NoteComment, NoteFolder } from '@shared/
 import { registerNoteEditor } from '../lib/note-editor-context'
 import { noteEditorHostExtension } from '../lib/editor-host'
 import {
-  historyKeymap,
   indentWithTab,
   moveLineDown,
   moveLineUp,
@@ -55,6 +54,7 @@ import {
 import { isImeComposing } from '../lib/ime'
 import { displayRowBoundaryKeymap } from '../lib/cm-display-row'
 import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
+import { appHistoryKeymap } from '../lib/history-keymap'
 import { noteMarkdown } from '../lib/cm-markdown-language'
 import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languages'
 import { markdownLinkExtension } from '../lib/cm-markdown-links'
@@ -438,7 +438,7 @@ function buildEditorKeymap(vimMode: boolean, overrides: KeymapOverrides): Extens
     ...mathBlockArrowKeymap,
     indentWithTab,
     ...vimAwareDefaultKeymap(vimMode),
-    ...historyKeymap,
+    ...appHistoryKeymap,
     ...vimAwareSearchKeymap(vimMode)
   ])
 }
