@@ -222,7 +222,10 @@ export const markdownListIndentPlugin = ViewPlugin.fromClass(
       if (
         update.docChanged ||
         update.viewportChanged ||
-        update.state.facet(listIndentConfig) !== update.startState.facet(listIndentConfig)
+        update.state.facet(listIndentConfig) !== update.startState.facet(listIndentConfig) ||
+        // A parse cut short by its time budget finishes in a later update
+        // that changes nothing else.
+        syntaxTree(update.startState) !== syntaxTree(update.state)
       ) {
         this.decorations = computeDecorations(update.view)
       }

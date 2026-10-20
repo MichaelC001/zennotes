@@ -426,6 +426,9 @@ function headingArrowPlugin(showLevelLabels: boolean): Extension {
           update.docChanged ||
           update.viewportChanged ||
           update.selectionSet ||
+          // A parse cut short by its time budget finishes in a later update
+          // that changes nothing else.
+          syntaxTree(update.startState) !== syntaxTree(update.state) ||
           update.transactions.some((tr) =>
             tr.effects.some((e) => e.is(foldEffect) || e.is(unfoldEffect))
           )

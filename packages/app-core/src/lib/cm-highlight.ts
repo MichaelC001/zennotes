@@ -246,7 +246,10 @@ const highlightPlugin = ViewPlugin.fromClass(
         update.docChanged ||
         update.selectionSet ||
         update.viewportChanged ||
-        update.focusChanged
+        update.focusChanged ||
+        // A parse cut short by its time budget finishes in a later update
+        // that changes nothing else.
+        syntaxTree(update.startState) !== syntaxTree(update.state)
       ) {
         const built = buildDecorations(update.view)
         this.decorations = built.all

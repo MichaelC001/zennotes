@@ -1,9 +1,16 @@
+// @vitest-environment jsdom
+
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { forceParsing } from '@codemirror/language'
+import { Compartment, EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import {
   listGuideStyle,
   listIndentPadCh,
   listPrefixCells,
-  markdownListHangingIndentCh
+  markdownListHangingIndentCh,
+  markdownListIndentPlugin
 } from './cm-markdown-list-indent'
 
 describe('markdownListHangingIndentCh', () => {
@@ -96,5 +103,28 @@ describe('listPrefixCells (#952)', () => {
   it('leaves a list inside a quote or callout alone', () => {
     expect(listPrefixCells('> - quoted', 2)).toBeNull()
     expect(listPrefixCells('>   - nested', 4)).toBeNull()
+  })
+})
+
+describe('markdownListIndentPlugin', () => {
+  it('redraws when only the syntax tree changes, as when a cut parse finishes', () => {
+    // Swapping the language in changes the tree and nothing else: no edit, no
+    // selection, no viewport. A parse that finishes after its time budget ran
+    // out reaches the plugin the same way.
+    const language = new Compartment()
+    const doc = '- one\n  - two\n\nplain'
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({ doc, extensions: [language.of([]), markdownListIndentPlugin] })
+    })
+    expect(view.dom.querySelector('.cm-markdown-list-line')).toBeNull()
+    view.dispatch({ effects: language.reconfigure(markdown({ base: markdownLanguage })) })
+    forceParsing(view, doc.length, 5000)
+    const lines = Array.from(view.dom.querySelectorAll('.cm-markdown-list-line'))
+    expect(lines.map((line) => line.textContent)).toEqual(['- one', '  - two'])
+    view.destroy()
+    parent.remove()
   })
 })

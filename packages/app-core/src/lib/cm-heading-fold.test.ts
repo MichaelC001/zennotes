@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect } from 'vitest'
-import { EditorState } from '@codemirror/state'
-import { foldedRanges, foldService, unfoldEffect } from '@codemirror/language'
+import { Compartment, EditorState } from '@codemirror/state'
+import { foldedRanges, foldService, forceParsing, unfoldEffect } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { EditorView } from '@codemirror/view'
 import { foldAllOutline, foldAtCursor, headingFolding, unfoldAtCursor } from './cm-heading-fold'
@@ -102,6 +102,31 @@ describe('heading folding', () => {
     ).toBe(true)
     expect(unfoldAtCursor(view)).toBe(true)
     expect(parent.querySelector('.cm-heading-line-folded')).toBeNull()
+
+    view.destroy()
+    parent.remove()
+  })
+
+  it('redraws when only the syntax tree changes, as when a cut parse finishes', () => {
+    // Swapping the language in changes the tree and nothing else: no edit, no
+    // selection, no viewport. A parse that finishes after its time budget ran
+    // out reaches the plugin the same way.
+    const language = new Compartment()
+    const doc = '```bash\n# a comment\n```\n\n# Real\n\nbody'
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({ doc, extensions: [language.of([]), headingFolding()] })
+    })
+    const headingLines = (): Array<string | null> =>
+      Array.from(parent.querySelectorAll('.cm-heading-line')).map((line) => line.textContent)
+    // No tree yet, so nothing says the fence is code.
+    expect(headingLines()).toHaveLength(2)
+    view.dispatch({ effects: language.reconfigure(markdown({ base: markdownLanguage })) })
+    forceParsing(view, doc.length, 5000)
+    expect(headingLines()).toHaveLength(1)
+    expect(headingLines()[0]).toContain('# Real')
 
     view.destroy()
     parent.remove()

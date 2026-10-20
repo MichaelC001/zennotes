@@ -122,7 +122,15 @@ const liveTemplateTokenPlugin = ViewPlugin.fromClass(
       const refreshed = update.transactions.some((tr) =>
         tr.effects.some((effect) => effect.is(refreshLiveTokensEffect))
       )
-      if (refreshed || update.docChanged || update.selectionSet || update.viewportChanged) {
+      if (
+        refreshed ||
+        update.docChanged ||
+        update.selectionSet ||
+        update.viewportChanged ||
+        // A parse cut short by its time budget finishes in a later update
+        // that changes nothing else.
+        syntaxTree(update.startState) !== syntaxTree(update.state)
+      ) {
         this.decorations = buildDecorations(update.view)
       }
     }

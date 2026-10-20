@@ -2,7 +2,7 @@
 
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { forceParsing } from '@codemirror/language'
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AssetMeta, NoteMeta } from '@shared/ipc'
@@ -84,6 +84,34 @@ describe('wikilinkRenderExtension', () => {
     const links = Array.from(view.dom.querySelectorAll<HTMLElement>('.cm-wikilink'))
     expect(links.map((e) => e.textContent)).toEqual(['Foo'])
     view.destroy()
+  })
+
+  it('redraws when only the syntax tree changes, as when a cut parse finishes', () => {
+    // Swapping the language in changes the tree and nothing else: no edit, no
+    // selection, no viewport. A parse that finishes after its time budget ran
+    // out reaches the plugin the same way.
+    const language = new Compartment()
+    const doc = '```\n[[Foo]]\n```\n\nsee [[Bar]] end'
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({
+        doc,
+        selection: { anchor: doc.length },
+        extensions: [language.of([]), wikilinkRenderExtension]
+      })
+    })
+    const links = (): Array<string | null> =>
+      Array.from(view.dom.querySelectorAll('.cm-wikilink')).map((e) => e.textContent)
+    // No tree yet, so nothing says the fence is code.
+    expect(links()).toEqual(['Foo', 'Bar'])
+    view.dispatch({ effects: language.reconfigure(markdown({ base: markdownLanguage })) })
+    forceParsing(view, doc.length, 5000)
+    expect(links()).toEqual(['Bar'])
+    expect(view.dom.textContent).toContain('[[Foo]]')
+    view.destroy()
+    parent.remove()
   })
 })
 
