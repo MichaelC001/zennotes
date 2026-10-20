@@ -43,6 +43,7 @@ import {
 } from '@codemirror/view'
 import { Vim, vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { registerDisplayLineMotion } from '../lib/cm-vim-display-line'
@@ -482,6 +483,7 @@ export function QuickCaptureApp(): JSX.Element {
             ])
           ),
           history(),
+          scrollerClickFocus,
           storedCursorDrawSelection(PREFS_KEY, () => loadPrefs().cursorBlink),
           editorTabSize(prefs.editorTabSize),
           highlightActiveLine(),

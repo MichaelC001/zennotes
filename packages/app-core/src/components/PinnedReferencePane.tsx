@@ -27,6 +27,7 @@ import {
 } from '@codemirror/view'
 import { vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
 import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
 import { getKeymapBinding, type KeymapOverrides } from '../lib/keymaps'
@@ -248,6 +249,7 @@ export function PinnedReferencePane(): JSX.Element | null {
           ),
           vimVisualHighlightExtension,
           history(),
+          scrollerClickFocus,
           drawSelectionCompartment.of(cursorDrawSelection(s0.cursorBlink)),
           tabSizeCompartment.of([
             editorTabSize(s0.editorTabSize),

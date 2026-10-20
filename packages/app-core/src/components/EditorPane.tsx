@@ -54,6 +54,7 @@ import {
 } from '@codemirror/commands'
 import { isImeComposing } from '../lib/ime'
 import { displayRowBoundaryKeymap } from '../lib/cm-display-row'
+import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
 import { noteMarkdown } from '../lib/cm-markdown-language'
 import { customCodeFenceHighlightExtension } from '../lib/cm-custom-code-languages'
 import { markdownLinkExtension } from '../lib/cm-markdown-links'
@@ -2078,6 +2079,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             listIndentGuidesExt(s0.listIndentGuides)
           ]),
           highlightActiveLine(),
+          scrollerClickFocus,
           taskJumpHighlightField,
           yankHighlightExtension,
           vimVisualHighlightExtension,

@@ -26,6 +26,7 @@ import {
 } from '@codemirror/view'
 import { Vim, vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { noteMarkdown } from '../lib/cm-markdown-language'
@@ -348,6 +349,7 @@ export function FloatingNoteApp({ notePath }: { notePath: string }): JSX.Element
           vimImeGuard(() => prefs.vimBlockImeInNormalMode && !isTouchPrimaryDevice()),
           vimVisualHighlightExtension,
           history(),
+          scrollerClickFocus,
           floatingCursorDrawSelection(),
           editorTabSize(prefs.editorTabSize),
           highlightActiveLine(),

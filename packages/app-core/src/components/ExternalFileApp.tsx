@@ -15,6 +15,7 @@ import { Annotation, Compartment, EditorState, type Transaction } from '@codemir
 import { EditorView, highlightActiveLine, keymap } from '@codemirror/view'
 import { Vim, vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap, vimAwareSearchKeymap } from '../lib/cm-vim-default-keymap'
 import { mapDefaultHalfPageKeys, registerHalfPageMotion } from '../lib/cm-vim-half-page-motion'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
@@ -172,6 +173,7 @@ export function ExternalFileApp(): JSX.Element {
           vimImeGuard(() => prefs.vimBlockImeInNormalMode && !isTouchPrimaryDevice()),
           vimVisualHighlightExtension,
           history(),
+          scrollerClickFocus,
           floatingCursorDrawSelection(),
           editorTabSize(prefs.editorTabSize),
           highlightActiveLine(),

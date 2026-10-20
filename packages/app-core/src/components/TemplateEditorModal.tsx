@@ -10,6 +10,7 @@ import { Compartment, EditorState, type Transaction } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, tooltips } from '@codemirror/view'
 import { vim } from '@replit/codemirror-vim'
 import { history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { scrollerClickFocus } from '../lib/cm-scroller-click-focus'
 import { vimAwareDefaultKeymap, vimAwareMarkdownKeymap } from '../lib/cm-vim-default-keymap'
 import { vimVisualHighlightExtension } from '../lib/cm-vim-visual-highlight'
 import { isTouchPrimaryDevice, vimImeGuard } from '../lib/cm-vim-ime-guard'
@@ -130,6 +131,7 @@ export function TemplateEditorModal({
         ),
         vimVisualHighlightExtension,
         history(),
+        scrollerClickFocus,
         cursorDrawSelection(useStore.getState().cursorBlink),
         editorTabSize(useStore.getState().editorTabSize),
         highlightActiveLine(),
