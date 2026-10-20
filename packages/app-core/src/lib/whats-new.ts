@@ -40,6 +40,23 @@ export const CLOUD_ANNOUNCEMENT = {
 
 export const WHATS_NEW: readonly WhatsNewEntry[] = [
   {
+    version: '2.73.0',
+    highlights: [
+      {
+        title: 'Move the window without a title bar',
+        body: 'With Window title bar turned off under Settings → Appearance → Chrome, drag blank space in the tab strip to move the window, as you would a title bar, even with the sidebar closed. The browser app gets the same switch, called Title bar.'
+      },
+      {
+        title: 'Settings in a narrow window',
+        body: 'Text fields, choices, font pickers, sliders and key bindings in Settings move under their label when the window or tablet is narrow, instead of squeezing the label into a column of single words.'
+      },
+      {
+        title: 'Vim o and O in quotes',
+        body: 'With Vim on, o and O on a line inside a quote or callout open the new line inside it, with the same quote marker and list marker Enter would give.'
+      }
+    ]
+  },
+  {
     version: '2.72.0',
     highlights: [
       {
