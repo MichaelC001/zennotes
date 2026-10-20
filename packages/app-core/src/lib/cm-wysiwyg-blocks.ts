@@ -270,6 +270,10 @@ export const wysiwygBlocksPlugin = ViewPlugin.fromClass(
         update.docChanged ||
         update.selectionSet ||
         update.viewportChanged ||
+        // A parse cut short by its time budget finishes in a later update that
+        // changes nothing else; without this the cards and hidden fences stay
+        // as the partial tree drew them until the next edit or cursor move.
+        syntaxTree(update.startState) !== syntaxTree(update.state) ||
         update.transactions.some((tr) =>
           tr.effects.some((e) => e.is(foldEffect) || e.is(unfoldEffect))
         )
