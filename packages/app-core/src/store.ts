@@ -6432,7 +6432,13 @@ export const useStore = create<Store>((set, get) => {
         meta.path,
         composeTaskFile({ title, dateCreated: new Date().toISOString() })
       )
-      await get().refreshTasks()
+      // One file changed, so a loaded task list takes that file's tasks. A
+      // full scan reads every note, which on a phone vault kept "Task added"
+      // waiting for seconds (zennotesandroid#128). An empty list may never
+      // have been loaded, and Home and the calendar load it only while it is
+      // empty, so it is loaded whole, without holding up the toast.
+      if (get().vaultTasks.length > 0) await get().rescanTasksForPath(meta.path)
+      else void get().refreshTasks()
       // On the Tasks view the new task shows up in the list. Anywhere else (the
       // palette, `:newtask`, a phone's Action Button) nothing on screen
       // changes, so say it landed and offer the note.
@@ -8504,12 +8510,18 @@ export const useStore = create<Store>((set, get) => {
       if (options?.tags && options.tags.length > 0) {
         await window.zen.writeNote(meta.path, composeNewNoteBody(meta.title, options.tags))
       }
-      await get().refreshNotes()
-      set({
+      // Open the note first and re-list the vault after. Opening needs only
+      // the note, and on a phone vault the full listing is one storage query
+      // per folder: waiting for it kept a new note 12 to 15 seconds away
+      // (zennotesandroid#128). The note joins the list at once so a second
+      // quick note right away still picks the next free title.
+      set((s) => ({
+        notes: s.notes.some((n) => n.path === meta.path) ? s.notes : [...s.notes, meta],
         view: { kind: 'folder', folder, subpath },
         pendingTitleFocusPath: options?.focusTitle ? meta.path : null
-      })
+      }))
       await get().selectNote(meta.path)
+      await get().refreshNotes()
     } catch (err) {
       console.error('createNote failed', err)
     }

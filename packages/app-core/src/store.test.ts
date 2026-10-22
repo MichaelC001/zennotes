@@ -2996,3 +2996,29 @@ describe('createAndOpen with tags (#826 follow-up)', () => {
     expect(writeNote).not.toHaveBeenCalled()
   })
 })
+
+describe('createAndOpen on a slow vault listing (zennotesandroid#128)', () => {
+  it('opens the new note while the vault is still being listed, then takes the listing', async () => {
+    const created = makeNote('# Untitled\n\n', 'inbox/Untitled.md')
+    type Listed = ReturnType<typeof makeNote>
+    let finishListing: (notes: Listed[]) => void = () => {}
+    const listNotes = vi.fn(() => new Promise<Listed[]>((resolve) => { finishListing = resolve }))
+    installZen({
+      createNote: vi.fn().mockResolvedValue(created),
+      listNotes,
+      readNote: vi.fn().mockResolvedValue(created)
+    })
+    const { useStore } = await loadStore()
+
+    const creating = useStore.getState().createAndOpen('inbox', '', { focusTitle: true })
+    await vi.waitFor(() => expect(useStore.getState().selectedPath).toBe('inbox/Untitled.md'))
+    expect(listNotes).toHaveBeenCalled()
+    expect(useStore.getState().notes.map((n) => n.path)).toEqual(['inbox/Untitled.md'])
+    expect(useStore.getState().pendingTitleFocusPath).toBe('inbox/Untitled.md')
+
+    const other = makeNote('# Other\n\n', 'inbox/Other.md')
+    finishListing([created, other])
+    await creating
+    expect(useStore.getState().notes.map((n) => n.path).sort()).toEqual(['inbox/Other.md', 'inbox/Untitled.md'])
+  })
+})
