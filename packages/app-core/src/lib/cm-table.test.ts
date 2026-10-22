@@ -51,10 +51,11 @@ function mount(doc: string): EditorView {
       extensions: [markdown({ base: markdownLanguage }), history(), tablePlugin]
     })
   })
-  // Ensure the GFM table node is parsed, then nudge the field to rebuild.
+  // Ensure the GFM table node is parsed. The field rebuilds whenever the syntax
+  // tree changes, so that is all a mount needs. Nothing edits the note after
+  // it: an edit at the top reparses from there under the same 20 ms budget,
+  // and a cut parse can stop before the table.
   forceParsing(view, doc.length, 5000)
-  view.dispatch({ changes: { from: 0, insert: ' ' } })
-  view.dispatch({ changes: { from: 0, to: 1 } })
   return view
 }
 
@@ -789,6 +790,10 @@ describe('tablePlugin — column widths (#294)', () => {
   it('re-resizing replaces the marker — never duplicates it', () => {
     const view = mount(PLAIN_DOC)
     drag(view, 100, 180)
+    // The marker edit reparses this short note under the 20 ms budget, and a
+    // cut parse stops before the table. Finish it, as the app's parse worker
+    // would, so the second drag finds the widget again.
+    forceParsing(view, view.state.doc.length, 5000)
     drag(view, 100, 140)
     const markers = view.state.doc.toString().match(/zen:cols/g) ?? []
     expect(markers.length).toBe(1)

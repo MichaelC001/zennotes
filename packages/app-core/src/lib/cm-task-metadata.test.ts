@@ -2,7 +2,7 @@
 
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { forceParsing } from '@codemirror/language'
-import { EditorState } from '@codemirror/state'
+import { EditorState, StateEffect } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { taskMetadataExtension } from './cm-task-metadata'
@@ -12,15 +12,15 @@ function mount(doc: string): EditorView {
   document.body.append(parent)
   const view = new EditorView({
     parent,
-    state: EditorState.create({
-      doc,
-      extensions: [markdown({ base: markdownLanguage }), taskMetadataExtension]
-    })
+    state: EditorState.create({ doc, extensions: [markdown({ base: markdownLanguage })] })
   })
+  // The plugin redraws on edits and viewport changes, not when only the syntax
+  // tree changes, so it joins once the parse is complete and builds against the
+  // full tree. An edit would not do: a note this short parses from scratch on
+  // every edit, under the same 20 ms budget, and a cut parse can stop before
+  // the code fence.
   forceParsing(view, doc.length, 5000)
-  // nudge the doc so the plugin rebuilds against a fully-parsed tree
-  view.dispatch({ changes: { from: doc.length, insert: ' ' } })
-  view.dispatch({ changes: { from: doc.length, to: doc.length + 1 } })
+  view.dispatch({ effects: StateEffect.appendConfig.of(taskMetadataExtension) })
   return view
 }
 const classesOn = (view: EditorView, sel: string) =>

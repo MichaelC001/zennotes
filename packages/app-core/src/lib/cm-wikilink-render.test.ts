@@ -26,13 +26,15 @@ function mount(doc: string, anchor: number): EditorView {
   })
 }
 
-/** Mount and force a full markdown parse so code-context detection is reliable. */
+/**
+ * Mount and force a full markdown parse so code-context detection is reliable.
+ * The plugin redraws when only the syntax tree changes, so nothing edits the
+ * note after the parse: a note this short parses from scratch on every edit,
+ * under the same 20 ms budget, and a cut parse can stop before the code.
+ */
 function mountParsed(doc: string, anchor: number): EditorView {
   const view = mount(doc, anchor)
   forceParsing(view, doc.length, 5000)
-  // Nudge a no-op change so decorations rebuild against the parsed tree.
-  view.dispatch({ changes: { from: doc.length, insert: ' ' } })
-  view.dispatch({ changes: { from: doc.length, to: doc.length + 1 } })
   return view
 }
 
