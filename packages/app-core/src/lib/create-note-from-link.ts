@@ -1,6 +1,38 @@
+import { confirmApp } from './confirm-requests'
 import { promptApp } from './prompt-requests'
-import { parseCreateNotePath, suggestCreateNotePath } from './wikilinks'
+import { dateNoteForTitle, type DateNoteInfo } from './vault-layout'
+import { parseCreateNotePath, stripWikilinkAnchor, suggestCreateNotePath } from './wikilinks'
 import { useStore } from '../store'
+
+const DATE_NOTE_LABEL: Record<DateNoteInfo['kind'], string> = {
+  daily: 'daily',
+  weekly: 'weekly',
+  monthly: 'monthly'
+}
+
+/**
+ * The periodic note a dead link names: a bare `[[2026-11-03]]` while daily
+ * notes are on, `[[2026-W45]]` for weekly notes, and so on. It is created the
+ * way the calendar creates it, in the folder its pattern gives and from its
+ * template; made as a plain note from the link text it landed in the Inbox
+ * root, where the calendar never counted it as that day's note and creating
+ * the day there later made a second note of the same name. A link that names
+ * a folder (`journal/2026-11-03`) says where the note goes, so it keeps the
+ * plain path.
+ */
+function dateNoteForLink(target: string): { info: DateNoteInfo; title: string } | null {
+  const title = stripWikilinkAnchor(target).trim().replace(/\.md$/i, '')
+  if (!title || title.includes('/') || title.includes('\\')) return null
+  const info = dateNoteForTitle(title, useStore.getState().vaultSettings)
+  return info ? { info, title } : null
+}
+
+async function openDateNote(info: DateNoteInfo): Promise<void> {
+  const state = useStore.getState()
+  if (info.kind === 'daily') await state.openDailyNoteForDate(info.date)
+  else if (info.kind === 'weekly') await state.openWeeklyNoteForDate(info.date)
+  else await state.openMonthlyNoteForDate(info.date)
+}
 
 /**
  * Offer to create a note for a dead link `target`, confirming first. Shared by
@@ -10,6 +42,18 @@ import { useStore } from '../store'
  * out to already exist, that note is opened instead.
  */
 export async function offerCreateNoteFromLink(target: string): Promise<void> {
+  const dateNote = dateNoteForLink(target)
+  if (dateNote) {
+    const kind = DATE_NOTE_LABEL[dateNote.info.kind]
+    const ok = await confirmApp({
+      title: `New ${kind} note`,
+      description: `${dateNote.title} does not exist yet. Create it as your ${kind} note?`,
+      confirmLabel: 'Create',
+      cancelLabel: 'Never mind'
+    })
+    if (ok) await openDateNote(dateNote.info)
+    return
+  }
   const value = await promptApp({
     title: `Create note for "${target}"?`,
     description:
@@ -36,9 +80,15 @@ export async function offerCreateNoteFromLink(target: string): Promise<void> {
  * unless the link names a top folder. The fast path behind a Cmd/Ctrl-click on
  * an unresolved wikilink and the `gD` motion (#768): when the note belongs
  * where the link already says, the confirmation only costs a keystroke. A
- * note that already exists at that path is opened instead.
+ * note that already exists at that path is opened instead, and a link that
+ * names a periodic note creates that note where its pattern puts it.
  */
 export async function createNoteFromLinkNow(target: string): Promise<void> {
+  const dateNote = dateNoteForLink(target)
+  if (dateNote) {
+    await openDateNote(dateNote.info)
+    return
+  }
   await createNoteAtPath(suggestCreateNotePath(target))
 }
 

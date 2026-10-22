@@ -1567,6 +1567,64 @@ export function findMonthlyNoteForDate(
   )
 }
 
+/**
+ * The periodic note a title names, for a note that does not exist yet: the
+ * daily, weekly or monthly note whose current title pattern produces exactly
+ * `title` for one date. A link to a missing `[[2026-11-03]]` creates that day's
+ * note through this, where the pattern puts it and with its template, instead
+ * of a plain Inbox note the calendar would never count. Only the title is read
+ * (a link has no folder); a pattern that cannot pin the title to one date,
+ * with the year in the directory say, names none. Earlier patterns are left
+ * out: a new note always takes the current one.
+ */
+export function dateNoteForTitle(
+  title: string,
+  settings: VaultSettings | null | undefined
+): DateNoteInfo | null {
+  const s = normalizeVaultSettings(settings)
+  const kinds: Array<{
+    kind: DateNoteInfo['kind']
+    enabled: boolean
+    pattern: DateNotePatternSettings
+    defaultTitlePattern: string
+    candidates: (n: DateNotePatternMatch) => Date[]
+    titleFor: (date: Date) => string
+  }> = [
+    {
+      kind: 'daily',
+      enabled: s.dailyNotes.enabled,
+      pattern: currentDailyNotePattern(s),
+      defaultTitlePattern: DEFAULT_DAILY_NOTE_TITLE_PATTERN,
+      candidates: dailyCandidateDates,
+      titleFor: (date) => dailyNoteLocationForPattern(date, s, currentDailyNotePattern(s)).title
+    },
+    {
+      kind: 'weekly',
+      enabled: s.weeklyNotes.enabled,
+      pattern: currentWeeklyNotePattern(s),
+      defaultTitlePattern: DEFAULT_WEEKLY_NOTE_TITLE_PATTERN,
+      candidates: weeklyCandidateMondays,
+      titleFor: (date) => weeklyNoteLocationForPattern(date, s, currentWeeklyNotePattern(s)).title
+    },
+    {
+      kind: 'monthly',
+      enabled: s.monthlyNotes.enabled,
+      pattern: currentMonthlyNotePattern(s),
+      defaultTitlePattern: DEFAULT_MONTHLY_NOTE_TITLE_PATTERN,
+      candidates: monthlyCandidateDates,
+      titleFor: (date) => monthlyNoteLocationForPattern(date, s, currentMonthlyNotePattern(s)).title
+    }
+  ]
+  for (const { kind, enabled, pattern, defaultTitlePattern, candidates, titleFor } of kinds) {
+    if (!enabled) continue
+    const numerics = matchDateNotePattern(pattern.titlePattern ?? defaultTitlePattern, title)
+    if (!numerics) continue
+    const dates = candidates(numerics).filter((date) => titleFor(date) === title)
+    if (dates.length === 1) return { kind, date: dates[0] }
+  }
+  return null
+}
+
 export function findDateNoteByTitle(
   notes: readonly NoteMeta[],
   settings: VaultSettings | null | undefined,

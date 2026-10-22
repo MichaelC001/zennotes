@@ -5,6 +5,7 @@ import {
   assetFolderSubpath,
   classifyDateNote,
   dailyNoteLocationForDate,
+  dateNoteForTitle,
   dateNoteFolderMayBelongToDatePattern,
   dateNoteDirectoryDisplayLabel,
   favoriteFolderKey,
@@ -918,3 +919,60 @@ describe('normalizeVaultSettings: harper', () => {
     expect(normalizeVaultSettings(base).harper).toBeUndefined()
   })
 })
+
+describe('dateNoteForTitle', () => {
+  const withPeriodic = (overrides: Partial<VaultSettings> = {}): VaultSettings =>
+    normalizeVaultSettings({
+      dailyNotes: { enabled: true, directory: 'Daily Notes' },
+      weeklyNotes: { enabled: true, directory: 'Weekly Notes' },
+      monthlyNotes: { enabled: true, directory: 'Monthly Notes' },
+      ...overrides
+    } as Partial<VaultSettings> as VaultSettings)
+
+  it('names the daily note a dead [[2026-11-03]] points at', () => {
+    const info = dateNoteForTitle('2026-11-03', withPeriodic())
+    expect(info?.kind).toBe('daily')
+    expect(info?.date.getFullYear()).toBe(2026)
+    expect(info?.date.getMonth()).toBe(10)
+    expect(info?.date.getDate()).toBe(3)
+    // And creating it lands where the calendar looks for it.
+    expect(dailyNoteLocationForDate(info!.date, withPeriodic())).toEqual({
+      title: '2026-11-03',
+      subpath: 'Daily Notes'
+    })
+  })
+
+  it('names weekly and monthly notes by their own patterns', () => {
+    const week = dateNoteForTitle('2026-W45', withPeriodic())
+    expect(week?.kind).toBe('weekly')
+    expect(weeklyNoteLocationForDate(week!.date, withPeriodic()).title).toBe('2026-W45')
+    const month = dateNoteForTitle('2026-11', withPeriodic())
+    expect(month?.kind).toBe('monthly')
+    expect(month?.date.getMonth()).toBe(10)
+  })
+
+  it('follows a custom title pattern, and only its exact output', () => {
+    const settings = withPeriodic({
+      dailyNotes: { enabled: true, directory: 'Journal', titlePattern: 'dd.MM.yyyy' }
+    } as Partial<VaultSettings>)
+    expect(dateNoteForTitle('03.11.2026', settings)?.kind).toBe('daily')
+    expect(dateNoteForTitle('2026-11-03', settings)).toBeNull()
+    expect(dateNoteForTitle('3.11.2026', settings)).toBeNull()
+  })
+
+  it('names nothing for a kind that is off, a day that does not exist, or other titles', () => {
+    expect(dateNoteForTitle('2026-11-03', normalizeVaultSettings(null))).toBeNull()
+    expect(dateNoteForTitle('2026-02-30', withPeriodic())).toBeNull()
+    expect(dateNoteForTitle('Meeting notes', withPeriodic())).toBeNull()
+    expect(dateNoteForTitle('2026-11-03 standup', withPeriodic())).toBeNull()
+  })
+
+  it('names nothing when the title alone cannot pin the date', () => {
+    // The year lives in the directory, so `11-03` could be any year's.
+    const settings = withPeriodic({
+      dailyNotes: { enabled: true, directory: 'yyyy', titlePattern: 'MM-dd' }
+    } as Partial<VaultSettings>)
+    expect(dateNoteForTitle('11-03', settings)).toBeNull()
+  })
+})
+
