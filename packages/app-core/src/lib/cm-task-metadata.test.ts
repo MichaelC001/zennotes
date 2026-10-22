@@ -2,7 +2,7 @@
 
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { forceParsing } from '@codemirror/language'
-import { EditorState, StateEffect } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { taskMetadataExtension } from './cm-task-metadata'
@@ -12,15 +12,16 @@ function mount(doc: string): EditorView {
   document.body.append(parent)
   const view = new EditorView({
     parent,
-    state: EditorState.create({ doc, extensions: [markdown({ base: markdownLanguage })] })
+    state: EditorState.create({
+      doc,
+      extensions: [markdown({ base: markdownLanguage }), taskMetadataExtension]
+    })
   })
-  // The plugin redraws on edits and viewport changes, not when only the syntax
-  // tree changes, so it joins once the parse is complete and builds against the
-  // full tree. An edit would not do: a note this short parses from scratch on
-  // every edit, under the same 20 ms budget, and a cut parse can stop before
-  // the code fence.
+  // The plugin redraws whenever the syntax tree changes, so finishing the parse
+  // is all a mount needs. Nothing edits the note after it: a note this short
+  // parses from scratch on every edit, under the same 20 ms budget, and a cut
+  // parse can stop before the code fence.
   forceParsing(view, doc.length, 5000)
-  view.dispatch({ effects: StateEffect.appendConfig.of(taskMetadataExtension) })
   return view
 }
 const classesOn = (view: EditorView, sel: string) =>
@@ -72,5 +73,27 @@ describe('cm-task-metadata (#454)', () => {
     expect(classesOn(view, '.cm-task-prio-high')).toEqual([])
     expect(classesOn(view, '.cm-task-prio-low')).toEqual(['!low'])
     view.destroy()
+  })
+
+  it('redraws when only the syntax tree changes, as when a cut parse finishes', () => {
+    // Swapping the language in changes the tree and nothing else: no edit, no
+    // selection, no viewport. A parse that finishes after its time budget ran
+    // out reaches the plugin the same way.
+    const language = new Compartment()
+    const doc = '```md\n- [ ] Example !high\n```\n\n- [ ] Real !low'
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({ doc, extensions: [language.of([]), taskMetadataExtension] })
+    })
+    // No tree yet, so nothing says the fence is code.
+    expect(classesOn(view, '.cm-task-prio-high')).toEqual(['!high'])
+    view.dispatch({ effects: language.reconfigure(markdown({ base: markdownLanguage })) })
+    forceParsing(view, doc.length, 5000)
+    expect(classesOn(view, '.cm-task-prio-high')).toEqual([])
+    expect(classesOn(view, '.cm-task-prio-low')).toEqual(['!low'])
+    view.destroy()
+    parent.remove()
   })
 })
