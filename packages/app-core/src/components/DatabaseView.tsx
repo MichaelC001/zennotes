@@ -17,7 +17,7 @@ import { DatabaseBoardView } from './DatabaseBoardView'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { DatabaseFilterMenu } from './DatabaseFilterMenu'
 import { Button, IconButton } from './ui/Button'
-import { DatabaseIcon, TableIcon, KanbanIcon, PlusIcon, FilterIcon } from './icons'
+import { DatabaseIcon, TableIcon, KanbanIcon, PlusIcon, FilterIcon, MoreIcon } from './icons'
 
 /**
  * Host for a CSV database tab: loads the database, renders the header
@@ -40,6 +40,9 @@ export function DatabaseView({
   const updateDatabaseRows = useStore((s) => s.updateDatabaseRows)
   const updateDatabaseSchema = useStore((s) => s.updateDatabaseSchema)
   const renameDatabase = useStore((s) => s.renameDatabase)
+  const createAllRecordPages = useStore((s) => s.createAllRecordPages)
+  const vimMode = useStore((s) => s.vimMode)
+  const [databaseMenu, setDatabaseMenu] = useState<{ x: number; y: number } | null>(null)
   const [viewMenu, setViewMenu] = useState<{ viewId: string; x: number; y: number } | null>(null)
   const [renamingView, setRenamingView] = useState<string | null>(null)
   const [rawMode, setRawMode] = useState(false)
@@ -218,6 +221,17 @@ export function DatabaseView({
               </Button>
             </>
           )}
+          <IconButton
+            size="sm"
+            title="More database actions"
+            aria-label="More database actions"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect()
+              setDatabaseMenu({ x: rect.left, y: rect.bottom + 4 })
+            }}
+          >
+            <MoreIcon className="h-3.5 w-3.5" />
+          </IconButton>
         </div>
       </header>
 
@@ -241,6 +255,22 @@ export function DatabaseView({
           anchor={filterAnchor}
           ignoreRef={filterBtnRef}
           onClose={() => setFilterAnchor(null)}
+        />
+      )}
+
+      {databaseMenu && (
+        <ContextMenu
+          x={databaseMenu.x}
+          y={databaseMenu.y}
+          items={[
+            {
+              label: 'Create pages for all records',
+              hint: vimMode ? 'O' : undefined,
+              disabled: doc.rows.length === 0 || !formDirFromCsvPath(csvPath),
+              onSelect: () => void createAllRecordPages(csvPath)
+            }
+          ]}
+          onClose={() => setDatabaseMenu(null)}
         />
       )}
 

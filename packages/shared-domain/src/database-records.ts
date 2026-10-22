@@ -39,6 +39,50 @@ export function composePageBody(doc: DatabaseDoc, row: DbRow, body: string): str
   return `${lines.join('\n')}\n${body.replace(/^\n+/, '')}`
 }
 
+/** What giving every record its page would do: the records that get one, and
+ *  how many are left as they are. */
+export interface RecordPagePlan {
+  /** Records with no page, or whose page is gone, in row order. */
+  missing: DbRow[]
+  /** Records whose page is mapped and still there. */
+  existing: number
+  /** Records with an empty title field, left without a page. */
+  untitled: number
+}
+
+/**
+ * Plan "Create pages for all records". A record is a note links can reach
+ * only once it has a page, and a page used to be made only by opening the
+ * record, one at a time: a database converted from a CSV of hundreds of rows
+ * had none to link to. A record whose page is mapped and still exists keeps
+ * it; one whose page was deleted gets a new one, as opening it would; one
+ * with an empty title is skipped, since its page would only be "Untitled"
+ * and nothing could link to it by name. `zn base pages` (zennotescli
+ * internal/database) mirrors these rules.
+ */
+export function planRecordPages(
+  doc: DatabaseDoc,
+  pageExists: (path: string) => boolean
+): RecordPagePlan {
+  const titleField = doc.fields.find((f) => f.id !== doc.idFieldId)
+  const missing: DbRow[] = []
+  let existing = 0
+  let untitled = 0
+  for (const row of doc.rows) {
+    const page = doc.pages?.[row.id]
+    if (page && pageExists(page)) {
+      existing++
+      continue
+    }
+    if (!(titleField ? (row.cells[titleField.id] ?? '').trim() : '')) {
+      untitled++
+      continue
+    }
+    missing.push(row)
+  }
+  return { missing, existing, untitled }
+}
+
 export function setCell(doc: DatabaseDoc, rowId: string, fieldId: string, value: string): DatabaseDoc {
   return {
     ...doc,

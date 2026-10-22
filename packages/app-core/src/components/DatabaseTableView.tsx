@@ -344,6 +344,14 @@ export function DatabaseTableView({ csvPath, doc, view, isActive }: Props): JSX.
         e.preventDefault()
         return openPage(c.row.id)
       }
+      case 'O': {
+        // Every record's page at once (o opens one). A new single-key
+        // shortcut, so it stays off with Vim mode off.
+        if (!useStore.getState().vimMode) return
+        e.preventDefault()
+        void useStore.getState().createAllRecordPages(csvPath)
+        return
+      }
       case 'm': {
         // Open the context menu (like the sidebar's `m`), anchored to the
         // active header or cell. On a header → field menu; on a cell → row menu.

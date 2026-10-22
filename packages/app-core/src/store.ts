@@ -87,7 +87,7 @@ import {
   isDatabaseCsvPath
 } from '@shared/databases'
 import { parseFrontmatter } from '@shared/template-files'
-import { recordTitle, composePageBody } from './lib/database-cells'
+import { recordTitle, composePageBody, planRecordPages } from './lib/database-cells'
 import { applyManualMove, manualOrderCompare, parentDirOf } from './lib/manual-order'
 import { TAGS_TAB_PATH, isTagsTabPath } from '@shared/tags'
 import { WORKFLOWS_TAB_PATH, isWorkflowsTabPath } from '@shared/workflows-view'
@@ -3435,6 +3435,11 @@ interface Store {
   forgetDatabase: (csvPath: string) => Promise<void>
   /** Open a record as a markdown "page" note (creating + linking it on first open). */
   openRecordPage: (csvPath: string, rowId: string) => Promise<void>
+  /** Give every record of a database that has no page its page note, so each
+   *  one is a note links can reach. Asks first; null when nothing ran. */
+  createAllRecordPages: (
+    csvPath: string
+  ) => Promise<{ created: number; existing: number; untitled: number } | null>
   /** Rename a record's linked page note to match its title (no-op if unlinked). */
   renameRecordPage: (csvPath: string, rowId: string) => Promise<void>
   /** Add or remove a tag from the Tags view selection without touching
@@ -6712,6 +6717,92 @@ export const useStore = create<Store>((set, get) => {
       }
     }
     await get().selectNote(pagePath)
+  }),
+  createAllRecordPages: trackNoteWrite(null, async (csvPath) => {
+    const doc = get().databases[csvPath]
+    if (!doc) return null
+    if (!formDirFromCsvPath(csvPath)) {
+      useToastStore
+        .getState()
+        .addToast('This database is a loose CSV file, which cannot hold record pages.', 'info')
+      return null
+    }
+    // Record pages are notes (listNotes surfaces them), so the note list says
+    // which mapped pages are still there without reading every file.
+    const notePaths = new Set(get().notes.map((note) => note.path))
+    const plan = planRecordPages(doc, (path) => notePaths.has(path))
+    const counts = { created: 0, existing: plan.existing, untitled: plan.untitled }
+    if (plan.missing.length === 0) {
+      useToastStore
+        .getState()
+        .addToast(
+          plan.untitled > 0
+            ? `Every titled record already has a page. ${plan.untitled} ${plan.untitled === 1 ? 'record without a title has' : 'records without a title have'} none.`
+            : 'Every record already has a page.',
+          'info'
+        )
+      return counts
+    }
+    const n = plan.missing.length
+    const ok = await confirmApp({
+      title: `Create pages for ${n} ${n === 1 ? 'record' : 'records'}?`,
+      description:
+        `Each gets a note in the ${doc.title} folder, named after the record, so it can be linked.` +
+        (plan.existing > 0
+          ? ` ${plan.existing} ${plan.existing === 1 ? 'record that already has a page keeps' : 'records that already have a page keep'} it.`
+          : '') +
+        (plan.untitled > 0
+          ? ` ${plan.untitled} ${plan.untitled === 1 ? 'record without a title is' : 'records without a title are'} left out.`
+          : ''),
+      confirmLabel: 'Create pages',
+      cancelLabel: 'Cancel'
+    })
+    if (!ok) return null
+    const pages: Record<string, string> = {}
+    let failure: unknown = null
+    for (const row of plan.missing) {
+      const title = recordTitle(doc, row)
+      try {
+        pages[row.id] = await window.zen.createRecordPage(
+          csvPath,
+          title,
+          composePageBody(doc, row, `# ${title}\n\n`)
+        )
+      } catch (err) {
+        failure = err
+        break
+      }
+    }
+    counts.created = Object.keys(pages).length
+    // One schema write for the whole run, onto the latest doc: rows edited or
+    // deleted while the pages were written keep those edits.
+    const latest = get().databases[csvPath]
+    if (latest && counts.created > 0) {
+      const live = new Set(latest.rows.map((row) => row.id))
+      const kept = Object.fromEntries(Object.entries(pages).filter(([id]) => live.has(id)))
+      get().updateDatabaseSchema(csvPath, {
+        ...latest,
+        pages: { ...(latest.pages ?? {}), ...kept },
+        pageHasContent: {
+          ...(latest.pageHasContent ?? {}),
+          ...Object.fromEntries(Object.keys(kept).map((id) => [id, false]))
+        }
+      })
+    }
+    if (failure) {
+      console.error('createAllRecordPages failed', failure)
+      useToastStore
+        .getState()
+        .addToast(
+          `Created ${counts.created} of ${n} record pages, then: ${failure instanceof Error ? failure.message : String(failure)}`,
+          'error'
+        )
+      return counts
+    }
+    useToastStore
+      .getState()
+      .addToast(`Created ${counts.created} record ${counts.created === 1 ? 'page' : 'pages'}.`, 'success')
+    return counts
   }),
   renameRecordPage: async (csvPath, rowId) => {
     const isCurrent = captureFolderActionContext(get)

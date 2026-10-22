@@ -34,6 +34,7 @@ import {
 import { harperEditorConfig, harperSupported } from './harper-runtime'
 import { reflowParagraph } from './cm-reflow'
 import { convertTableToDatabase } from './table-to-database'
+import { csvPathFromDatabaseTab } from '@shared/databases'
 import { canRenameVault, renameVaultWithPrompt } from './rename-vault'
 import { promptImageWidth } from './image-resize'
 import { copyLinkAtCursor } from './link-copy'
@@ -1029,6 +1030,22 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
         if (!view) return
         reflowParagraph(view)
         view.focus()
+      }
+    },
+    {
+      id: 'database.create-record-pages',
+      title: 'Create Pages for All Records',
+      category: 'Database',
+      shortcut: getState().vimMode ? 'O' : undefined,
+      keywords: 'database base records rows pages notes link wikilink bulk all csv',
+      when: () => {
+        const tab = getActiveLeaf()?.activeTab
+        return !!tab && !!csvPathFromDatabaseTab(tab)
+      },
+      run: async () => {
+        const tab = getActiveLeaf()?.activeTab
+        const csvPath = tab ? csvPathFromDatabaseTab(tab) : null
+        if (csvPath) await getState().createAllRecordPages(csvPath)
       }
     },
     {

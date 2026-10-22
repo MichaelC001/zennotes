@@ -30,9 +30,11 @@ export {
   deleteRow,
   ensureSelectOption,
   fieldsById,
+  planRecordPages,
   recordTitle,
   setCell
 } from '@shared/database-records'
+export type { RecordPagePlan } from '@shared/database-records'
 
 const genId = defaultGenId
 

@@ -452,7 +452,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Any CSV is a database',
     body:
-      'A `.csv` file in your vault is a full Notion-style database, with zero new dependencies. The same data shows up as an editable Table (inline cell editing) and as a Board grouped by a select field; add and switch views freely. Fields are typed as text, number, checkbox, date, select, multi-select, or note link (single or multi), and support sort, filter, and a raw-CSV toggle, while every row keeps a stable id so external edits round-trip cleanly. Open any row as a real Markdown note, a “record page” in a per-database folder, whose frontmatter mirrors the row’s properties and whose body is a freeform page. Create one with “New Database” in the command palette or by right-clicking a folder → New database.'
+      'A `.csv` file in your vault is a full Notion-style database, with zero new dependencies. The same data shows up as an editable Table (inline cell editing) and as a Board grouped by a select field; add and switch views freely. Fields are typed as text, number, checkbox, date, select, multi-select, or note link (single or multi), and support sort, filter, and a raw-CSV toggle, while every row keeps a stable id so external edits round-trip cleanly. Open any row as a real Markdown note, a “record page” in a per-database folder, whose frontmatter mirrors the row’s properties and whose body is a freeform page. A record can be linked once it has a page; to give every record one at once (a database converted from a CSV starts with none), choose Create pages for all records in the database’s ⋯ menu or the command palette, or press `O` in the grid in Vim mode. Create one with “New Database” in the command palette or by right-clicking a folder → New database.'
   },
   {
     title: 'Databases discover your notes',
@@ -462,7 +462,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'The CLI is the bridge to launchers',
     body:
-      'The `zn` command-line tool can list, read, search, capture, edit, archive, trash, inspect tasks, work with databases (`zn base list / rows / get / add / set / create`: add rows with record pages, set fields with the grid’s exact semantics, locally or against a self-hosted server; renaming a record page with `zn rename` keeps its row pointing at it), and start the MCP server without the app running. With no `--vault` or `--server` flag, `zn` works on the vault the app has open, a connected server included (it sends the token `zn connect` saved for that server, or `ZENNOTES_REMOTE_TOKEN` / `--token`). Raycast uses it for search, then uses `zennotes://open` and `zennotes://open-window` links to bring the selected note back into ZenNotes. On macOS, Settings → CLI can install the bundled Raycast extension locally so users do not need to wait for the Raycast Store version.'
+      'The `zn` command-line tool can list, read, search, capture, edit, archive, trash, inspect tasks, work with databases (`zn base list / rows / get / add / set / create / pages`: add rows with record pages, give every record its page with `zn base pages`, set fields with the grid’s exact semantics, locally or against a self-hosted server; renaming a record page with `zn rename` keeps its row pointing at it), and start the MCP server without the app running. With no `--vault` or `--server` flag, `zn` works on the vault the app has open, a connected server included (it sends the token `zn connect` saved for that server, or `ZENNOTES_REMOTE_TOKEN` / `--token`). Raycast uses it for search, then uses `zennotes://open` and `zennotes://open-window` links to bring the selected note back into ZenNotes. On macOS, Settings → CLI can install the bundled Raycast extension locally so users do not need to wait for the Raycast Store version.'
   },
   {
     title: 'Excalidraw drawings are first-class files',
@@ -766,6 +766,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'm', action: 'Open the row menu', detail: 'On a cell, open the right-click menu for that record (Open, Delete, and the rest).' },
       { keys: 'Space / x', action: 'Select the row', detail: 'Toggle the row’s selection for bulk actions.' },
       { keys: 'o', action: 'Open the record page', detail: 'Open the row as a Markdown note in the per-database folder.' },
+      { keys: 'O', action: 'Create pages for all records', detail: 'Give every record that has no page its note in the per-database folder, so each one can be linked with [[wikilinks]]. Records that already have a page keep it, and rows with an empty title are left out. Asks first. Also in the database’s ⋯ menu and the command palette.' },
       { keys: 'Ctrl-o', action: 'Jump back to the grid', detail: 'From a record page, return to the database grid, whether you opened it as a .csv file or via New Database.' },
       { keys: 'Ctrl-w k / j / h / l', action: 'Move to tabs or panes', detail: 'Move between the grid, the tab strip, and split panes, exactly like from the editor.' },
       { keys: 'a', action: 'Add a row', detail: 'Append a new empty record and move the cursor to it.' },
