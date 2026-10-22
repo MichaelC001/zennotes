@@ -295,6 +295,7 @@ import {
   showTray,
 } from "./tray";
 import { shouldQuitWithOnlyQuickCaptureLeft } from "./last-window";
+import { quickCaptureBoundsOnDisplay } from "./quick-capture-placement";
 import {
   checkForAppUpdates,
   describeInstall,
@@ -5537,8 +5538,30 @@ async function showQuickCaptureWindow(): Promise<void> {
   ) {
     inheritWindowWorkspaceSession(sourceWindow, win);
   }
+  // A hidden panel opens on the display under the pointer (#976). One already
+  // on screen stays put: the user can see it, and a pinned panel sits where
+  // it was placed.
+  if (!win.isVisible()) moveQuickCaptureToPointerDisplay(win);
   win.show();
   win.focus();
+}
+
+/** Where the panel last sat on each display it left, by display id. */
+const quickCaptureBoundsByDisplay = new Map<number, Electron.Rectangle>();
+
+function moveQuickCaptureToPointerDisplay(win: BrowserWindow): void {
+  const bounds = win.getBounds();
+  const from = screen.getDisplayMatching(bounds);
+  const to = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const next = quickCaptureBoundsOnDisplay({
+    bounds,
+    from,
+    to,
+    remembered: quickCaptureBoundsByDisplay.get(to.id),
+  });
+  if (!next) return;
+  quickCaptureBoundsByDisplay.set(from.id, bounds);
+  win.setBounds(next);
 }
 
 async function toggleQuickCaptureWindow(): Promise<void> {
