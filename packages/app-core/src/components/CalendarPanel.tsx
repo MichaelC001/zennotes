@@ -41,6 +41,7 @@ import { confirmApp } from '../lib/confirm-requests'
 import { usePanelResize } from '../lib/use-panel-resize'
 import { PanelResizeHandle } from './PanelResizeHandle'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
+import { LazyNoteHoverPreview as NoteHoverPreview } from './LazyNoteHoverPreview'
 import { buildTaskMenuItems } from '../lib/task-context-menu'
 
 const FULL_DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -377,7 +378,10 @@ export function CalendarPanel({
   )
 
   // --- Hover preview -------------------------------------------------------
-  const [hover, setHover] = useState<{ meta: NoteMeta; right: number; top: number } | null>(null)
+  const [hover, setHover] = useState<{
+    meta: NoteMeta
+    rect: Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom' | 'width' | 'height'>
+  } | null>(null)
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const clearHover = useCallback(() => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current)
@@ -386,10 +390,14 @@ export function CalendarPanel({
   }, [])
   const armHover = useCallback((el: HTMLElement, meta: NoteMeta | undefined) => {
     if (!meta) return
-    const rect = el.getBoundingClientRect()
+    // The preview opens beside the panel, level with the day, so it never
+    // covers the days and weeks the pointer moves on to next.
+    const day = el.getBoundingClientRect()
+    const edge = el.closest('[data-calendar-panel]')?.getBoundingClientRect().left ?? day.left
+    const rect = { left: edge, right: edge, width: 0, top: day.top, bottom: day.bottom, height: day.height }
     if (hoverTimer.current) clearTimeout(hoverTimer.current)
     hoverTimer.current = setTimeout(() => {
-      setHover({ meta, right: window.innerWidth - rect.left + 8, top: rect.top })
+      setHover({ meta, rect })
     }, HOVER_DELAY_MS)
   }, [])
   useEffect(() => clearHover, [clearHover])
@@ -1209,21 +1217,10 @@ export function CalendarPanel({
         </div>
       )}
 
-      {hover && (
-        <div
-          className="fixed z-50 max-w-[260px] rounded-lg border border-paper-300/75 bg-paper-50 p-3 shadow-[0_12px_28px_-18px_rgb(var(--z-shadow)/0.8)]"
-          style={{ right: hover.right, top: Math.min(hover.top, window.innerHeight - 140) }}
-        >
-          <div className="truncate text-xs font-semibold text-ink-900">{hover.meta.title}</div>
-          {hover.meta.excerpt ? (
-            <div className="mt-1 line-clamp-4 text-xs leading-5 text-ink-500">
-              {hover.meta.excerpt}
-            </div>
-          ) : (
-            <div className="mt-1 text-xs italic text-ink-400">Empty note</div>
-          )}
-        </div>
-      )}
+      {/* The day's note drawn as the note, the same preview a link gets. The
+          index excerpt runs every line together, so a day's plan would read
+          as one paragraph. */}
+      {hover && <NoteHoverPreview note={hover.meta} anchorRect={hover.rect} />}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />
