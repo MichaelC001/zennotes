@@ -26,7 +26,7 @@
  *
  * WYSIWYG-only: registered via `wysiwygExtensions()`.
  */
-import { syntaxTree } from '@codemirror/language'
+import { syntaxTree, syntaxTreeAvailable } from '@codemirror/language'
 import { Facet, RangeSetBuilder, StateField, type EditorState, type Extension } from '@codemirror/state'
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view'
 
@@ -246,6 +246,18 @@ function buildMermaidDecorations(
       )
     }
   })
+
+  // A parse that ran out of time stops partway down the note and finishes on a
+  // later, parse-only update. Fences past where it stopped are still in the
+  // note, so they keep their memory until a tree reaches them again. (The
+  // note's mixed parser pads a cut tree to the note's length, so where it
+  // stopped is the end of its last block, not tree.length.)
+  if (!syntaxTreeAvailable(state)) {
+    const reach = tree.topNode.lastChild?.to ?? 0
+    for (const [from, memory] of previousMemory) {
+      if (from > reach) blocks.push({ from, memory })
+    }
+  }
 
   return { decorations: builder.finish(), blockLines, blocks }
 }
