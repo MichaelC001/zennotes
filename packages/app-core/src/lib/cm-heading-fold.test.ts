@@ -164,6 +164,9 @@ describe('list item folding (#848)', () => {
       parent,
       state: state.update({ selection: { anchor: state.doc.line(line).from } }).state
     })
+    // Folds read the syntax tree, and on a cold, loaded worker the first parse
+    // can run out of its time budget before it reaches the list.
+    forceParsing(view, text.length, 5000)
     return {
       view,
       done: () => {
@@ -331,6 +334,8 @@ describe('heading arrows', () => {
         extensions: [markdown({ base: markdownLanguage }), headingFolding({ showLevelLabels: true })]
       })
     })
+    // Only the tree knows the `#` lines in the fence and the indented block are code.
+    forceParsing(view, text.length, 5000)
     return {
       view,
       done: () => {

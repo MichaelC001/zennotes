@@ -33,10 +33,12 @@ function mount(
       extensions: [markdown({ base: markdownLanguage }), extension]
     })
   })
+  // The field rebuilds whenever the syntax tree changes, so finishing the parse
+  // is all a mount needs. Nothing edits the note after it: a note this short
+  // parses from scratch on every edit, under the same 20 ms budget, and a cut
+  // parse drops the fence from the tree, so the block comes back as a new
+  // widget (a second render) or not at all.
   forceParsing(view, doc.length, 5000)
-  // Nudge a rebuild so decorations reflect the fully parsed tree.
-  view.dispatch({ changes: { from: doc.length, insert: ' ' } })
-  view.dispatch({ changes: { from: doc.length, to: doc.length + 1 } })
   return view
 }
 
@@ -82,18 +84,18 @@ describe('mermaidRenderExtension', () => {
   // The theme identity carries the text font, and a new font has to be measured
   // again, so the widget is rebuilt and asks the renderer (which answers from
   // its cache when only the palette changed).
-  it('rebuilds when the theme identity changes without changing light/dark mode', async () => {
+  it('rebuilds when the theme identity changes without changing light/dark mode', () => {
     mermaidMocks.renderMermaidSvg.mockResolvedValue({ ok: true, svg: '<svg data-theme="a" />' })
     const theme = new Compartment()
     const view = mount(DIAGRAM, undefined, theme.of(mermaidRenderExtension('light', 'theme-a')))
+    const source = 'flowchart LR\n  A --> B'
+    expect(mermaidMocks.renderMermaidSvg.mock.calls).toEqual([[source]])
 
-    await vi.waitFor(() => expect(mermaidMocks.renderMermaidSvg).toHaveBeenCalledTimes(1))
     view.dispatch({
       effects: theme.reconfigure(mermaidRenderExtension('light', 'theme-b'))
     })
 
-    await vi.waitFor(() => expect(mermaidMocks.renderMermaidSvg).toHaveBeenCalledTimes(2))
-    expect(mermaidMocks.renderMermaidSvg).toHaveBeenLastCalledWith(expect.stringContaining('flowchart LR'))
+    expect(mermaidMocks.renderMermaidSvg.mock.calls).toEqual([[source], [source]])
     view.destroy()
   })
 
