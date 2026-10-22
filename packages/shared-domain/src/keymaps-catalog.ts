@@ -82,6 +82,8 @@ export const KEYMAP_CATALOG: KeymapCatalogEntry[] = [
   { id: "tabs.select7", group: "global", defaultBinding: "Alt+7", defaultBindingMac: "Ctrl+7", title: "Go to tab 7" },
   { id: "tabs.select8", group: "global", defaultBinding: "Alt+8", defaultBindingMac: "Ctrl+8", title: "Go to tab 8" },
   { id: "tabs.select9", group: "global", defaultBinding: "Alt+9", defaultBindingMac: "Ctrl+9", title: "Go to tab 9" },
+  { id: "tabs.next", group: "global", defaultBinding: "Mod+PageDown", defaultBindingMac: "Alt+Mod+ArrowRight", title: "Next tab" },
+  { id: "tabs.previous", group: "global", defaultBinding: "Mod+PageUp", defaultBindingMac: "Alt+Mod+ArrowLeft", title: "Previous tab" },
   { id: "vim.leaderPrefix", group: "vim", defaultBinding: "Space", title: "Leader key" },
   { id: "vim.leaderOpenBuffers", group: "vim", defaultBinding: "o", title: "Leader: open buffers" },
   { id: "vim.leaderCloudConflicts", group: "vim", defaultBinding: "r", title: "Leader: review Cloud conflicts" },

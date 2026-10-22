@@ -38,7 +38,7 @@ import {
   matchesShortcut,
   TAB_SELECT_KEYMAP_IDS
 } from './lib/keymaps'
-import { selectActiveBuffer } from './lib/buffer-navigation'
+import { selectActiveBuffer, stepActiveTab } from './lib/buffer-navigation'
 import { resolveCloseShortcut } from './lib/close-shortcut'
 import { focusPaneOrEdgePanel } from './lib/pane-nav'
 import {
@@ -838,6 +838,21 @@ function App(): JSX.Element {
           if (!overrides[id] && eventMatchesUserOverride(e, overrides, id)) continue
           e.preventDefault()
           selectActiveBuffer(state, i + 1)
+          return
+        }
+      }
+      // Next / previous tab with Vim on or off (#973), in the same order gt/gT
+      // walk. Inserted mid-chain like the digits above, so an explicit rebind
+      // of the same combination to a later action still wins.
+      if (!overlayOpen) {
+        for (const [id, delta] of [
+          ['tabs.next', 1],
+          ['tabs.previous', -1]
+        ] as const) {
+          if (!matchesShortcut(e, overrides, id)) continue
+          if (!overrides[id] && eventMatchesUserOverride(e, overrides, id)) continue
+          e.preventDefault()
+          stepActiveTab(state, delta)
           return
         }
       }

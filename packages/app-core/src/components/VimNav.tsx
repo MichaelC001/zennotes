@@ -34,6 +34,7 @@ import {
   getKeymapDisplay,
   getSequenceTokens,
   matchesSequenceToken,
+  matchesShortcut,
   matchesShortcutBinding,
   UNBOUND_BINDING,
   sequenceTokenFromEvent
@@ -1265,6 +1266,17 @@ export function VimNav(): JSX.Element | null {
       // releaseSelfKeyedSurfaceFocus), which is what makes DOM focus the
       // right test here.
       if (target?.closest(EXCALIDRAW_SURFACE)) return
+
+      // Next / previous tab (#973) belong to the app handler in every panel.
+      // The panel handlers below take every ArrowLeft / ArrowRight whatever
+      // its modifiers, so the Mac default Cmd+Option+Right opened the sidebar
+      // row under the cursor instead of stepping to the next tab.
+      if (
+        matchesShortcut(e, overrides, 'tabs.next') ||
+        matchesShortcut(e, overrides, 'tabs.previous')
+      ) {
+        return
+      }
 
       // ------- Sidebar navigation (explicit) -----------------------------
       // When focusedPanel is 'sidebar', always handle here — even if the

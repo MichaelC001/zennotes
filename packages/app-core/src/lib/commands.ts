@@ -17,6 +17,7 @@ import { buildMoveNotePrompt, moveNoteVocabulary, parseMoveNoteTarget } from './
 import { focusPaneInDirection } from './pane-nav'
 import { focusSidebarPanel } from './sidebar-focus'
 import { findLeaf } from './pane-layout'
+import { getTabStepTarget, stepActiveTab } from './buffer-navigation'
 import { requestPaneMode } from './pane-mode'
 import { resolveQuickNoteTitle } from './quick-note-title'
 import { forwardTaskWithPicker, taskAtEditorCursor } from './forward-task'
@@ -627,6 +628,30 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       shortcut: shortcut('global.reopenClosedTab'),
       when: () => getState().closedTabStack.length > 0,
       run: () => getState().reopenLastClosedTab()
+    },
+    {
+      id: 'tab.next',
+      title: 'Next Tab',
+      category: 'Tabs',
+      shortcut: shortcut('tabs.next'),
+      keywords: 'cycle switch right gt ctrl+tab',
+      when: () => {
+        const s = getState()
+        return getTabStepTarget(s.paneLayout, s.activePaneId, 1).kind !== 'none'
+      },
+      run: () => stepActiveTab(getState(), 1)
+    },
+    {
+      id: 'tab.previous',
+      title: 'Previous Tab',
+      category: 'Tabs',
+      shortcut: shortcut('tabs.previous'),
+      keywords: 'cycle switch left gT back ctrl+shift+tab',
+      when: () => {
+        const s = getState()
+        return getTabStepTarget(s.paneLayout, s.activePaneId, -1).kind !== 'none'
+      },
+      run: () => stepActiveTab(getState(), -1)
     },
     {
       id: 'tab.pin',

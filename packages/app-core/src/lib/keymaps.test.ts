@@ -231,6 +231,54 @@ describe('sequenceTokenFromEvent', () => {
   })
 })
 
+describe('next / previous tab (#973)', () => {
+  it('default to Ctrl+PageDown / Ctrl+PageUp, and Cmd+Option+arrows on the Mac', () => {
+    withPlatform('darwin', () => {
+      expect(getDefaultKeymapBinding('tabs.next')).toBe('Alt+Mod+ArrowRight')
+      expect(getDefaultKeymapBinding('tabs.previous')).toBe('Alt+Mod+ArrowLeft')
+    })
+    for (const platform of ['linux', 'win32'] as const) {
+      withPlatform(platform, () => {
+        expect(getDefaultKeymapBinding('tabs.next')).toBe('Mod+PageDown')
+        expect(getDefaultKeymapBinding('tabs.previous')).toBe('Mod+PageUp')
+      })
+    }
+  })
+
+  it('fire on those chords and leave plain paging and word motions alone', () => {
+    withPlatform('linux', () => {
+      const ctrl = (key: string): KeyboardEvent => fakeEvent({ key, code: key, ctrlKey: true })
+      expect(matchesShortcut(ctrl('PageDown'), {}, 'tabs.next')).toBe(true)
+      expect(matchesShortcut(ctrl('PageUp'), {}, 'tabs.previous')).toBe(true)
+      expect(matchesShortcut(fakeEvent({ key: 'PageDown', code: 'PageDown' }), {}, 'tabs.next')).toBe(false)
+    })
+    withPlatform('darwin', () => {
+      const cmdOption = (key: string): KeyboardEvent =>
+        fakeEvent({ key, code: key, metaKey: true, altKey: true })
+      expect(matchesShortcut(cmdOption('ArrowRight'), {}, 'tabs.next')).toBe(true)
+      expect(matchesShortcut(cmdOption('ArrowLeft'), {}, 'tabs.previous')).toBe(true)
+      // Cmd+Right is end of line and Option+Right a word: neither is a tab step.
+      const cmdRight = fakeEvent({ key: 'ArrowRight', code: 'ArrowRight', metaKey: true })
+      const optionRight = fakeEvent({ key: 'ArrowRight', code: 'ArrowRight', altKey: true })
+      expect(matchesShortcut(cmdRight, {}, 'tabs.next')).toBe(false)
+      expect(matchesShortcut(optionRight, {}, 'tabs.next')).toBe(false)
+    })
+  })
+
+  it('clash with no other default, and leave Ctrl+Tab to Switch to previous note', () => {
+    for (const platform of ['darwin', 'linux', 'win32'] as const) {
+      withPlatform(platform, () => {
+        for (const id of ['tabs.next', 'tabs.previous'] as const) {
+          expect(findKeymapConflict({}, id, getDefaultKeymapBinding(id))).toBeNull()
+        }
+        const ctrlTab = fakeEvent({ key: 'Tab', code: 'Tab', ctrlKey: true })
+        expect(matchesShortcut(ctrlTab, {}, 'global.toggleRecentNote')).toBe(true)
+        expect(matchesShortcut(ctrlTab, {}, 'tabs.next')).toBe(false)
+      })
+    }
+  })
+})
+
 describe('template shortcuts (#847)', () => {
   it('bind New note from template to ⌘⌥T on the Mac and leave Linux and Windows unbound', () => {
     withPlatform('darwin', () => {

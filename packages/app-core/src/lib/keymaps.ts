@@ -50,6 +50,8 @@ export type KeymapId =
   | "tabs.select7"
   | "tabs.select8"
   | "tabs.select9"
+  | "tabs.next"
+  | "tabs.previous"
   | "vim.leaderPrefix"
   | "vim.leaderOpenBuffers"
   | "vim.leaderWorkflows"
@@ -510,6 +512,33 @@ const KEYMAP_DEFINITIONS: KeymapDefinition[] = [
       defaultBindingMac: `Ctrl+${n}`,
     }),
   ),
+  // Step through the open tabs with or without Vim (#973), in the order gt/gT
+  // and the digit shortcuts use. Ctrl+Tab stays Switch to previous note, so
+  // these take the other common conventions: Ctrl+PageDown / Ctrl+PageUp
+  // (browsers, VS Code), and Cmd+Option+Right / Left on macOS (Chrome, VS
+  // Code), where Ctrl+PageDown needs fn.
+  {
+    id: "tabs.next",
+    kind: "shortcut",
+    scope: "app",
+    group: "global",
+    title: "Next tab",
+    description:
+      "Go to the next open tab, counted across panes in the same order gt cycles, wrapping from the last tab to the first. Works with Vim mode on or off.",
+    defaultBinding: "Mod+PageDown",
+    defaultBindingMac: "Alt+Mod+ArrowRight",
+  },
+  {
+    id: "tabs.previous",
+    kind: "shortcut",
+    scope: "app",
+    group: "global",
+    title: "Previous tab",
+    description:
+      "Go to the previous open tab, counted across panes in the same order gT cycles, wrapping from the first tab to the last. Works with Vim mode on or off.",
+    defaultBinding: "Mod+PageUp",
+    defaultBindingMac: "Alt+Mod+ArrowLeft",
+  },
   {
     id: "vim.leaderPrefix",
     kind: "sequence",
