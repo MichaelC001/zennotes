@@ -196,6 +196,7 @@ import type { WorkflowRunReceipt, WorkflowUndoResult } from '@bridge-contract/wo
 import { BUILTIN_TEMPLATES } from '@shared/builtin-templates'
 import {
   composeTemplateFile,
+  findTemplate,
   mergeTemplates,
   parseCustomTemplate,
   slugifyTemplateName
@@ -477,13 +478,13 @@ async function refreshVaultIndexes(): Promise<void> {
     })
 }
 
-/** Find a template (built-in or custom) by id, or undefined if it's gone. */
+/** Find a template (built-in or custom) by id, or undefined if it's gone. A
+ *  built-in's id reaches its edited copy (see findTemplate). */
 function resolveTemplate(
   customTemplates: NoteTemplate[],
   id: string | undefined
 ): NoteTemplate | undefined {
-  if (!id) return undefined
-  return mergeTemplates(BUILTIN_TEMPLATES, customTemplates).find((t) => t.id === id)
+  return findTemplate(mergeTemplates(BUILTIN_TEMPLATES, customTemplates), id)
 }
 
 function isDeletedAssetRecord(value: unknown): value is DeletedAsset {

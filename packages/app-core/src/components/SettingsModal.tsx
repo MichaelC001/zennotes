@@ -124,7 +124,12 @@ import {
   specificFolderDestination,
 } from "../lib/vault-layout";
 import { BUILTIN_TEMPLATES } from "@shared/builtin-templates";
-import { composeTemplateFile, mergeTemplates } from "@shared/template-files";
+import {
+  composeTemplateFile,
+  findTemplate,
+  mergeTemplates,
+  templateSettingId,
+} from "@shared/template-files";
 import { TemplateEditorModal } from "./TemplateEditorModal";
 import type { NoteTemplate } from "@bridge-contract/templates";
 import {
@@ -7303,8 +7308,9 @@ function TemplateSelectRow({
 }): JSX.Element {
   // A configured template that no longer exists (deleted) shows as missing so
   // the user can pick a replacement; daily/weekly creation falls back to blank.
-  const missing = !!value && !templates.some((t) => t.id === value);
-  const selected = templates.find((t) => t.id === value);
+  // A built-in's id still names it once edited (findTemplate).
+  const selected = findTemplate(templates, value);
+  const missing = !!value && !selected;
   const triggerLabel = missing
     ? "[Missing template]"
     : selected
@@ -7329,7 +7335,7 @@ function TemplateSelectRow({
   // Highlight the current selection when the menu opens.
   useEffect(() => {
     if (!open) return;
-    const current = value ? items.findIndex((t) => t?.id === value) : 0;
+    const current = value ? items.findIndex((t) => !!t && t === selected) : 0;
     setActiveIdx(current >= 0 ? current : 0);
   }, [open, items, value]);
 
@@ -7402,7 +7408,8 @@ function TemplateSelectRow({
       setActiveIdx((i) => Math.max(0, i - 1));
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      commit(items[activeIdx]?.id);
+      const picked = items[activeIdx];
+      commit(picked ? templateSettingId(picked) : undefined);
     } else if (e.key === "Escape") {
       e.preventDefault();
       setOpen(false);
@@ -7474,7 +7481,7 @@ function TemplateSelectRow({
           >
             <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-1">
               {items.map((tpl, idx) => {
-                const isSelected = tpl ? tpl.id === value : !value && !missing;
+                const isSelected = tpl ? tpl === selected : !value && !missing;
                 const text = tpl
                   ? `${tpl.category} · ${tpl.name}`
                   : "None (blank note)";
@@ -7485,7 +7492,7 @@ function TemplateSelectRow({
                     role="option"
                     aria-selected={isSelected}
                     data-idx={idx}
-                    onClick={() => commit(tpl?.id)}
+                    onClick={() => commit(tpl ? templateSettingId(tpl) : undefined)}
                     onMouseMove={() => setActiveIdx(idx)}
                     className={[
                       "flex w-full items-center px-3 py-1.5 text-left text-sm",
