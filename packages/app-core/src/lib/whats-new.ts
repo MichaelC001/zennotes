@@ -40,6 +40,23 @@ export const CLOUD_ANNOUNCEMENT = {
 
 export const WHATS_NEW: readonly WhatsNewEntry[] = [
   {
+    version: '2.74.0',
+    highlights: [
+      {
+        title: 'Every record, ready to link',
+        body: 'Choose Create pages for all records in a database’s ⋯ menu, or press O in the grid with Vim on, to give every record its page at once, so each one can be linked. A page file already in the folder is linked, not copied.'
+      },
+      {
+        title: 'Next and previous tab',
+        body: 'Ctrl+PageDown and Ctrl+PageUp (Cmd+Option+Right and Left on macOS) step through your open tabs, with Vim on or off. Next Tab and Previous Tab are in the command palette too.'
+      },
+      {
+        title: 'Plan days ahead',
+        body: 'Follow a link like [[2026-11-03]] to a day with no note and it becomes that day’s daily note, from your template. Hover a day in the calendar to read its note without opening it.'
+      }
+    ]
+  },
+  {
     version: '2.73.0',
     highlights: [
       {
