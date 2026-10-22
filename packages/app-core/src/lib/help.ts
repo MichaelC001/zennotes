@@ -766,7 +766,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'm', action: 'Open the row menu', detail: 'On a cell, open the right-click menu for that record (Open, Delete, and the rest).' },
       { keys: 'Space / x', action: 'Select the row', detail: 'Toggle the row’s selection for bulk actions.' },
       { keys: 'o', action: 'Open the record page', detail: 'Open the row as a Markdown note in the per-database folder.' },
-      { keys: 'O', action: 'Create pages for all records', detail: 'Give every record that has no page its note in the per-database folder, so each one can be linked with [[wikilinks]]. Records that already have a page keep it, and rows with an empty title are left out. Asks first. Also in the database’s ⋯ menu and the command palette.' },
+      { keys: 'O', action: 'Create pages for all records', detail: 'Give every record that has no page its note in the per-database folder, so each one can be linked with [[wikilinks]]. Records that already have a page keep it, a page file already in the folder under a record’s name is linked instead of copied, and rows with an empty title are left out. Asks first. Also in the database’s ⋯ menu and the command palette.' },
       { keys: 'Ctrl-o', action: 'Jump back to the grid', detail: 'From a record page, return to the database grid, whether you opened it as a .csv file or via New Database.' },
       { keys: 'Ctrl-w k / j / h / l', action: 'Move to tabs or panes', detail: 'Move between the grid, the tab strip, and split panes, exactly like from the editor.' },
       { keys: 'a', action: 'Add a row', detail: 'Append a new empty record and move the cursor to it.' },

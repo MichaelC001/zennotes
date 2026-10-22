@@ -31,6 +31,7 @@ export {
   ensureSelectOption,
   fieldsById,
   planRecordPages,
+  recordPageToAdopt,
   recordTitle,
   setCell
 } from '@shared/database-records'

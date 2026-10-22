@@ -14,8 +14,14 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-async function setup(overrides: { createRecordPage?: (csv: string, title: string, body: string) => Promise<string> } = {}) {
-  const files = new Map([[DUNE, '---\nAuthor: Herbert\n---\n# Dune\n\nRead twice.\n']])
+async function setup(
+  overrides: {
+    createRecordPage?: (csv: string, title: string, body: string) => Promise<string>
+    files?: Array<[string, string]>
+    pages?: Record<string, string>
+  } = {}
+) {
+  const files = new Map([[DUNE, '---\nAuthor: Herbert\n---\n# Dune\n\nRead twice.\n'], ...(overrides.files ?? [])])
   const metadata = (path: string) => ({
     path, title: path.split('/').pop()!.replace(/\.md$/, ''), folder: 'inbox' as const,
     siblingOrder: 0, createdAt: 1, updatedAt: 1, size: 0, tags: [], wikilinks: [], assetEmbeds: [], hasAttachments: false, excerpt: ''
@@ -30,7 +36,7 @@ async function setup(overrides: { createRecordPage?: (csv: string, title: string
       { id: 'kindred', cells: { id: 'kindred', title: 'Kindred', author: 'Butler' } },
       { id: 'blank', cells: { id: 'blank', title: '  ', author: 'Nobody' } }
     ],
-    pages: { dune: DUNE, emma: GONE },
+    pages: overrides.pages ?? { dune: DUNE, emma: GONE },
     pageHasContent: { dune: true, emma: false }
   }
   const createRecordPage = vi.fn(
@@ -45,7 +51,14 @@ async function setup(overrides: { createRecordPage?: (csv: string, title: string
     getCapabilities: () => ({}), listNotes: async () => [...files.keys()].map(metadata), listFolders: async () => [],
     scanTasks: async () => [], scanTasksForPath: async () => [], hasAssetsDir: async () => false,
     getRemoteWorkspaceInfo: async () => null, setVaultSettings: async (s: unknown) => s,
-    readNote: vi.fn(async (path: string) => ({ ...metadata(path), body: files.get(path) ?? '' })),
+    readNote: vi.fn(async (path: string) => {
+      if (!files.has(path)) throw new Error('Missing page')
+      return { ...metadata(path), body: files.get(path)! }
+    }),
+    writeNote: vi.fn(async (path: string, text: string) => {
+      files.set(path, text)
+      return metadata(path)
+    }),
     writeDatabaseRows: vi.fn(async () => {}),
     writeDatabaseSchema: vi.fn(async () => {}),
     createRecordPage
@@ -77,7 +90,7 @@ describe('createAllRecordPages', () => {
     const { request, result } = await s.run(true)
 
     expect(request.options.title).toBe('Create pages for 2 records?')
-    expect(result).toEqual({ created: 2, existing: 1, untitled: 1 })
+    expect(result).toEqual({ created: 2, linked: 0, existing: 1, untitled: 1 })
     expect(s.bridge.createRecordPage.mock.calls.map((c) => c[1])).toEqual(['Emma', 'Kindred'])
     // The page the grid's own "open" would make: properties as frontmatter, the title as its heading.
     expect(s.files.get('Books.base/Kindred.md')).toBe('---\nAuthor: Butler\n---\n# Kindred\n\n')
@@ -104,7 +117,7 @@ describe('createAllRecordPages', () => {
       }
     })
     const { result } = await s.run(true)
-    expect(result).toEqual({ created: 1, existing: 1, untitled: 1 })
+    expect(result).toEqual({ created: 1, linked: 0, existing: 1, untitled: 1 })
     expect(s.useStore.getState().databases[CSV].pages).toMatchObject({ emma: 'Books.base/Emma.md' })
     expect(s.useStore.getState().databases[CSV].pages).not.toHaveProperty('kindred')
     expect(s.toasts.getState().toasts.at(-1)?.message).toContain('Created 1 of 2 record pages, then: disk full')
@@ -118,8 +131,53 @@ describe('createAllRecordPages', () => {
     }
     s.useStore.setState({ databases: { [CSV]: done } })
     const result = await s.useStore.getState().createAllRecordPages(CSV)
-    expect(result).toEqual({ created: 0, existing: 1, untitled: 1 })
+    expect(result).toEqual({ created: 0, linked: 0, existing: 1, untitled: 1 })
     expect(s.prompts.getConfirmRequest()).toBeNull()
     expect(s.bridge.createRecordPage).not.toHaveBeenCalled()
   })
 })
+
+// A workaround script wrote a page file for each record, named after it,
+// but no schema.json entry: those files get linked, never a "Title 2.md"
+// beside them.
+describe('page files already in the folder', () => {
+  const scripted: Array<[string, string]> = [
+    ['Books.base/Emma.md', '# Emma\n\nMy notes on Emma.\n'],
+    ['Books.base/pages/Kindred.md', '# Kindred\n\nMy notes on Kindred.\n']
+  ]
+
+  it('links them instead of writing copies', async () => {
+    const s = await setup({ files: scripted, pages: { dune: DUNE } })
+    const { request, result } = await s.run(true)
+    expect(request.options.title).toBe('Link 2 records to their pages?')
+    expect(request.options.description).toContain('2 records already have page files in the folder; those are linked, not copied.')
+    expect(result).toEqual({ created: 0, linked: 2, existing: 1, untitled: 1 })
+    expect(s.bridge.createRecordPage).not.toHaveBeenCalled()
+    expect(s.useStore.getState().databases[CSV].pages).toEqual({
+      dune: DUNE,
+      emma: 'Books.base/Emma.md',
+      kindred: 'Books.base/pages/Kindred.md'
+    })
+    // Linked as they are.
+    expect(s.files.get('Books.base/Emma.md')).toBe('# Emma\n\nMy notes on Emma.\n')
+    expect(s.toasts.getState().toasts.at(-1)?.message).toBe('Linked 2 existing pages.')
+  })
+
+  it('never takes a file another row maps', async () => {
+    // Emma's file is mapped to Dune's row, oddly; Emma still gets her own page.
+    const s = await setup({ files: [['Books.base/Emma.md', '# Emma\n']], pages: { dune: 'Books.base/Emma.md' } })
+    const { result } = await s.run(true)
+    expect(result).toMatchObject({ linked: 0, existing: 1 })
+    expect(s.bridge.createRecordPage.mock.calls.map((c) => c[1])).toEqual(['Emma', 'Kindred'])
+  })
+
+  it('opening one record links its file too', async () => {
+    const s = await setup({ files: scripted, pages: { dune: DUNE } })
+    await s.useStore.getState().openRecordPage(CSV, 'emma')
+    expect(s.bridge.createRecordPage).not.toHaveBeenCalled()
+    expect(s.useStore.getState().databases[CSV].pages).toMatchObject({ emma: 'Books.base/Emma.md' })
+    // Opening re-mirrors the row's properties and keeps the body, as for any page.
+    expect(s.files.get('Books.base/Emma.md')).toBe('---\nAuthor: Austen\n---\n# Emma\n\nMy notes on Emma.\n')
+  })
+})
+

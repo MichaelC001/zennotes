@@ -87,7 +87,7 @@ import {
   isDatabaseCsvPath
 } from '@shared/databases'
 import { parseFrontmatter } from '@shared/template-files'
-import { recordTitle, composePageBody, planRecordPages } from './lib/database-cells'
+import { recordTitle, composePageBody, planRecordPages, recordPageToAdopt } from './lib/database-cells'
 import { applyManualMove, manualOrderCompare, parentDirOf } from './lib/manual-order'
 import { TAGS_TAB_PATH, isTagsTabPath } from '@shared/tags'
 import { WORKFLOWS_TAB_PATH, isWorkflowsTabPath } from '@shared/workflows-view'
@@ -3439,7 +3439,7 @@ interface Store {
    *  one is a note links can reach. Asks first; null when nothing ran. */
   createAllRecordPages: (
     csvPath: string
-  ) => Promise<{ created: number; existing: number; untitled: number } | null>
+  ) => Promise<{ created: number; linked: number; existing: number; untitled: number } | null>
   /** Rename a record's linked page note to match its title (no-op if unlinked). */
   renameRecordPage: (csvPath: string, rowId: string) => Promise<void>
   /** Add or remove a tag from the Tags view selection without touching
@@ -6694,6 +6694,16 @@ export const useStore = create<Store>((set, get) => {
       }
     }
     if (!pagePath) {
+      // A page file already there under the record's name but not mapped (a
+      // script wrote it, say) is linked, not shadowed by a `Title 2.md`.
+      const notePaths = new Set(get().notes.map((note) => note.path))
+      const found = recordPageToAdopt(doc, row, (path) => notePaths.has(path))
+      if (found) {
+        pagePath = found
+        get().updateDatabaseSchema(csvPath, { ...doc, pages: { ...(doc.pages ?? {}), [rowId]: found } })
+      }
+    }
+    if (!pagePath) {
       try {
         const body = composePageBody(doc, row, `# ${recordTitle(doc, row)}\n\n`)
         pagePath = await window.zen.createRecordPage(csvPath, recordTitle(doc, row), body)
@@ -6731,8 +6741,8 @@ export const useStore = create<Store>((set, get) => {
     // which mapped pages are still there without reading every file.
     const notePaths = new Set(get().notes.map((note) => note.path))
     const plan = planRecordPages(doc, (path) => notePaths.has(path))
-    const counts = { created: 0, existing: plan.existing, untitled: plan.untitled }
-    if (plan.missing.length === 0) {
+    const counts = { created: 0, linked: plan.adopt.length, existing: plan.existing, untitled: plan.untitled }
+    if (plan.missing.length === 0 && plan.adopt.length === 0) {
       useToastStore
         .getState()
         .addToast(
@@ -6744,26 +6754,36 @@ export const useStore = create<Store>((set, get) => {
       return counts
     }
     const n = plan.missing.length
+    const linking = plan.adopt.length
     const ok = await confirmApp({
-      title: `Create pages for ${n} ${n === 1 ? 'record' : 'records'}?`,
+      title:
+        n > 0
+          ? `Create pages for ${n} ${n === 1 ? 'record' : 'records'}?`
+          : `Link ${linking} ${linking === 1 ? 'record' : 'records'} to ${linking === 1 ? 'its page' : 'their pages'}?`,
       description:
-        `Each gets a note in the ${doc.title} folder, named after the record, so it can be linked.` +
+        (n > 0
+          ? `Each gets a note in the ${doc.title} folder, named after the record, so it can be linked.`
+          : '') +
+        (linking > 0
+          ? ` ${linking === 1 ? '1 record already has a page file' : `${linking} records already have page files`} in the folder; ${linking === 1 ? 'it is' : 'those are'} linked, not copied.`
+          : '') +
         (plan.existing > 0
           ? ` ${plan.existing} ${plan.existing === 1 ? 'record that already has a page keeps' : 'records that already have a page keep'} it.`
           : '') +
         (plan.untitled > 0
           ? ` ${plan.untitled} ${plan.untitled === 1 ? 'record without a title is' : 'records without a title are'} left out.`
           : ''),
-      confirmLabel: 'Create pages',
+      confirmLabel: n > 0 ? 'Create pages' : 'Link pages',
       cancelLabel: 'Cancel'
     })
     if (!ok) return null
-    const pages: Record<string, string> = {}
+    const pages: Record<string, string> = Object.fromEntries(plan.adopt.map(({ row, page }) => [row.id, page]))
+    const created: Record<string, string> = {}
     let failure: unknown = null
     for (const row of plan.missing) {
       const title = recordTitle(doc, row)
       try {
-        pages[row.id] = await window.zen.createRecordPage(
+        created[row.id] = await window.zen.createRecordPage(
           csvPath,
           title,
           composePageBody(doc, row, `# ${title}\n\n`)
@@ -6773,19 +6793,22 @@ export const useStore = create<Store>((set, get) => {
         break
       }
     }
-    counts.created = Object.keys(pages).length
+    counts.created = Object.keys(created).length
+    Object.assign(pages, created)
     // One schema write for the whole run, onto the latest doc: rows edited or
     // deleted while the pages were written keep those edits.
     const latest = get().databases[csvPath]
-    if (latest && counts.created > 0) {
+    if (latest && Object.keys(pages).length > 0) {
       const live = new Set(latest.rows.map((row) => row.id))
       const kept = Object.fromEntries(Object.entries(pages).filter(([id]) => live.has(id)))
       get().updateDatabaseSchema(csvPath, {
         ...latest,
         pages: { ...(latest.pages ?? {}), ...kept },
+        // A page just written holds only its heading; a linked one keeps
+        // whatever it had, which the next read of the database measures.
         pageHasContent: {
           ...(latest.pageHasContent ?? {}),
-          ...Object.fromEntries(Object.keys(kept).map((id) => [id, false]))
+          ...Object.fromEntries(Object.keys(created).filter((id) => live.has(id)).map((id) => [id, false]))
         }
       })
     }
@@ -6801,7 +6824,17 @@ export const useStore = create<Store>((set, get) => {
     }
     useToastStore
       .getState()
-      .addToast(`Created ${counts.created} record ${counts.created === 1 ? 'page' : 'pages'}.`, 'success')
+      .addToast(
+        [
+          counts.created > 0 ? `Created ${counts.created} record ${counts.created === 1 ? 'page' : 'pages'}` : '',
+          counts.linked > 0
+            ? `${counts.created > 0 ? 'linked' : 'Linked'} ${counts.linked} existing ${counts.linked === 1 ? 'page' : 'pages'}`
+            : ''
+        ]
+          .filter(Boolean)
+          .join(' and ') + '.',
+        'success'
+      )
     return counts
   }),
   renameRecordPage: async (csvPath, rowId) => {
