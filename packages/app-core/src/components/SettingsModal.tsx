@@ -708,6 +708,8 @@ export function SettingsModal(): JSX.Element {
   const showArchivedTasks = useStore((s) => s.showArchivedTasks);
   const kanbanCardSort = useStore((s) => s.kanbanCardSort);
   const setKanbanCardSort = useStore((s) => s.setKanbanCardSort);
+  const tasksListOrder = useStore((s) => s.tasksListOrder);
+  const setTasksListOrder = useStore((s) => s.setTasksListOrder);
   const setShowArchivedTasks = useStore((s) => s.setShowArchivedTasks);
   const mathRenderer = useStore((s) => s.mathRenderer);
   const mathFontScale = useStore((s) => s.mathFontScale);
@@ -3471,6 +3473,21 @@ export function SettingsModal(): JSX.Element {
           ],
         },
         {
+          id: "tasks-list-order",
+          title: "Tasks list order",
+          description:
+            "Order the tasks in each group of the Tasks list by their notes' line order or by priority.",
+          keywords: [
+            "tasks",
+            "list",
+            "sort",
+            "order",
+            "priority",
+            "high",
+            "note",
+          ],
+        },
+        {
           id: "kanban-card-sort",
           title: "Kanban card order",
           description:
@@ -3563,6 +3580,22 @@ export function SettingsModal(): JSX.Element {
                 { value: "due", label: "Due date" },
               ]}
               onChange={(next) => setKanbanCardSort(next)}
+            />
+          </Section>
+          <Section
+            title="List order"
+            description="How the tasks inside each group of the Tasks list are ordered."
+          >
+            <SegmentedRow
+              label="Tasks list order"
+              description="Note order follows each note's line order, which Shift+J/K and dragging rearrange. Priority puts high priority first, then medium, low, and none, with ties by due date; reordering works in Note order. In the list: the Order menu, or s in Vim mode."
+              value={tasksListOrder}
+              settingId="tasks-list-order"
+              options={[
+                { value: "note", label: "Note order" },
+                { value: "priority", label: "Priority" },
+              ]}
+              onChange={(next) => setTasksListOrder(next)}
             />
           </Section>
           <Section

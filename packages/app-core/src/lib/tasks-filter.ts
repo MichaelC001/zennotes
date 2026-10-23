@@ -106,9 +106,38 @@ export function applyFileOrder(groups: VaultTaskGroups): VaultTaskGroups {
   }
 }
 
-/** One-stop computation used by TasksView — takes raw tasks + filter + today
+const PRIORITY_RANK: Record<NonNullable<VaultTask['priority']>, number> = { high: 0, med: 1, low: 2 }
+
+/** High, then medium, then low, then none; ties by due date (none last), then
+ *  note order, so tasks of one priority keep a stable, readable order. */
+function sortByPriority(tasks: VaultTask[]): VaultTask[] {
+  const rank = (task: VaultTask) => (task.priority ? PRIORITY_RANK[task.priority] : 3)
+  return sortByFileOrder(tasks).sort((a, b) => {
+    if (rank(a) !== rank(b)) return rank(a) - rank(b)
+    const ad = a.due ?? '9999-99-99'
+    const bd = b.due ?? '9999-99-99'
+    return ad === bd ? 0 : ad < bd ? -1 : 1
+  })
+}
+
+/** Order by priority, still grouped by date (#989). Only the live groups
+ *  re-sort; forwarded, done and cancelled keep note order, since priority no
+ *  longer says what to do next there. */
+export function applyPriorityOrder(groups: VaultTaskGroups): VaultTaskGroups {
+  const byNote = applyFileOrder(groups)
+  return {
+    ...byNote,
+    today: sortByPriority(groups.today),
+    upcoming: sortByPriority(groups.upcoming),
+    undated: sortByPriority(groups.undated),
+    waiting: sortByPriority(groups.waiting)
+  }
+}
+
+/** One-stop computation used by TasksView: takes raw tasks + filter + today
  *  and returns everything the view needs. Within each group, tasks follow the
- *  note's line order so editor / list reordering is reflected. */
+ *  note's line order so editor / list reordering is reflected, or priority
+ *  when the list's Order says so (#989). */
 export function computeTasksRender(
   tasks: VaultTask[],
   filter: string,
@@ -121,10 +150,12 @@ export function computeTasksRender(
     forwarded: boolean
     done: boolean
     cancelled: boolean
-  }
+  },
+  order: 'note' | 'priority' = 'note'
 ): TasksRender {
   const filtered = filterTasks(tasks, filter)
-  const groups = applyFileOrder(groupTasks(filtered, today))
+  const grouped = groupTasks(filtered, today)
+  const groups = order === 'priority' ? applyPriorityOrder(grouped) : applyFileOrder(grouped)
   const rows = flattenRows(groups, collapsed)
   return { rows, groups, filtered }
 }

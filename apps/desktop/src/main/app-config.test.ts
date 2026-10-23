@@ -132,6 +132,7 @@ describe('TOML serialization', () => {
       savedTaskFilters: { 'Project alpha': '@project:alpha', Blocked: '@status:blocked' },
       kanbanGroupBy: 'folder',
       kanbanCardSort: 'due',
+      tasksListOrder: 'priority',
       kanbanFolderRoot: 'Projects',
       externalApplicationSchemes: ['zotero', 'obsidian'],
       ignoredKeys: ['KanaMode', 'F24']
@@ -165,6 +166,8 @@ describe('TOML serialization', () => {
     expect(round.kanbanGroupBy).toBe('folder')
     expect(text).toContain('kanban_card_sort = "due"')
     expect(round.kanbanCardSort).toBe('due')
+    expect(text).toContain('tasks_list_order = "priority"')
+    expect(round.tasksListOrder).toBe('priority')
     expect(round.kanbanFolderRoot).toBe('Projects')
     expect(text).toContain('ignored_keys = ["KanaMode", "F24"]')
     expect(round.externalApplicationSchemes).toEqual(['zotero', 'obsidian'])

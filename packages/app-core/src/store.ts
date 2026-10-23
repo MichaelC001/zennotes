@@ -763,6 +763,8 @@ interface Prefs {
    *  they were dragged into (due date until then), `due` always sorts them by
    *  due date and leaves that arrangement untouched for later. (#889) */
   kanbanCardSort: KanbanCardSort
+  /** Tasks list groups in their notes' line order or by priority. (#989) */
+  tasksListOrder: TasksListOrder
   /** Display-only Kanban column title overrides. Keyed by `${groupBy}:${columnId}`. */
   kanbanColumnTitles: Record<string, string>
   /** Manual Kanban column arrangement per board. Keyed by groupBy → ordered
@@ -789,6 +791,9 @@ interface Prefs {
 export type TasksViewMode = 'list' | 'calendar' | 'kanban'
 export type KanbanGroupBy = 'status' | 'priority' | 'folder' | `field:${string}`
 export type KanbanCardSort = 'manual' | 'due'
+/** `note` keeps each Tasks list group in its notes' line order (what J/K
+ *  rearrange); `priority` puts high before medium before low. (#989) */
+export type TasksListOrder = 'note' | 'priority'
 /** How the Tags view combines multiple selected tags: `all` = intersection
  *  (AND, narrows), `any` = union (OR, widens). */
 export type TagMatchMode = 'all' | 'any'
@@ -1193,6 +1198,7 @@ export const DEFAULT_PREFS: Prefs = {
   showArchivedTasks: false,
   kanbanGroupBy: 'status',
   kanbanCardSort: 'manual',
+  tasksListOrder: 'note',
   kanbanColumnTitles: {},
   kanbanColumnOrder: {},
   kanbanCardOrder: {},
@@ -1547,6 +1553,7 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
         : DEFAULT_PREFS.showArchivedTasks,
     kanbanGroupBy: normalizeKanbanGroupBy(p.kanbanGroupBy),
     kanbanCardSort: p.kanbanCardSort === 'due' ? 'due' : 'manual',
+    tasksListOrder: p.tasksListOrder === 'priority' ? 'priority' : 'note',
     kanbanColumnTitles: normalizeKanbanColumnTitles(p.kanbanColumnTitles),
     kanbanColumnOrder: normalizeKanbanColumnOrder(p.kanbanColumnOrder),
     kanbanCardOrder: normalizeKanbanCardOrder(p.kanbanCardOrder),
@@ -2479,6 +2486,7 @@ function collectPrefs(s: {
   showArchivedTasks: boolean
   kanbanGroupBy: KanbanGroupBy
   kanbanCardSort: KanbanCardSort
+  tasksListOrder: TasksListOrder
   kanbanColumnTitles: Record<string, string>
   kanbanColumnOrder: Record<string, string[]>
   kanbanCardOrder: Record<string, string[]>
@@ -2590,6 +2598,7 @@ function collectPrefs(s: {
     showArchivedTasks: s.showArchivedTasks,
     kanbanGroupBy: s.kanbanGroupBy,
     kanbanCardSort: s.kanbanCardSort,
+    tasksListOrder: s.tasksListOrder,
     kanbanColumnTitles: s.kanbanColumnTitles,
     kanbanColumnOrder: s.kanbanColumnOrder,
     kanbanCardOrder: s.kanbanCardOrder,
@@ -3238,6 +3247,8 @@ interface Store {
   kanbanGroupBy: KanbanGroupBy
   /** Cards in each Kanban column by hand-placed order or by due date. (#889) */
   kanbanCardSort: KanbanCardSort
+  /** Tasks list groups in note order or by priority. (#989) */
+  tasksListOrder: TasksListOrder
   /** Display-only column title overrides for the Tasks Kanban view. */
   kanbanColumnTitles: Record<string, string>
   /** Manual column arrangement per board (groupBy → ordered column ids). */
@@ -3496,6 +3507,7 @@ interface Store {
   confirmArchiveNotes: (paths: string[]) => Promise<boolean>
   setKanbanGroupBy: (group: KanbanGroupBy) => void
   setKanbanCardSort: (sort: KanbanCardSort) => void
+  setTasksListOrder: (order: TasksListOrder) => void
   setKanbanColumnTitle: (
     group: KanbanGroupBy,
     columnId: string,
@@ -5972,6 +5984,7 @@ export const useStore = create<Store>((set, get) => {
   showArchivedTasks: loadPrefs().showArchivedTasks,
   kanbanGroupBy: loadPrefs().kanbanGroupBy,
   kanbanCardSort: loadPrefs().kanbanCardSort,
+  tasksListOrder: loadPrefs().tasksListOrder,
   kanbanColumnTitles: loadPrefs().kanbanColumnTitles,
   kanbanColumnOrder: loadPrefs().kanbanColumnOrder,
   kanbanCardOrder: loadPrefs().kanbanCardOrder,
@@ -7451,6 +7464,10 @@ export const useStore = create<Store>((set, get) => {
   },
   setKanbanCardSort: (sort) => {
     set({ kanbanCardSort: sort })
+    savePrefs(collectPrefs(get()))
+  },
+  setTasksListOrder: (order) => {
+    set({ tasksListOrder: order })
     savePrefs(collectPrefs(get()))
   },
   setKanbanColumnTitle: (group, columnId, title) => {

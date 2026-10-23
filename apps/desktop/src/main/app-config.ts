@@ -415,6 +415,11 @@ const SCALAR_FIELDS: Partial<Record<PortablePrefKey, ScalarFieldMap>> = {
     tomlKey: 'kanban_card_sort',
     comment: 'manual | due: cards in a Kanban column keep the order you drag them into, or follow their due dates'
   },
+  tasksListOrder: {
+    section: 'view',
+    tomlKey: 'tasks_list_order',
+    comment: 'note | priority: each Tasks list group keeps its notes\' line order, or puts high priority first'
+  },
   kanbanFolderRoot: {
     section: 'view',
     tomlKey: 'kanban_folder_root',

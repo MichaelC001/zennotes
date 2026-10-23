@@ -1481,6 +1481,19 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
     run: () => getState().setKanbanCardSort(getState().kanbanCardSort === 'due' ? 'manual' : 'due')
   })
 
+  // The Tasks list's order (#989), from any note: the next list opened uses it.
+  cmds.push({
+    id: 'view.tasks-list-order',
+    title:
+      getState().tasksListOrder === 'priority'
+        ? 'Tasks: Order List by Note Order'
+        : 'Tasks: Order List by Priority',
+    category: 'View',
+    keywords: 'tasks list sort priority high order note line',
+    run: () =>
+      getState().setTasksListOrder(getState().tasksListOrder === 'priority' ? 'note' : 'priority')
+  })
+
   // Saved Tasks filters (#731): one palette entry per name, so a filter is a
   // few keystrokes away from any note. Opening the view resets the filter, so
   // the query is applied once the open has settled.

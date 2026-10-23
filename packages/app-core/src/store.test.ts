@@ -1853,6 +1853,29 @@ describe('vimWrappedLineMotions (#638)', () => {
   })
 })
 
+describe('tasksListOrder (#989)', () => {
+  it('defaults to note order and round-trips priority order', async () => {
+    installZen()
+    const { useStore } = await loadStore()
+    expect(useStore.getState().tasksListOrder).toBe('note')
+
+    useStore.getState().setTasksListOrder('priority')
+    const saved = JSON.parse(localStorage.getItem('zen:prefs:v2') ?? '{}')
+    expect(saved.tasksListOrder).toBe('priority')
+
+    vi.resetModules()
+    const reloaded = await import('./store')
+    expect(reloaded.useStore.getState().tasksListOrder).toBe('priority')
+  })
+
+  it('normalizes an unknown stored value to note order', async () => {
+    installZen()
+    localStorage.setItem('zen:prefs:v2', JSON.stringify({ tasksListOrder: 'due' }))
+    const { useStore } = await loadStore()
+    expect(useStore.getState().tasksListOrder).toBe('note')
+  })
+})
+
 describe('kanbanCardSort (#889)', () => {
   it('defaults to the manual order and round-trips due-date ordering', async () => {
     installZen()

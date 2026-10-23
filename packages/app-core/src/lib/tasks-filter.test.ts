@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { VaultTask, VaultTaskGroups } from '@shared/tasks'
-import { applyFileOrder, filterTasks } from './tasks-filter'
+import { applyFileOrder, applyPriorityOrder, computeTasksRender, filterTasks } from './tasks-filter'
 
 function task(sourcePath: string, taskIndex: number, overrides?: Partial<VaultTask>): VaultTask {
   return {
@@ -88,5 +88,33 @@ describe('applyFileOrder', () => {
     const input = [task('a.md', 1), task('a.md', 0)]
     applyFileOrder(groups(input))
     expect(input.map((t) => t.taskIndex)).toEqual([1, 0])
+  })
+})
+
+describe('the list by priority (#989)', () => {
+  const today = new Date(2026, 9, 23)
+  const open = { today: false, upcoming: false, undated: false, waiting: false, forwarded: false, done: false, cancelled: false }
+
+  it('puts high before medium before low before none inside each group, ties by due date then note order', () => {
+    const tasks = [
+      task('a.md', 0, { content: 'bank', priority: 'med', due: '2026-10-23' }),
+      task('a.md', 1, { content: 'passport', priority: 'high', due: '2026-10-20' }),
+      task('b.md', 0, { content: 'plants', due: '2026-10-23' }),
+      task('b.md', 1, { content: 'invoice', priority: 'low', due: '2026-10-23' }),
+      task('c.md', 0, { content: 'contract', priority: 'high', due: '2026-10-23' }),
+      task('c.md', 1, { content: 'rent', priority: 'high', due: '2026-11-01' }),
+      task('c.md', 2, { content: 'tickets', priority: 'low', due: '2026-11-04' })
+    ]
+    const byPriority = computeTasksRender(tasks, '', today, open, 'priority').groups
+    expect(byPriority.today.map((t) => t.content)).toEqual(['passport', 'contract', 'bank', 'invoice', 'plants'])
+    expect(byPriority.upcoming.map((t) => t.content)).toEqual(['rent', 'tickets'])
+    const byNote = computeTasksRender(tasks, '', today, open).groups
+    expect(byNote.today.map((t) => t.content)).toEqual(['bank', 'passport', 'plants', 'invoice', 'contract'])
+  })
+
+  it('keeps note order for the closed groups', () => {
+    const done = [task('b.md', 0, { checked: true, priority: 'low' }), task('a.md', 0, { checked: true, priority: 'high' })]
+    const g = applyPriorityOrder({ ...groups([]), done })
+    expect(g.done.map((t) => t.sourcePath)).toEqual(['a.md', 'b.md'])
   })
 })

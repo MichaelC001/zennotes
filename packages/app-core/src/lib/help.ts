@@ -282,7 +282,7 @@ export const HELP_CORE_CONCEPTS: HelpCard[] = [
   {
     title: 'Tasks, tags, archive, and trash are vault-wide views',
     body:
-      'Tasks scans every note for checkboxes and groups the open ones by when they are due: Today (due today or overdue), Upcoming, and No due date, then Waiting, Forwarded, Done, and Cancelled. A task written in a daily note counts as due on that note’s date while “Tasks are due on the note’s date” is on (Settings → Daily notes). Tags lets you browse notes that carry all of the selected tags (toggle Match to Any for a union), Archive gives you a dedicated list of cold-storage notes, and Trash gives you a recovery surface for deleted notes without turning the left rail into a second browser. Selected tags accumulate so you can narrow across several at once; clear them with the Selected strip’s “Clear all”, the `c` key, or a right-click on any tag chip (which also offers “Unselect others” to keep just that one). A tag chip’s context menu also carries “Rename Tag…” and “Delete Tag…”, which rewrite or remove that hashtag across the whole vault. Tags work in any script (`#тест` and `#标签` are tags), while headings (`# x`) and hex colors (`#1971c2`) are not.'
+      'Tasks scans every note for checkboxes and groups the open ones by when they are due: Today (due today or overdue), Upcoming, and No due date, then Waiting, Forwarded, Done, and Cancelled. A task written in a daily note counts as due on that note’s date while “Tasks are due on the note’s date” is on (Settings → Daily notes). Inside each group the list keeps the notes’ line order, or puts high priority first when its Order menu, above the list, says Priority (`s` in Vim mode). Tags lets you browse notes that carry all of the selected tags (toggle Match to Any for a union), Archive gives you a dedicated list of cold-storage notes, and Trash gives you a recovery surface for deleted notes without turning the left rail into a second browser. Selected tags accumulate so you can narrow across several at once; clear them with the Selected strip’s “Clear all”, the `c` key, or a right-click on any tag chip (which also offers “Unselect others” to keep just that one). A tag chip’s context menu also carries “Rename Tag…” and “Delete Tag…”, which rewrite or remove that hashtag across the whole vault. Tags work in any script (`#тест` and `#标签` are tags), while headings (`# x`) and hex colors (`#1971c2`) are not.'
   },
   {
     title: 'Archiving a note retires its tasks',
@@ -704,7 +704,8 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'i', action: 'Mark task in progress', detail: 'Tasks list only: mark the selected task as started (`- [/]`), or set it back to open. In-progress tasks keep their group and their day on the calendar, so the row keeps its place.' },
       { keys: 'c', action: 'Cancel task', detail: 'Tasks list only: mark the selected task as intentionally abandoned (`- [-]`), or un-cancel it. Cancelled tasks live under a “Cancelled” group, out of Today and Done.' },
       { keys: '@', action: 'Choose due date', detail: 'Tasks list, board, and calendar: give the selected task any due date from the month calendar that typing `@date` opens in a note, the same as Choose a date… in its right-click menu. It starts on the task’s due date (today without one); arrows move, Enter sets the day, or type a date.' },
-      { keys: 'K / J', action: 'Move task up / down', detail: 'Tasks list only: reorder the selected task within its group. Works with Vim mode on or off.' },
+      { keys: 'K / J', action: 'Move task up / down', detail: 'Tasks list only: reorder the selected task within its group. Works with Vim mode on or off, in Note order (see `s`).' },
+      { keys: 's', action: 'Order the list', detail: 'Tasks list only: switch the order inside each group between the notes’ line order and priority (high, then medium, low, and none, ties by due date). Same as the Order menu above the list, `:order priority` / `:order note`, and `tasks_list_order` under `[view]` in config.toml.' },
       { keys: 'r', action: 'Restore trashed note', detail: 'Trash view only: restore the selected trashed note.' },
       { keys: 'x / d', action: 'Delete forever', detail: 'Trash view only: permanently delete the selected trashed note after confirmation.' },
       { keys: '/', action: 'Filter the view', detail: 'Focus the local filter box for tasks, tag matches, or trashed notes.' },
@@ -809,9 +810,9 @@ export const HELP_VIM_COMMANDS: HelpExCommand[] = [
     detail: 'Keeps the query in the Tasks filter box as a saved filter called `<name>` (bare `:savefilter`, or `:sf`, asks for the name). It shows up as a chip under the Tasks header, in the command palette as “Tasks: name”, and in config.toml under `[saved_filters]`.'
   },
   {
-    command: ':order due | manual',
-    summary: 'Order Kanban cards by due date or by hand',
-    detail: 'In the Tasks view, `:order due` sorts the cards in every Kanban column by due date, earliest first and cards without one last; `:order manual` brings back the order you dragged them into, which ordering by date never overwrites. Bare `:order` switches between the two, like `s` on the board in Vim mode. Same as `kanban_card_sort` under `[view]` in config.toml.'
+    command: ':order due | manual | priority | note',
+    summary: 'Order Kanban cards by due date or by hand, or the list by priority',
+    detail: 'In the Tasks view, `:order due` sorts the cards in every Kanban column by due date, earliest first and cards without one last; `:order manual` brings back the order you dragged them into, which ordering by date never overwrites. On the board or the calendar, bare `:order` switches between the two, like `s` on the board in Vim mode. Same as `kanban_card_sort` under `[view]` in config.toml. In the list, `:order priority` puts high priority first inside each group and `:order note` brings back the notes’ line order; bare `:order` there switches between the two, like `s`. Same as `tasks_list_order` under `[view]`.'
   },
   {
     command: ':delfilter <name>',
@@ -1225,6 +1226,7 @@ export const HELP_SETTINGS: HelpSettingsSection[] = [
     items: [
       { label: 'Show tasks from archived notes', detail: 'Off by default: archiving a note retires its tasks from the Tasks list, calendar, and Kanban. Turn this on to keep them visible everywhere, Archive column included. The raw key is `show_archived_tasks` in `config.toml`.' },
       { label: 'Kanban statuses', detail: 'Define the ordered columns of the custom-status Kanban board here; `kanban_statuses` under `[view]` in `config.toml` is the file-level equivalent.' },
+      { label: 'Tasks list order', detail: 'Note order keeps each group of the Tasks list in its notes’ line order, which Shift+J/K and dragging rearrange; Priority puts high priority first, then medium, low, and none, ties by due date. The list’s Order menu sets the same thing, and the raw key is `tasks_list_order` (`note` or `priority`) under `[view]` in `config.toml`.' },
       { label: 'Kanban card order', detail: 'Manual keeps the cards in the order you drag them into; Due date sorts every Kanban column by due date, cards without one last, and keeps your manual order for when you switch back. The board\'s Order menu sets the same thing, and the raw key is `kanban_card_sort` (`manual` or `due`) under `[view]` in `config.toml`.' }
     ]
   },
