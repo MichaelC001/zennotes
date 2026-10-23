@@ -5140,6 +5140,9 @@ function Breadcrumb({
     const raf = requestAnimationFrame(() => {
       inputRef.current?.focus()
       inputRef.current?.select()
+      // Focusing scrolls a name wider than the row to its tail. Show its start
+      // instead, still fully selected (zennotesandroid#126).
+      if (inputRef.current) inputRef.current.scrollLeft = 0
       if (autoFocus) onAutoFocusHandled()
     })
     return () => cancelAnimationFrame(raf)
@@ -5187,26 +5190,38 @@ function Breadcrumb({
     return true
   }
 
+  // The note's name outranks its folders when the row runs out
+  // (zennotesandroid#126). On a phone or a narrow split pane, full-width crumbs
+  // used to squeeze the title of a note a few folders deep to a sliver. The
+  // crumbs share one group that gives way first, clipped at the vault end so
+  // the nearest folder stays beside the title, which truncates only once it
+  // alone fills the row. Crumbs carry their trailing space as padding, not a
+  // flex gap, so a collapsed group leaves nothing to push the title past the
+  // edge.
   return (
-    <div className="flex min-w-0 shrink items-center gap-1 overflow-hidden text-sm text-ink-500">
-      {ancestors.map((c, i) => (
-        <span key={i} className="flex shrink-0 items-center gap-1">
-          <button
-            data-crumb-menu=""
-            onClick={c.onClick}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setCrumbMenu({ x: e.clientX, y: e.clientY, subpath: c.subpath })
-            }}
-            className="truncate rounded px-1 hover:bg-paper-200/70 hover:text-ink-800"
-            title={`Go to ${c.label}, right-click${vimMode ? ' (or m)' : ''} to create here`}
-          >
-            {c.label}
-          </button>
-          <span className="text-ink-400">›</span>
+    <div className="flex min-w-0 shrink items-center overflow-hidden text-sm text-ink-500">
+      {ancestors.length > 0 && (
+        <span className="flex min-w-0 items-center justify-end overflow-hidden">
+          {ancestors.map((c, i) => (
+            <span key={i} className="flex shrink-0 items-center gap-1 pr-1">
+              <button
+                data-crumb-menu=""
+                onClick={c.onClick}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setCrumbMenu({ x: e.clientX, y: e.clientY, subpath: c.subpath })
+                }}
+                className="truncate rounded px-1 hover:bg-paper-200/70 hover:text-ink-800"
+                title={`Go to ${c.label}, right-click${vimMode ? ' (or m)' : ''} to create here`}
+              >
+                {c.label}
+              </button>
+              <span className="text-ink-400">›</span>
+            </span>
+          ))}
         </span>
-      ))}
+      )}
       {crumbMenu && (
         <ContextMenu
           x={crumbMenu.x}
@@ -5281,8 +5296,12 @@ function Breadcrumb({
           }}
           title={warning || 'Rename note'}
           aria-invalid={warning ? 'true' : 'false'}
+          // As wide as the name, up to the whole row, so the field shows the
+          // name being renamed rather than its tail. An engine without
+          // field-sizing keeps the default width, still clear of the crumbs.
+          style={{ fieldSizing: 'content' }}
           className={[
-            'min-w-[88px] max-w-[360px] rounded px-1.5 py-0.5 text-sm font-semibold text-ink-900 outline-none',
+            'min-w-[88px] max-w-full shrink-0 rounded px-1.5 py-0.5 text-sm font-semibold text-ink-900 outline-none',
             warning ? 'bg-red-500/12 ring-1 ring-red-500/60' : 'bg-paper-200/60'
           ].join(' ')}
         />
@@ -5291,7 +5310,7 @@ function Breadcrumb({
           type="button"
           onClick={() => setEditing(true)}
           title="Rename note"
-          className="truncate rounded px-1.5 py-0.5 text-sm font-semibold text-ink-900 hover:bg-paper-200/70"
+          className="max-w-full shrink-0 truncate rounded px-1.5 py-0.5 text-sm font-semibold text-ink-900 hover:bg-paper-200/70"
         >
           {note.title || 'Untitled'}
         </button>
