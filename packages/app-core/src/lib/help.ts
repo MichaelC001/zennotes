@@ -66,7 +66,7 @@ export const HELP_QUICK_START: HelpCard[] = [
   {
     title: 'Find things in the right place',
     body:
-      'Use note search when you know the note title or path, vault text search when you know a phrase inside the note, and the command palette when you know the action you want but not where it lives. When note search turns up nothing, Shift+Enter opens a small New note form with your search as the name; pick a folder and tags if you like, press Enter, and the note opens in the editor. A search that comes up empty is two keystrokes from becoming the note.'
+      'Use note search when you know the note title or path, vault text search when you know a phrase inside the note, and the command palette when you know the action you want but not where it lives. Each note search result shows the folder its note lives in, so notes that share a name are easy to tell apart. When note search turns up nothing, Shift+Enter opens a small New note form with your search as the name; pick a folder and tags if you like, press Enter, and the note opens in the editor. A search that comes up empty is two keystrokes from becoming the note.'
   },
   {
     title: 'Keep supporting material nearby',

@@ -93,9 +93,10 @@ describe('SearchPalette: Ctrl+D moves the highlighted note to Trash', () => {
     if (!el) throw new Error('search input not rendered')
     return el
   }
+  // The titles only: each row also shows the note's folder.
   const rows = (): string[] =>
     [...document.querySelectorAll<HTMLButtonElement>('[data-search-idx]')].map(
-      (row) => row.textContent?.replace(/inbox$/i, '').trim() ?? ''
+      (row) => row.querySelector('span')?.textContent?.trim() ?? ''
     )
   const ctrlD = async (): Promise<void> => {
     await act(async () => {
@@ -294,7 +295,7 @@ describe('SearchPalette: the create row opens a New note form', () => {
     type(search(), 'Alph')
     const rows = [...document.querySelectorAll<HTMLElement>('[data-search-idx]')]
     expect(rows.map((r) => r.dataset.searchIdx)).toEqual(['0', '1'])
-    expect(rows[0].textContent).toBe('Alphainbox')
+    expect(rows[0].textContent).toBe('Alpha‪inbox‬')
     expect(rows[1].hasAttribute('data-search-create')).toBe(true)
     expect(highlighted()).toBe('0')
 
@@ -556,5 +557,83 @@ describe('SearchPalette: the create row opens a New note form', () => {
     expect(createRow()).toBeNull()
     await key(search(), 'Enter', { shiftKey: true })
     expect(form()).toBeNull()
+  })
+})
+
+describe('SearchPalette: each row shows the note\'s folder (#982)', () => {
+  let host: HTMLDivElement
+  let root: Root
+  let originalState: ReturnType<typeof useStore.getState>
+  let originalScrollIntoView: PropertyDescriptor | undefined
+
+  const at = (path: string, folder: NoteMeta['folder'] = 'inbox'): NoteMeta => ({
+    ...note('Overview'),
+    path,
+    folder
+  })
+
+  beforeEach(() => {
+    originalState = useStore.getState()
+    host = document.createElement('div')
+    document.body.append(host)
+    root = createRoot(host)
+    originalScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
+    Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+    useStore.setState({
+      notes: [
+        at('inbox/Projects/Atlas/docs/Overview.md'),
+        at('inbox/Projects/Billing/docs/Overview.md'),
+        at('archive/2025/Atlas/Overview.md', 'archive'),
+        // A root-mode vault keeps its primary notes at the vault root.
+        at('Overview.md')
+      ],
+      selectedPath: null,
+      noteContents: {},
+      noteDirty: {},
+      searchOpen: true
+    })
+  })
+
+  afterEach(() => {
+    act(() => root.unmount())
+    host.remove()
+    document.body.innerHTML = ''
+    if (originalScrollIntoView) {
+      Object.defineProperty(Element.prototype, 'scrollIntoView', originalScrollIntoView)
+    } else {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+    useStore.setState(originalState, true)
+  })
+
+  const shown = (): { title: string; folder: string }[] =>
+    [...document.querySelectorAll<HTMLButtonElement>('[data-search-idx]')].map((row) => {
+      const [title, folder] = [...row.querySelectorAll('span')].map((s) => s.textContent ?? '')
+      return { title, folder: folder.replace(/[‪‬]/g, '') }
+    })
+
+  it('tells notes that share a name apart by their folder', () => {
+    act(() => root.render(createElement(SearchPalette)))
+    expect(shown()).toEqual([
+      { title: 'Overview', folder: 'inbox/Projects/Atlas/docs' },
+      { title: 'Overview', folder: 'inbox/Projects/Billing/docs' },
+      { title: 'Overview', folder: 'archive/2025/Atlas' },
+      { title: 'Overview', folder: 'inbox' }
+    ])
+  })
+
+  it('cuts a long folder from the left and keeps a root note\'s area label', () => {
+    act(() => root.render(createElement(SearchPalette)))
+    const dirs = [...document.querySelectorAll<HTMLElement>('[data-search-dir]')]
+    expect(dirs).toHaveLength(3)
+    for (const dir of dirs) {
+      // rtl puts the ellipsis on the left; the embedding keeps the path LTR.
+      expect(dir.getAttribute('dir')).toBe('rtl')
+      expect(dir.textContent?.startsWith('‪')).toBe(true)
+      expect(dir.className).toContain('truncate')
+    }
+    const rootRow = document.querySelector('[data-search-idx="3"]')!
+    expect(rootRow.querySelector('[data-search-dir]')).toBeNull()
+    expect(rootRow.querySelectorAll('span')[1].className).toContain('uppercase')
   })
 })

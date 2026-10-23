@@ -9,6 +9,7 @@ import {
   searchNoteIndex
 } from '../lib/note-search'
 import { focusEditorNormalMode } from '../lib/editor-focus'
+import { parentDirOf } from '../lib/manual-order'
 import {
   destinationLabel,
   parseDestinationText,
@@ -198,25 +199,45 @@ export function SearchPalette(): JSX.Element {
           {rowCount === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-ink-400">No matches.</div>
           ) : (
-            results.map((n, i) => (
-              <button
-                key={n.path}
-                data-search-idx={i}
-                onClick={() => open(n)}
-                onMouseMove={() => setActive(i)}
-                className={[
-                  'flex w-full min-w-0 items-center gap-3 px-4 py-2 text-left',
-                  i === active ? 'bg-paper-200' : 'hover:bg-paper-200/70'
-                ].join(' ')}
-              >
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-900">
-                  {n.title}
-                </span>
-                <span className="shrink-0 text-xs uppercase tracking-wide text-ink-400">
-                  {n.folder}
-                </span>
-              </button>
-            ))
+            results.map((n, i) => {
+              const dir = parentDirOf(n.path)
+              return (
+                <button
+                  key={n.path}
+                  data-search-idx={i}
+                  onClick={() => open(n)}
+                  onMouseMove={() => setActive(i)}
+                  className={[
+                    'flex w-full min-w-0 items-center gap-3 px-4 py-2 text-left',
+                    i === active ? 'bg-paper-200' : 'hover:bg-paper-200/70'
+                  ].join(' ')}
+                >
+                  {/* Notes that share a name differ only by folder, so the row
+                      shows the folder the way the buffer switcher does (#635,
+                      #982): the title keeps its natural width and the path takes
+                      what is left, losing its head first (dir="rtl", with the
+                      LRE/PDF embedding keeping the path itself left-to-right).
+                      A note at the vault root has no folder to show and keeps
+                      its area label. */}
+                  <span className="min-w-0 truncate text-sm font-medium text-ink-900">
+                    {n.title}
+                  </span>
+                  {dir ? (
+                    <span
+                      dir="rtl"
+                      data-search-dir
+                      className="min-w-0 flex-1 truncate text-xs text-ink-400"
+                    >
+                      {`‪${dir}‬`}
+                    </span>
+                  ) : (
+                    <span className="ml-auto shrink-0 text-xs uppercase tracking-wide text-ink-400">
+                      {n.folder}
+                    </span>
+                  )}
+                </button>
+              )
+            })
           )}
           {createRow && results.length > 0 && (
             <div className="my-1 border-t border-paper-300/70" aria-hidden="true" />
