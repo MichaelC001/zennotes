@@ -50,6 +50,7 @@ import { useStore } from '../store'
 import { isMacPlatform, matchesSequenceToken, matchesShortcutBinding, type KeymapId } from './keymaps'
 import { writeClipboardText } from './clipboard-text'
 import { followLinkTarget } from './follow-link'
+import { TableCellLinkPicker, type CellTextEdit } from './cm-table-link-picker'
 import { linkRangeAtCursor, type LineLinkKind } from './internal-links'
 
 /** The follow target for a rendered link anchor inside a table cell, with its
@@ -363,6 +364,8 @@ class TableWidget extends WidgetType {
   private pendingG = false
   /** Last `f`/`t` find, so `;`/`,` can repeat it. */
   private lastFind: { cmd: 'f' | 'F' | 't' | 'T'; ch: string } | null = null
+  /** The `[[` note picker for the cell being typed in, made on first use. */
+  private linkPicker: TableCellLinkPicker | null = null
   /** Set in toDOM — CodeMirror hands the live view there. Block widgets are
    *  provided by a StateField, which has no view at build time. */
   private view!: EditorView
@@ -703,8 +706,10 @@ class TableWidget extends WidgetType {
     editable.addEventListener('input', () => {
       this.dirty = true
       editable.dataset.raw = editable.textContent ?? ''
+      this.cellLinkPicker().update(editable)
     })
     editable.addEventListener('blur', () => {
+      this.linkPicker?.close()
       this.clearCellCursor(editable)
       editable.classList.remove('is-vim-normal')
       // Leaving the cell: pull the (possibly edited) source back out of the DOM
@@ -872,6 +877,14 @@ class TableWidget extends WidgetType {
   ): void {
     const cols = this.model.headers.length
     const rowsCount = this.model.rows.length
+
+    // An open `[[` picker owns its keys (arrows, Enter, Tab, Escape, …) ahead
+    // of the cell's own navigation and Vim handling, as in the editor.
+    if (this.linkPicker?.handleKey(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
 
     if (editable.getAttribute('contenteditable') === 'true') {
       const marker = matchesShortcutBinding(event, 'Mod+B')
@@ -1406,6 +1419,26 @@ class TableWidget extends WidgetType {
     placeCaretAt(cell, caretOffset)
   }
 
+  private cellLinkPicker(): TableCellLinkPicker {
+    this.linkPicker ??= new TableCellLinkPicker(
+      this.view,
+      (cell) => {
+        if (cell.getAttribute('contenteditable') !== 'true') return null
+        const selection = cellSelectionOffsets(cell)
+        if (!selection || selection.from !== selection.to) return null
+        return { text: cell.textContent ?? '', caret: selection.to }
+      },
+      (cell, edit: CellTextEdit) => {
+        cell.textContent = edit.text
+        cell.dataset.raw = edit.text
+        cell.dataset.rendered = 'false'
+        this.dirty = true
+        placeCellSelection(cell, edit.from, edit.to)
+      }
+    )
+    return this.linkPicker
+  }
+
   /** Apply or remove a Markdown marker around the native selection in an
    *  editable cell. Cell edits do not pass through CodeMirror's keymap, so the
    *  widget mirrors the editor's bold and italic toggle locally. */
@@ -1430,6 +1463,7 @@ class TableWidget extends WidgetType {
    *  removes `removeBefore` chars just before the caret first, used to strip a
    *  typed insert-escape prefix (the `j` of `jk`) before exiting. (#341) */
   private exitInsertToNormal(editable: HTMLElement, removeBefore: number): void {
+    this.linkPicker?.close()
     const sel = window.getSelection()
     let caret = sel && sel.anchorNode && editable.contains(sel.anchorNode) ? sel.anchorOffset : 0
     let text = editable.textContent ?? ''
@@ -2123,6 +2157,7 @@ class TableWidget extends WidgetType {
   }
 
   destroy(): void {
+    this.linkPicker?.close()
     // Flush any uncommitted edits if the widget is torn down while focused.
     this.commitIfDirty()
     this.dom = null
