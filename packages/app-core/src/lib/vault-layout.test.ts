@@ -12,6 +12,7 @@ import {
   folderForVaultRelativePath,
   isCalendarToggleAvailable,
   isFavoriteFolderKey,
+  noteFolderLabel,
   noteFolderSubpath,
   normalizeVaultSettings,
   resolveCreateLocation,
@@ -615,6 +616,50 @@ describe('folderForVaultRelativePath with remapped system folders (#398)', () =>
     // The dirs that are reserved no matter what stay reserved.
     expect(folderForVaultRelativePath('assets/scan.pdf', rootMode)).toBeNull()
     expect(folderForVaultRelativePath('99 - Archive/scan.pdf', rootMode)).toBe('archive')
+  })
+})
+
+describe('noteFolderLabel: the folder note search, the buffer switcher and the [[ picker show', () => {
+  const inboxMode = { primaryNotesLocation: 'inbox' } as VaultSettings
+  const rootMode = { primaryNotesLocation: 'root' } as VaultSettings
+
+  it('shows a main-area folder without the area directory, in either vault mode', () => {
+    expect(noteFolderLabel({ folder: 'inbox', path: 'inbox/Projects/Atlas/n.md' }, inboxMode)).toBe(
+      'Projects/Atlas'
+    )
+    expect(noteFolderLabel({ folder: 'inbox', path: 'Projects/Atlas/n.md' }, rootMode)).toBe(
+      'Projects/Atlas'
+    )
+  })
+
+  it('follows a remapped notes area', () => {
+    const remapped = {
+      primaryNotesLocation: 'inbox',
+      systemFolderPaths: { inbox: '00 - Notes' }
+    } as VaultSettings
+    expect(noteFolderLabel({ folder: 'inbox', path: '00 - Notes/Projects/n.md' }, remapped)).toBe(
+      'Projects'
+    )
+  })
+
+  it('leaves a note at the top of the main area for the caller to label', () => {
+    expect(noteFolderLabel({ folder: 'inbox', path: 'inbox/n.md' }, inboxMode)).toBe('')
+    expect(noteFolderLabel({ folder: 'inbox', path: 'n.md' }, rootMode)).toBe('')
+  })
+
+  it('keeps the area directory for every other area, as it is named on disk', () => {
+    expect(noteFolderLabel({ folder: 'archive', path: 'archive/2025/Atlas/n.md' }, inboxMode)).toBe(
+      'archive/2025/Atlas'
+    )
+    expect(noteFolderLabel({ folder: 'archive', path: 'archive/n.md' }, rootMode)).toBe('archive')
+    expect(noteFolderLabel({ folder: 'quick', path: 'quick/n.md' }, inboxMode)).toBe('quick')
+    const remapped = {
+      primaryNotesLocation: 'inbox',
+      systemFolderPaths: { archive: '99 - Archive' }
+    } as VaultSettings
+    expect(noteFolderLabel({ folder: 'archive', path: '99 - Archive/2025/n.md' }, remapped)).toBe(
+      '99 - Archive/2025'
+    )
   })
 })
 

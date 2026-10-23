@@ -1054,6 +1054,24 @@ export function noteFolderSubpath(
   return parts.length > 1 ? parts.slice(0, -1).join('/') : ''
 }
 
+/**
+ * Where a note lives, as the folder column of note search, the buffer
+ * switcher and the [[ picker show it. In the main notes area it is the folder
+ * inside that area, without the area's own directory: most notes live there,
+ * and `inbox/` on every row only crowded the title out. Anywhere else it is
+ * the whole folder path, area directory first, so `archive/2025/Atlas` never
+ * reads as an inbox folder of the same name (#982). A note at the top of the
+ * main notes area has no folder to show and gets '', for the caller to label.
+ */
+export function noteFolderLabel(
+  note: Pick<NoteMeta, 'folder' | 'path'>,
+  settings: VaultSettings | null | undefined
+): string {
+  if (note.folder === 'inbox') return noteFolderSubpath(note, settings)
+  const end = note.path.lastIndexOf('/')
+  return end === -1 ? '' : note.path.slice(0, end)
+}
+
 export function noteBelongsToFolderView(
   note: Pick<NoteMeta, 'folder' | 'path'>,
   folder: NoteFolder,

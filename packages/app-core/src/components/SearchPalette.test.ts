@@ -295,7 +295,7 @@ describe('SearchPalette: the create row opens a New note form', () => {
     type(search(), 'Alph')
     const rows = [...document.querySelectorAll<HTMLElement>('[data-search-idx]')]
     expect(rows.map((r) => r.dataset.searchIdx)).toEqual(['0', '1'])
-    expect(rows[0].textContent).toBe('Alpha‪inbox‬')
+    expect(rows[0].textContent).toBe('Alphainbox')
     expect(rows[1].hasAttribute('data-search-create')).toBe(true)
     expect(highlighted()).toBe('0')
 
@@ -609,14 +609,14 @@ describe('SearchPalette: each row shows the note\'s folder (#982)', () => {
   const shown = (): { title: string; folder: string }[] =>
     [...document.querySelectorAll<HTMLButtonElement>('[data-search-idx]')].map((row) => {
       const [title, folder] = [...row.querySelectorAll('span')].map((s) => s.textContent ?? '')
-      return { title, folder: folder.replace(/[‪‬]/g, '') }
+      return { title, folder: folder.replace(/[\u202A\u202C]/g, '') }
     })
 
   it('tells notes that share a name apart by their folder', () => {
     act(() => root.render(createElement(SearchPalette)))
     expect(shown()).toEqual([
-      { title: 'Overview', folder: 'inbox/Projects/Atlas/docs' },
-      { title: 'Overview', folder: 'inbox/Projects/Billing/docs' },
+      { title: 'Overview', folder: 'Projects/Atlas/docs' },
+      { title: 'Overview', folder: 'Projects/Billing/docs' },
       { title: 'Overview', folder: 'archive/2025/Atlas' },
       { title: 'Overview', folder: 'inbox' }
     ])
@@ -629,7 +629,7 @@ describe('SearchPalette: each row shows the note\'s folder (#982)', () => {
     for (const dir of dirs) {
       // rtl puts the ellipsis on the left; the embedding keeps the path LTR.
       expect(dir.getAttribute('dir')).toBe('rtl')
-      expect(dir.textContent?.startsWith('‪')).toBe(true)
+      expect(dir.textContent?.startsWith('\u202A')).toBe(true)
       expect(dir.className).toContain('truncate')
     }
     const rootRow = document.querySelector('[data-search-idx="3"]')!

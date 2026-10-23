@@ -9,7 +9,6 @@ import {
   searchNoteIndex
 } from '../lib/note-search'
 import { focusEditorNormalMode } from '../lib/editor-focus'
-import { parentDirOf } from '../lib/manual-order'
 import {
   destinationLabel,
   parseDestinationText,
@@ -18,7 +17,7 @@ import {
   type SearchCreateDraft
 } from '../lib/search-create'
 import { resolveSystemFolderLabels } from '../lib/system-folder-labels'
-import { isPrimaryNotesAtRoot } from '../lib/vault-layout'
+import { isPrimaryNotesAtRoot, noteFolderLabel } from '../lib/vault-layout'
 import { useToastStore } from '../lib/toast'
 import { Modal } from './ui/Modal'
 import { SearchCreateForm, type SearchCreateTarget } from './SearchCreateForm'
@@ -200,7 +199,7 @@ export function SearchPalette(): JSX.Element {
             <div className="px-4 py-6 text-center text-sm text-ink-400">No matches.</div>
           ) : (
             results.map((n, i) => {
-              const dir = parentDirOf(n.path)
+              const dir = noteFolderLabel(n, vaultSettings)
               return (
                 <button
                   key={n.path}
@@ -213,12 +212,13 @@ export function SearchPalette(): JSX.Element {
                   ].join(' ')}
                 >
                   {/* Notes that share a name differ only by folder, so the row
-                      shows the folder the way the buffer switcher does (#635,
-                      #982): the title keeps its natural width and the path takes
-                      what is left, losing its head first (dir="rtl", with the
-                      LRE/PDF embedding keeping the path itself left-to-right).
-                      A note at the vault root has no folder to show and keeps
-                      its area label. */}
+                      shows the folder the way the buffer switcher and the [[
+                      picker do (noteFolderLabel, #635, #982): the title keeps
+                      its natural width and the path takes what is left, losing
+                      its head first (dir="rtl", with the LRE/PDF embedding
+                      keeping the path itself left-to-right). A note at the top
+                      of the main notes area has no folder to show and keeps its
+                      area label. */}
                   <span className="min-w-0 truncate text-sm font-medium text-ink-900">
                     {n.title}
                   </span>
@@ -228,7 +228,7 @@ export function SearchPalette(): JSX.Element {
                       data-search-dir
                       className="min-w-0 flex-1 truncate text-xs text-ink-400"
                     >
-                      {`‪${dir}‬`}
+                      {`\u202A${dir}\u202C`}
                     </span>
                   ) : (
                     <span className="ml-auto shrink-0 text-xs uppercase tracking-wide text-ink-400">
