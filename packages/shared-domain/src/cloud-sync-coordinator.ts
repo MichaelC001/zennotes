@@ -51,6 +51,8 @@ const CONFLICT_SETTLED =
 /** The other side moved on while the person was choosing. */
 const CONFLICT_CHANGED_AGAIN =
   'The file changed again on another device while you were reviewing it. Choose Sync now to load the newest version, then choose again.'
+const pathTakenInCloud = (path: string) =>
+  `Another file in Cloud already uses “${path}”, so this version cannot be saved there. Choose the other version, or save this one under a different name.`
 const CHOICE_UNCONFIRMED = "ZenNotes Cloud didn't confirm your choice, so nothing changed yet. Try again."
 const NEEDS_UPDATE = "This version of ZenNotes can't do that yet. Update ZenNotes, then try again."
 
@@ -127,13 +129,17 @@ export interface CloudSyncRepository {
   }): Promise<void>
   /** Materialize the complete local result of a decision without overwriting
    * an unrelated destination. The expected file is removed only after all
-   * replacement files have been written successfully. */
+   * replacement files have been written successfully. A file marked
+   * `displace_existing` is the other device's version going where that device
+   * put it: a different file of this device already there moves to the next
+   * free name beside it (`cloudSyncFreePath`) instead of blocking the choice. */
   applyConflictResolutionFiles?(input: {
     expected_path: string | null
     expected_sha256: string | null
     files: Array<{
       path: string
       content: CloudSyncContent
+      displace_existing?: boolean
     }>
   }): Promise<void>
   /** Apply the local filesystem half of an explicit first-sync decision. */
@@ -237,6 +243,16 @@ export class CloudSyncCoordinator {
     const state = await this.requireState()
     const stored = state.pending_conflicts?.[resolution.conflict_id]
     if (!stored) throw new Error(CONFLICT_SETTLED)
+    if (movedArrival(stored)) {
+      // Neither version is this device's: the file only met one of this
+      // device's own files on its way in. Whichever is chosen, it lands where
+      // Cloud keeps it and that file stays as it is.
+      const settled = await this.settleMovedArrivals(state, [], stored.id)
+      if (!settled.state.pending_conflicts?.[stored.id]) {
+        await this.states.save(settled.state)
+        return
+      }
+    }
     const local = await this.currentLocalSnapshot(stored)
     if ((local.content?.sha256 ?? null) !== resolution.expected_local_sha256) {
       throw new Error(
@@ -336,7 +352,11 @@ export class CloudSyncCoordinator {
     const response = await this.remote.mutate(this.vaultId, request)
     const conflict = response.conflicts.find((item) => item.operation_id === operationId)
     if (conflict) {
-      throw new Error(CONFLICT_CHANGED_AGAIN)
+      // A different Cloud file holding the destination is not a newer edit
+      // of this one: "choose again" would only ever fail the same way.
+      throw new Error(conflict.code === 'PATH_CONFLICT' && mutation.type !== 'delete'
+        ? pathTakenInCloud(mutation.path)
+        : CONFLICT_CHANGED_AGAIN)
     }
     if (!response.acknowledged.some((item) => item.operation_id === operationId)) {
       throw new Error(CHOICE_UNCONFIRMED)
@@ -488,6 +508,12 @@ export class CloudSyncCoordinator {
     state = initialPull.state
     pulled += initialPull.pulled
     localConflicts.push(...initialPull.localConflicts)
+    const settled = await this.settleMovedArrivals(state, localConflicts)
+    if (settled.state !== state) {
+      state = settled.state
+      pulled += settled.pulled
+      await this.states.save(state)
+    }
 
     let localItems = await this.repository.scan()
     const repositoryPendingPaths = (await this.repository.pendingConflictPaths?.()) ?? []
@@ -950,6 +976,44 @@ export class CloudSyncCoordinator {
     return state
   }
 
+  /**
+   * A file new to this device that met one of this device's own files on its
+   * way in was queued as a conflict at that path, and the queue kept it after
+   * Cloud moved the file on. Dave's phone (2026-10-23): its sync was stuck
+   * while the computer made an Untitled.md and trashed it, so the phone's own
+   * edited Untitled.md was claimed by two conflicts. Keeping this device's
+   * version for the second was refused as "changed again", and taking the
+   * other device's deleted the phone's note, which was never that file's.
+   * Once nothing collides, the file lands where Cloud keeps it, as any new
+   * file would, and leaves this device's file alone; a deleted one just
+   * leaves the queue. Landing on another of this device's files queues a
+   * conflict there, at the path where the two really meet.
+   */
+  private async settleMovedArrivals(
+    state: CloudSyncState,
+    localConflicts: CloudSyncLocalConflict[],
+    onlyId?: string
+  ): Promise<{ state: CloudSyncState; pulled: number }> {
+    const waiting = Object.values(state.pending_conflicts ?? {}).filter(
+      (conflict) => (onlyId === undefined || conflict.id === onlyId) && movedArrival(conflict)
+    )
+    if (waiting.length === 0) return { state, pulled: 0 }
+    const manifest = await this.stableManifest(false)
+    let pulled = 0
+    for (const conflict of waiting) {
+      const item = manifest.items.find((entry) => entry.item_id === conflict.item_id)
+      if (item && conflict.local.path !== null &&
+          cloudSyncPathKey(item.path) === cloudSyncPathKey(conflict.local.path)) continue
+      state = withoutConflict(state, conflict.id)
+      if (!item) continue
+      const change = manifestUpsert(await this.hydrateManifestItem(item), manifest.cursor)
+      state = await this.landRemoteChange(state, change, undefined, localConflicts)
+      state = { ...state, items: { ...state.items, [item.item_id]: trackedManifestItem(item) } }
+      pulled++
+    }
+    return { state, pulled }
+  }
+
   private async retryPendingMerges(
     initialState: CloudSyncState,
     localItems: CloudSyncLocalItem[],
@@ -1209,7 +1273,7 @@ export class CloudSyncCoordinator {
         expected_sha256: local.content?.sha256 ?? null,
         files:
           conflict.cloud.path && conflict.cloud.content
-            ? [{ path: conflict.cloud.path, content: conflict.cloud.content }]
+            ? [{ path: conflict.cloud.path, content: conflict.cloud.content, displace_existing: true }]
             : []
       })
       return
@@ -1240,7 +1304,7 @@ export class CloudSyncCoordinator {
         expected_path: local.path,
         expected_sha256: local.content.sha256,
         files: [
-          { path: conflict.cloud.path, content: conflict.cloud.content },
+          { path: conflict.cloud.path, content: conflict.cloud.content, displace_existing: true },
           { path: keepBothPath, content: local.content }
         ]
       })
@@ -1933,6 +1997,18 @@ function publicConflictVersion(
 
 function withConflict(state: CloudSyncState, conflict: CloudSyncStoredConflict): CloudSyncState {
   return { ...state, pending_conflicts: { ...state.pending_conflicts, [conflict.id]: conflict } }
+}
+
+/**
+ * A conflict for a file this device never had (no base) whose Cloud copy no
+ * longer sits on the local file it met: Cloud moved or deleted it since.
+ * See settleMovedArrivals.
+ */
+function movedArrival(conflict: CloudSyncStoredConflict): boolean {
+  if (conflict.base.path !== null || conflict.base.revision !== null) return false
+  if (conflict.cloud.path === null) return true
+  return conflict.local.path !== null &&
+    cloudSyncPathKey(conflict.cloud.path) !== cloudSyncPathKey(conflict.local.path)
 }
 
 function withoutConflict(state: CloudSyncState, conflictId: string): CloudSyncState {

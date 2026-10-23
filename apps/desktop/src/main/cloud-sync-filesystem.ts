@@ -13,6 +13,7 @@ import type {
 import {
   CLOUD_SYNC_SETTINGS_CONFLICT_PATH,
   CLOUD_SYNC_VAULT_SETTINGS_PATH,
+  cloudSyncFreePath,
   cloudSyncPathKey,
   isCloudSyncVaultSettingsPath,
   normalizeCloudSyncPath,
@@ -136,8 +137,11 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
     const local = expected ? await this.localItemOrNull(expected) : null
     if ((local?.content.sha256 ?? null) !== input.expected_sha256) throw new Error('This file changed on this device.')
     const replacing = expected !== null && cloudSyncPathKey(expected) === cloudSyncPathKey(cloud)
-    if (!replacing && await exists(this.resolve(cloud))) throw new Error(`A file named “${cloud}” already exists. Choose another name.`)
+    // The other device's version goes where that device put it.
+    const displacement = replacing ? null
+      : await this.displacementFor(cloud, new Set([cloud, ...(keep ? [keep] : [])].map(cloudSyncPathKey)))
     let keptCopy: Stats | undefined
+    let displaced = false
     let cloudPublished = false
     try {
       if (keep) {
@@ -148,6 +152,10 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
       // Recheck after a potentially long local copy, immediately before publish.
       if (expected && ((await this.localItemOrNull(expected))?.content.sha256 ?? null) !== input.expected_sha256) {
         throw new Error('This file changed on this device.')
+      }
+      if (displacement) {
+        await renameWithRetry(this.resolve(displacement.from), this.resolve(displacement.to))
+        displaced = true
       }
       await this.publishFile(cloud, handle.path, input.file.reference, replacing ? input.expected_sha256 : null, handle.signal)
       cloudPublished = true
@@ -162,8 +170,35 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
         // intact. An edit, replacement or unverifiable file must survive.
         await this.rollbackStagedConflictCopy(keep, expected, local.content, keptCopy).catch(() => {})
       }
+      if (displacement && displaced && !cloudPublished) await this.undoDisplacement(displacement).catch(() => {})
       throw error
     }
+  }
+
+  /**
+   * A different file of this device where the other device's version has to
+   * go (see CloudSyncRepository.applyConflictResolutionFiles): the next free
+   * name beside it, or null when the path is free. Anything but a plain file
+   * there keeps the choice refused.
+   */
+  private async displacementFor(relPath: string, reserved: Set<string>): Promise<{ from: string; to: string } | null> {
+    let stats: Stats
+    try {
+      stats = await fs.lstat(this.resolve(relPath))
+    } catch (error) {
+      if (isMissingFileError(error)) return null
+      throw error
+    }
+    if (!stats.isFile()) throw new Error(`A file named “${relPath}” already exists. Choose another name.`)
+    const to = await cloudSyncFreePath(relPath, async (candidate) =>
+      reserved.has(cloudSyncPathKey(candidate)) || await exists(this.resolve(candidate)))
+    reserved.add(cloudSyncPathKey(to))
+    return { from: relPath, to }
+  }
+
+  private async undoDisplacement(move: { from: string; to: string }): Promise<void> {
+    if (await exists(this.resolve(move.from))) return
+    await renameWithRetry(this.resolve(move.to), this.resolve(move.from))
   }
 
   private async rollbackStagedConflictCopy(relPath: string, originalPath: string, content: CloudSyncContent, created: Stats): Promise<void> {
@@ -370,7 +405,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
   async applyConflictResolutionFiles(input: {
     expected_path: string | null
     expected_sha256: string | null
-    files: Array<{ path: string; content: CloudSyncContent }>
+    files: Array<{ path: string; content: CloudSyncContent; displace_existing?: boolean }>
   }): Promise<void> {
     const expectedPath = input.expected_path ? normalizeCloudSyncPath(input.expected_path) : null
     const current = expectedPath ? await this.localItemOrNull(expectedPath) : null
@@ -382,9 +417,14 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
 
     const files = normalizedResolutionFiles(input.files)
     const expectedKey = expectedPath ? cloudSyncPathKey(expectedPath) : null
+    const reserved = new Set(files.map((file) => cloudSyncPathKey(file.path)))
+    const displacements: Array<{ from: string; to: string }> = []
     for (const file of files) {
       if (cloudSyncPathKey(file.path) === expectedKey) continue
-      if (await exists(this.resolve(file.path))) {
+      if (file.displace_existing) {
+        const displacement = await this.displacementFor(file.path, reserved)
+        if (displacement) displacements.push(displacement)
+      } else if (await exists(this.resolve(file.path))) {
         throw new Error(`A file named “${file.path}” already exists. Choose another name.`)
       }
     }
@@ -399,7 +439,12 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
           : 0
     )
     const newPaths: string[] = []
+    const displaced: Array<{ from: string; to: string }> = []
     try {
+      for (const move of displacements) {
+        await renameWithRetry(this.resolve(move.from), this.resolve(move.to))
+        displaced.push(move)
+      }
       for (const file of ordered) {
         if (cloudSyncPathKey(file.path) !== expectedKey) newPaths.push(file.path)
         await this.writeContent(file.path, file.content, cloudSyncPathKey(file.path) === expectedKey ? input.expected_sha256 : null)
@@ -412,6 +457,7 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
       for (const createdPath of newPaths.reverse()) {
         await fs.rm(this.resolve(createdPath), { force: true }).catch(() => undefined)
       }
+      for (const move of displaced.reverse()) await this.undoDisplacement(move).catch(() => undefined)
       throw error
     }
   }
@@ -579,8 +625,8 @@ export class DesktopCloudSyncRepository implements CloudSyncRepository {
 }
 
 function normalizedResolutionFiles(
-  files: Array<{ path: string; content: CloudSyncContent }>
-): Array<{ path: string; content: CloudSyncContent }> {
+  files: Array<{ path: string; content: CloudSyncContent; displace_existing?: boolean }>
+): Array<{ path: string; content: CloudSyncContent; displace_existing?: boolean }> {
   const normalized = files.map((file) => ({
     ...file,
     path: normalizeCloudSyncPath(file.path)

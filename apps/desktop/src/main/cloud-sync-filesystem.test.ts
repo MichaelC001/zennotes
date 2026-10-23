@@ -567,6 +567,64 @@ describe('DesktopCloudSyncRepository: decisions and writes', () => {
     expect(await readFile(path.join(root, 'Deck.pdf'), 'utf8')).toBe('cloud bytes')
   }, 20_000)
 
+  it('puts the other device\'s version where it went and moves this device\'s different file beside it', async () => {
+    // Dave (2026-10-23): the computer trashed the note his phone edited, and
+    // the phone had trashed an Untitled.md of its own into the same slot.
+    const root = await temporaryRoot()
+    const note = 'inbox/Daily Notes/Untitled.md'
+    await mkdir(path.join(root, 'inbox/Daily Notes'), { recursive: true })
+    await mkdir(path.join(root, 'trash/Daily Notes'), { recursive: true })
+    await writeFile(path.join(root, note), 'edited here')
+    await writeFile(path.join(root, 'trash/Daily Notes/Untitled.md'), 'own scratch')
+    await writeFile(path.join(root, 'trash/Daily Notes/Untitled 2.md'), 'already second')
+    const cloud = upsert('trash/Daily Notes/Untitled.md', 'from the computer').content!
+    const { data, ...contentMetadata } = cloud
+    const reference = { ...contentMetadata, item_id: 'item-remote', revision: 2 }
+    const repository = new DesktopCloudSyncRepository(root, {
+      stagingDirectory: await temporaryRoot(),
+      fetchImplementation: async () => new Response(data)
+    })
+    const file = await repository.stageCloudContent({
+      reference,
+      previewLimitBytes: 0,
+      getInstruction: async () => ({
+        item_id: reference.item_id, revision: reference.revision, content: contentMetadata,
+        download: { method: 'GET', url: 'https://objects.example.test/immutable', headers: {}, expires_at: '2099-10-01T12:00:00Z' }
+      })
+    })
+    try {
+      await repository.resolveStagedCloudConflict({
+        expected_path: note, expected_sha256: hash('edited here'), cloud_path: 'trash/Daily Notes/Untitled.md', file
+      })
+    } finally {
+      await releaseCloudSyncStagedFile(file)
+    }
+
+    expect(await readFile(path.join(root, 'trash/Daily Notes/Untitled.md'), 'utf8')).toBe('from the computer')
+    expect(await readFile(path.join(root, 'trash/Daily Notes/Untitled 3.md'), 'utf8')).toBe('own scratch')
+    expect(await readFile(path.join(root, 'trash/Daily Notes/Untitled 2.md'), 'utf8')).toBe('already second')
+    await expect(readFile(path.join(root, note), 'utf8')).rejects.toThrow()
+  })
+
+  it('moves only for the other device\'s version: a chosen name that is taken still refuses', async () => {
+    const root = await temporaryRoot()
+    await writeFile(path.join(root, 'Plan.md'), 'edited here')
+    await writeFile(path.join(root, 'Taken.md'), 'someone else')
+    const repository = new DesktopCloudSyncRepository(root)
+    const cloud = upsert('Taken.md', 'cloud').content!
+
+    await expect(repository.applyConflictResolutionFiles({
+      expected_path: 'Plan.md', expected_sha256: hash('edited here'),
+      files: [{ path: 'Taken.md', content: cloud }]
+    })).rejects.toThrow('already exists')
+    await repository.applyConflictResolutionFiles({
+      expected_path: 'Plan.md', expected_sha256: hash('edited here'),
+      files: [{ path: 'Taken.md', content: cloud, displace_existing: true }]
+    })
+    expect(await readFile(path.join(root, 'Taken.md'), 'utf8')).toBe('cloud')
+    expect(await readFile(path.join(root, 'Taken 2.md'), 'utf8')).toBe('someone else')
+  })
+
   it('refuses to write a snapshot that carries no bytes and no source', async () => {
     const root = await temporaryRoot()
     await writeFile(path.join(root, 'Deck.pdf'), 'agreed')

@@ -463,6 +463,42 @@ describe('PortableCloudSyncRepository', () => {
     expect(fs.text('blocked/Plan.md')).toBeNull()
   })
 
+  it('moves a different file of this device aside for the other device\'s version', async () => {
+    // Dave's phone: the computer trashed the note the phone edited, and the
+    // phone had trashed an Untitled.md of its own into the same slot.
+    const edited = await textContent('edited on the phone')
+    const cloud = await textContent('written on the computer')
+    const fs = new MemoryFileSystem({
+      'inbox/Daily Notes/Untitled.md': 'edited on the phone',
+      'trash/Daily Notes/Untitled.md': 'the phone\'s own scratch',
+      'trash/Daily Notes/Untitled 2.md': 'already the second one'
+    })
+    await new PortableCloudSyncRepository(fs).applyConflictResolutionFiles({
+      expected_path: 'inbox/Daily Notes/Untitled.md',
+      expected_sha256: edited.sha256,
+      files: [{ path: 'trash/Daily Notes/Untitled.md', content: cloud, displace_existing: true }]
+    })
+    expect(fs.text('trash/Daily Notes/Untitled.md')).toBe('written on the computer')
+    expect(fs.text('trash/Daily Notes/Untitled 3.md')).toBe('the phone\'s own scratch')
+    expect(fs.text('trash/Daily Notes/Untitled 2.md')).toBe('already the second one')
+    expect(fs.text('inbox/Daily Notes/Untitled.md')).toBeNull()
+  })
+
+  it('moves this device\'s file back when the other device\'s version cannot be written', async () => {
+    const edited = await textContent('edited')
+    const fs = new FailingMemoryFileSystem({ 'inbox/a.md': 'edited', 'trash/a.md': 'scratch' }, 'trash/a.md')
+    await expect(
+      new PortableCloudSyncRepository(fs).applyConflictResolutionFiles({
+        expected_path: 'inbox/a.md',
+        expected_sha256: edited.sha256,
+        files: [{ path: 'trash/a.md', content: await textContent('cloud'), displace_existing: true }]
+      })
+    ).rejects.toThrow('Cannot write trash/a.md')
+    expect(fs.text('trash/a.md')).toBe('scratch')
+    expect(fs.text('trash/a 2.md')).toBeNull()
+    expect(fs.text('inbox/a.md')).toBe('edited')
+  })
+
   it('reports a parked settings choice until its cloud copy is removed', async () => {
     const fs = new MemoryFileSystem({
       '.zennotes/vault.json': '{"favorites":["local.md"]}'
