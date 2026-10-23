@@ -40,6 +40,27 @@ export const CLOUD_ANNOUNCEMENT = {
 
 export const WHATS_NEW: readonly WhatsNewEntry[] = [
   {
+    version: '2.76.0',
+    highlights: [
+      {
+        title: 'Any due date, two clicks away',
+        body: 'Right-click a task in the Tasks list, on the board or in the calendar and pick Choose a date… for a month calendar: a click on a day sets it. In Vim mode, @ opens it on the selected task.'
+      },
+      {
+        title: 'No due date has its own place',
+        body: 'A task without a due date now waits under No due date, after Upcoming, instead of in Today. The Status board has the same column, and dropping a card there clears its date.'
+      },
+      {
+        title: 'Tasks by priority',
+        body: 'The Tasks list’s new Order menu puts high priority first inside each group, still grouped by date (s in Vim mode, or :order priority). Note order brings back your notes’ line order.'
+      },
+      {
+        title: 'Cloud conflicts settle cleanly',
+        body: 'Choosing the other device’s version no longer removes a note this device kept, and when a file already holds its place, that file moves beside it under the next free name.'
+      }
+    ]
+  },
+  {
     version: '2.75.0',
     highlights: [
       {
