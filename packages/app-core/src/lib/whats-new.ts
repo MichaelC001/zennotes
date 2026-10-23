@@ -40,6 +40,23 @@ export const CLOUD_ANNOUNCEMENT = {
 
 export const WHATS_NEW: readonly WhatsNewEntry[] = [
   {
+    version: '2.75.0',
+    highlights: [
+      {
+        title: 'Same name, different folder',
+        body: 'Search notes (Cmd+P on macOS, Ctrl+P elsewhere) now shows the folder each result lives in, so notes that share a name are easy to tell apart. A long folder keeps its end in view.'
+      },
+      {
+        title: 'Links in table cells',
+        body: 'Type [[ in a table cell in Edit mode and the same note picker as in a paragraph opens: arrows or Ctrl+N and Ctrl+P to move, Enter to insert, | to add display text.'
+      },
+      {
+        title: 'Deep notes keep their title',
+        body: 'In a narrow pane, a note several folders deep now gives up its outer folders before its title, and renaming it shows the whole name from the start.'
+      }
+    ]
+  },
+  {
     version: '2.74.0',
     highlights: [
       {
