@@ -120,9 +120,10 @@ export function statusColumns(tasks: VaultTask[], today: Date): Column[] {
   // started work gets its own column between the to-do buckets and Done, and
   // a glance shows how much is in flight (#677). `@waiting` still wins: a
   // blocked card reads as blocked and comes back here when the wait clears.
-  const inProgress = [...groups.today, ...groups.upcoming].filter((t) => t.inProgress)
+  const inProgress = [...groups.today, ...groups.upcoming, ...groups.undated].filter((t) => t.inProgress)
   const today_ = groups.today.filter((t) => !t.inProgress)
   const upcoming = groups.upcoming.filter((t) => !t.inProgress)
+  const undated = groups.undated.filter((t) => !t.inProgress)
   const overdueBadge = (list: VaultTask[]): Column['badge'] => {
     const value = list.filter((t) => isTaskOverdue(t, today)).length
     return value > 0 ? { kind: 'overdue', value } : undefined
@@ -130,6 +131,8 @@ export function statusColumns(tasks: VaultTask[], today: Date): Column[] {
   return [
     { id: 'today', label: 'Today', tasks: today_, badge: overdueBadge(today_) },
     { id: 'upcoming', label: 'Upcoming', tasks: upcoming },
+    // Open work with no date (#990); dropping a card here clears its `due:`.
+    { id: 'undated', label: 'No due date', tasks: undated },
     {
       id: IN_PROGRESS_COLUMN_ID,
       label: 'In progress',

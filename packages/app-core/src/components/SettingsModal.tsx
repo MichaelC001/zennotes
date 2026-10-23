@@ -4864,7 +4864,7 @@ export function SettingsModal(): JSX.Element {
                     />
                     <ToggleRow
                       label="Tasks are due on the note's date"
-                      description="A task written inside a daily note appears on the calendar for that day automatically, without typing a due date. An explicit `due:YYYY-MM-DD` still wins."
+                      description="A task written inside a daily note is due that day automatically, in the Tasks list, board and calendar and on Home, without typing a due date. An explicit `due:YYYY-MM-DD` still wins."
                       value={
                         vaultSettings.dailyNotes.tasksDueOnNoteDate !== false
                       }

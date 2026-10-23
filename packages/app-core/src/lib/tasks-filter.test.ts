@@ -23,7 +23,7 @@ function task(sourcePath: string, taskIndex: number, overrides?: Partial<VaultTa
 }
 
 function groups(today: VaultTask[]): VaultTaskGroups {
-  return { today, upcoming: [], waiting: [], done: [], forwarded: [], cancelled: [], overdueCount: 0 }
+  return { today, upcoming: [], undated: [], waiting: [], done: [], forwarded: [], cancelled: [], overdueCount: 0 }
 }
 
 describe('filterTasks', () => {

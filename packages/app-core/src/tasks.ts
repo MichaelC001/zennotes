@@ -2,8 +2,9 @@ import { captureNavigationContext } from './lib/navigation-context'
 import { useSyncExternalStore } from 'react'
 import type { VaultTask } from '@bridge-contract/tasks'
 import { useStore, type KanbanGroupBy } from './store'
-import { filterTasksForDisplay } from '@shared/tasks'
+import { filterTasksForDisplay, inferDailyTaskDueDates } from '@shared/tasks'
 import { computeTasksRender } from './lib/tasks-filter'
+import { buildDailyNoteDateByPath } from './lib/vault-layout'
 import { dropMutationsFor } from './lib/task-column-mutations'
 
 export type { KanbanGroupBy } from './store'
@@ -83,7 +84,8 @@ export function getTodayTasks(now = new Date()): { readonly tasks: readonly Task
   const state = useStore.getState()
   const livePaths = new Set(state.notes.filter(note => note.folder !== 'trash').map(note => note.path))
   const live = filterTasksForDisplay(state.vaultTasks, state.showArchivedTasks).filter(task => livePaths.has(task.sourcePath))
-  const render = computeTasksRender(live, '', now, { today: false, upcoming: false, waiting: false, forwarded: false, done: false, cancelled: false })
+  const dated = inferDailyTaskDueDates(live, buildDailyNoteDateByPath(state.notes, state.vaultSettings))
+  const render = computeTasksRender(dated, '', now, { today: false, upcoming: false, undated: false, waiting: false, forwarded: false, done: false, cancelled: false })
   const publicTasks = new Map(getTasksSnapshot().tasks.map(task => [task.id, task]))
   return Object.freeze({ tasks: Object.freeze(render.groups.today.map(task => publicTasks.get(task.id)!)), overdueCount: render.groups.overdueCount ?? 0 })
 }

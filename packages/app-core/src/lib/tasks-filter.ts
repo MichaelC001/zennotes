@@ -26,7 +26,7 @@ export function filterTasks(tasks: VaultTask[], query: string): VaultTask[] {
 export interface FlattenedTaskRow {
   kind: 'header' | 'task'
   /** Group the row belongs to — drives the collapse state for 'task' rows. */
-  group: 'today' | 'upcoming' | 'waiting' | 'forwarded' | 'done' | 'cancelled'
+  group: 'today' | 'upcoming' | 'undated' | 'waiting' | 'forwarded' | 'done' | 'cancelled'
   /** Only set when kind === 'task'. */
   task?: VaultTask
   /** Only set when kind === 'header'. */
@@ -42,6 +42,7 @@ export function flattenRows(
   collapsed: {
     today: boolean
     upcoming: boolean
+    undated: boolean
     waiting: boolean
     forwarded: boolean
     done: boolean
@@ -66,6 +67,7 @@ export function flattenRows(
   }
   push('today', groups.today, { overdueCount: groups.overdueCount })
   push('upcoming', groups.upcoming)
+  push('undated', groups.undated)
   push('waiting', groups.waiting)
   push('forwarded', groups.forwarded)
   push('done', groups.done)
@@ -96,6 +98,7 @@ export function applyFileOrder(groups: VaultTaskGroups): VaultTaskGroups {
     ...groups,
     today: sortByFileOrder(groups.today),
     upcoming: sortByFileOrder(groups.upcoming),
+    undated: sortByFileOrder(groups.undated),
     waiting: sortByFileOrder(groups.waiting),
     forwarded: sortByFileOrder(groups.forwarded),
     done: sortByFileOrder(groups.done),
@@ -113,6 +116,7 @@ export function computeTasksRender(
   collapsed: {
     today: boolean
     upcoming: boolean
+    undated: boolean
     waiting: boolean
     forwarded: boolean
     done: boolean

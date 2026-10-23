@@ -17,11 +17,12 @@ import { promptApp } from '../lib/prompt-requests'
 import { useToastStore } from '../lib/toast'
 import { findSavedTaskFilterName, savedTaskFilterNameForQuery } from '../lib/saved-task-filters'
 
-type GroupKey = 'today' | 'upcoming' | 'waiting' | 'forwarded' | 'done' | 'cancelled'
+type GroupKey = 'today' | 'upcoming' | 'undated' | 'waiting' | 'forwarded' | 'done' | 'cancelled'
 
 const GROUP_LABELS: Record<GroupKey, string> = {
   today: 'Today',
   upcoming: 'Upcoming',
+  undated: 'No due date',
   waiting: 'Waiting',
   forwarded: 'Forwarded',
   done: 'Done',
@@ -102,6 +103,7 @@ export function TasksView(): JSX.Element {
   const [collapsed, setCollapsed] = useState<Record<GroupKey, boolean>>({
     today: false,
     upcoming: false,
+    undated: false,
     waiting: false,
     forwarded: true,
     done: true,
