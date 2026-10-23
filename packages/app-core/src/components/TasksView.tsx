@@ -10,7 +10,7 @@ import { TasksKanban } from './TasksKanban'
 import { CalendarIcon, CheckSquareIcon, KanbanIcon, ListIcon } from './icons'
 import { advanceSequence, getKeymapBinding, matchesSequenceToken } from '../lib/keymaps'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
-import { buildTaskMenuItems } from '../lib/task-context-menu'
+import { buildTaskMenuItems, chooseTaskDueDate } from '../lib/task-context-menu'
 import { isImeComposing } from '../lib/ime'
 import { isOverlayOrDialogOpen } from '../lib/overlay-open'
 import { promptApp } from '../lib/prompt-requests'
@@ -748,6 +748,12 @@ export function TasksView(): JSX.Element {
         void startTaskFromList(currentTask)
         return
       }
+      // Any due date from the calendar `@date` opens (#991). Vim-gated single key.
+      if (vimMode && key === '@' && currentTask) {
+        consume()
+        void chooseTaskDueDate(currentTask)
+        return
+      }
     }
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
@@ -1040,14 +1046,14 @@ export function TasksView(): JSX.Element {
         <div className="border-t border-paper-300/45 px-4 py-1.5 text-xs text-current/40">
           {viewMode === 'list'
             ? vimMode
-              ? 'j/k move · J/K reorder · Enter/o open · x toggle · i start · c cancel · F saved filters · right-click actions · :q close'
+              ? 'j/k move · J/K reorder · Enter/o open · x toggle · i start · c cancel · @ due date · F saved filters · right-click actions · :q close'
               : '↑/↓ move · Shift+J/K reorder · Enter open · right-click actions'
             : viewMode === 'calendar'
               ? vimMode
-                ? 'h/j/k/l day · [ ] month · Tab pick · x toggle · i start · c cancel · F saved filters · drag to move · right-click actions · :q'
+                ? 'h/j/k/l day · [ ] month · Tab pick · x toggle · i start · c cancel · @ due date · F saved filters · drag to move · right-click actions · :q'
                 : '←/→/↑/↓ day · Tab pick · Space toggle · drag to move · right-click actions'
               : vimMode
-                ? 'h/l column · j/k card · x toggle · i start · c cancel · Enter open · s order · F saved filters · right-click actions · :q close'
+                ? 'h/l column · j/k card · x toggle · i start · c cancel · @ due date · Enter open · s order · F saved filters · right-click actions · :q close'
                 : '←/→ column · ↑/↓ card · Space toggle · Enter open · right-click actions'}
         </div>
       )}

@@ -48,7 +48,7 @@ import {
 import { filterTasks } from '../lib/tasks-filter'
 import { isOverlayOrDialogOpen } from '../lib/overlay-open'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
-import { buildTaskMenuItems } from '../lib/task-context-menu'
+import { buildTaskMenuItems, chooseTaskDueDate } from '../lib/task-context-menu'
 import { ArrowUpRightIcon, PencilIcon } from './icons'
 import { InlineMarkdown } from '../lib/inline-markdown'
 import { CloudTaskConflictIndicator } from './CloudTaskConflictIndicator'
@@ -1809,6 +1809,13 @@ export function TasksKanban({ tasks, filter, today, onOpenTask, onToggleTask }: 
           if (vimMode && focusedTask) {
             consume()
             void cancelTaskFromList(focusedTask)
+          }
+          return
+        // Any due date from the calendar `@date` opens (#991).
+        case '@':
+          if (vimMode && focusedTask) {
+            consume()
+            void chooseTaskDueDate(focusedTask)
           }
           return
         default:
